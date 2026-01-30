@@ -1,0 +1,54 @@
+---
+- name: Join new workers to K3s cluster
+  hosts: all
+  become: true
+  vars:
+    k3s_control_plane: "192.168.122.218"
+    k3s_version: "v1.28.5+k3s1"
+  
+  tasks:
+    - name: Check if k3s is already installed
+      stat:
+        path: /usr/local/bin/k3s
+      register: k3s_installed
+
+    - name: Display skip message if already installed
+      debug:
+        msg: "K3s already installed on {{ inventory_hostname }}, skipping"
+      when: k3s_installed.stat.exists
+
+    - name: Get K3s token from control plane
+      shell: cat /var/lib/rancher/k3s/server/node-token
+      register: k3s_token
+      delegate_to: "{{ k3s_control_plane }}"
+      run_once: true
+      when: not k3s_installed.stat.exists
+
+    - name: Install K3s agent
+      shell: |
+        curl -sfL https://get.k3s.io | K3S_URL=https://{{ k3s_control_plane }}:6443 \
+        K3S_TOKEN={{ k3s_token.stdout }} \
+        INSTALL_K3S_VERSION={{ k3s_version }} \
+        sh -
+      when: not k3s_installed.stat.exists
+
+    - name: Enable and start k3s-agent service
+      systemd:
+        name: k3s-agent
+        state: started
+        enabled: yes
+      when: not k3s_installed.stat.exists
+
+    - name: Wait for node to join cluster
+      pause:
+        seconds: 30
+      when: not k3s_installed.stat.exists
+
+    - name: Verify node joined cluster (on control plane)
+      shell: kubectl get nodes | grep {{ ansible_hostname }}
+      register: node_status
+      delegate_to: "{{ k3s_control_plane }}"
+      until: "'Ready' in node_status.stdout"
+      retries: 10
+      delay: 10
+      when: not k3s_installed.stat.exists

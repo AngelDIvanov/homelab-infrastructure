@@ -1,0 +1,386 @@
+{
+  "version": 0,
+  "block": {
+    "attributes": {
+      "allocation": {
+        "type": "number",
+        "description": "Reports the currently allocated space for the volume (in the unit specified by allocation_unit), which may be less than the volume capacity for sparse formats.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-general-metadata>",
+        "description_kind": "markdown",
+        "computed": true
+      },
+      "allocation_unit": {
+        "type": "string",
+        "description": "Sets the unit for the allocation value (for example, \"bytes\", \"KiB\", \"MiB\", \"GiB\"); if omitted, libvirt uses its default unit semantics.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-general-metadata>",
+        "description_kind": "markdown",
+        "optional": true
+      },
+      "backing_store": {
+        "nested_type": {
+          "attributes": {
+            "format": {
+              "nested_type": {
+                "attributes": {
+                  "type": {
+                    "type": "string",
+                    "description": "Specifies the backing store format type string (for example, \"raw\" or \"qcow2\"), which must be a format supported by the hypervisor.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "required": true
+                  }
+                },
+                "nesting_mode": "single"
+              },
+              "description": "Sets the on-disk format metadata for the backing store volume; this must match the actual format of the backing image.",
+              "description_kind": "markdown",
+              "optional": true
+            },
+            "path": {
+              "type": "string",
+              "description": "Sets the path to the backing image used by this volume, either as an absolute host path or a pool-relative path (for example, \"/var/lib/libvirt/images/base.qcow2\").\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+              "description_kind": "markdown",
+              "required": true
+            },
+            "permissions": {
+              "nested_type": {
+                "attributes": {
+                  "group": {
+                    "type": "string",
+                    "description": "Sets the numeric group ID (gid) that owns the backing store file or device; the value is user-provided, for example `107`.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "optional": true
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "Sets an SELinux security label for the backing store, when SELinux labeling is in use; the value is user-provided.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "optional": true
+                  },
+                  "mode": {
+                    "type": "string",
+                    "description": "Sets the numeric file mode (permission bits) for the backing store, typically as an octal value such as `0640`.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "optional": true
+                  },
+                  "owner": {
+                    "type": "string",
+                    "description": "Sets the numeric user ID (uid) that owns the backing store file or device; the value is user-provided, for example `107`.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "optional": true
+                  }
+                },
+                "nesting_mode": "single"
+              },
+              "description": "Configures POSIX ownership and SELinux label metadata for the backing store volume, controlling how the backing file is labeled and accessed on the host.",
+              "description_kind": "markdown",
+              "optional": true
+            }
+          },
+          "nesting_mode": "single"
+        },
+        "description": "Configures an optional backing store volume for copy-on-write images, enabling layered storage where this volume records changes on top of another image.",
+        "description_kind": "markdown",
+        "optional": true
+      },
+      "capacity": {
+        "type": "number",
+        "description": "Volume capacity in bytes (required unless using create.content)",
+        "description_kind": "plain",
+        "optional": true,
+        "computed": true
+      },
+      "capacity_unit": {
+        "type": "string",
+        "description": "Sets the unit used for `capacity` (for example `bytes`, `KiB`, `MiB`, `GiB`), matching libvirt’s `unit` attribute semantics.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-general-metadata>",
+        "description_kind": "markdown",
+        "optional": true
+      },
+      "create": {
+        "nested_type": {
+          "attributes": {
+            "content": {
+              "nested_type": {
+                "attributes": {
+                  "url": {
+                    "type": "string",
+                    "description": "URL to download content from",
+                    "description_kind": "plain",
+                    "required": true
+                  }
+                },
+                "nesting_mode": "single"
+              },
+              "description": "Upload content from a URL or local file",
+              "description_kind": "plain",
+              "required": true
+            }
+          },
+          "nesting_mode": "single"
+        },
+        "description": "Volume creation options for initializing volume content from external sources",
+        "description_kind": "plain",
+        "optional": true
+      },
+      "id": {
+        "type": "string",
+        "description": "Volume identifier (same as key)",
+        "description_kind": "plain",
+        "computed": true
+      },
+      "key": {
+        "type": "string",
+        "description": "Exposes the libvirt-assigned unique key identifying this volume within the pool, typically derived from the host path or backend identifier.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-general-metadata>",
+        "description_kind": "markdown",
+        "computed": true
+      },
+      "name": {
+        "type": "string",
+        "description": "Sets the volume name, which must be unique within the containing pool (for disk pools, often derived from a device path plus partition index).\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-general-metadata>",
+        "description_kind": "markdown",
+        "required": true
+      },
+      "path": {
+        "type": "string",
+        "description": "Volume path on the host filesystem (same as target.path)",
+        "description_kind": "plain",
+        "computed": true
+      },
+      "physical": {
+        "type": "number",
+        "description": "Reports the actual physical space currently used by the volume on the underlying storage, as computed by libvirt.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-general-metadata>",
+        "description_kind": "markdown",
+        "computed": true
+      },
+      "physical_unit": {
+        "type": "string",
+        "description": "Sets the unit used for `physical` (for example `bytes`, `KiB`, `MiB`, `GiB`), matching libvirt’s `unit` attribute semantics.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-general-metadata>",
+        "description_kind": "markdown",
+        "optional": true
+      },
+      "pool": {
+        "type": "string",
+        "description": "Name of the storage pool where the volume will be created",
+        "description_kind": "plain",
+        "required": true
+      },
+      "target": {
+        "nested_type": {
+          "attributes": {
+            "cluster_size": {
+              "type": "number",
+              "description": "Sets the cluster size for qcow2 volumes, controlling the allocation granularity on disk; value is a size with the unit given by `cluster_size_unit`.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+              "description_kind": "markdown",
+              "optional": true
+            },
+            "cluster_size_unit": {
+              "type": "string",
+              "description": "Sets the unit for `cluster_size` (for example `bytes`, `KiB`, `MiB`), matching libvirt’s clusterSize `unit` attribute semantics.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+              "description_kind": "markdown",
+              "optional": true
+            },
+            "compat": {
+              "type": "string",
+              "description": "Sets the qcow2 compatibility level for the volume (for example `0.10` or `1.1`), controlling which qemu feature set the image uses.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+              "description_kind": "markdown",
+              "optional": true
+            },
+            "encryption": {
+              "nested_type": {
+                "attributes": {
+                  "cipher": {
+                    "nested_type": {
+                      "attributes": {
+                        "hash": {
+                          "type": "string",
+                          "description": "Sets the hash algorithm used with the encryption cipher (for example `sha256`), with the exact value being user-provided but expected to be supported by the chosen encryption format.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                          "description_kind": "markdown",
+                          "required": true
+                        },
+                        "mode": {
+                          "type": "string",
+                          "description": "Sets the cipher mode of operation (for example `cbc` or `xts`), with the value user-provided and constrained by the encryption backend’s supported modes.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                          "description_kind": "markdown",
+                          "required": true
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Sets the base cipher algorithm name (for example `aes`), with the value user-provided and expected to be a valid algorithm for the image’s encryption format.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                          "description_kind": "markdown",
+                          "required": true
+                        },
+                        "size": {
+                          "type": "number",
+                          "description": "Sets the cipher key size in bits for the encrypted storage volume (user-provided integer such as 128, 256, etc.).\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                          "description_kind": "markdown",
+                          "required": true
+                        }
+                      },
+                      "nesting_mode": "single"
+                    },
+                    "description": "Defines the encryption cipher parameters used for the volume, such as algorithm name, mode, and hash.",
+                    "description_kind": "markdown",
+                    "optional": true
+                  },
+                  "format": {
+                    "type": "string",
+                    "description": "Sets the encryption format used for the volume; for LUKS volumes this is typically set to \"luks\".\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                    "description_kind": "markdown",
+                    "required": true
+                  },
+                  "ivgen": {
+                    "nested_type": {
+                      "attributes": {
+                        "hash": {
+                          "type": "string",
+                          "description": "Sets the hash algorithm used by the IV generator (for example \"sha1\" or \"sha256\"); value is user-provided.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                          "description_kind": "markdown",
+                          "required": true
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Sets the IV generation scheme name used by the encryption layer (for example \"plain\", \"essiv\", etc.); value is user-provided.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                          "description_kind": "markdown",
+                          "required": true
+                        }
+                      },
+                      "nesting_mode": "single"
+                    },
+                    "description": "Configures the initialization vector (IV) generation method for the encrypted volume; when present, both name and hash must be specified.",
+                    "description_kind": "markdown",
+                    "optional": true
+                  },
+                  "secret": {
+                    "nested_type": {
+                      "attributes": {
+                        "type": {
+                          "type": "string",
+                          "description": "Sets how the secret is referenced, typically \"uuid\" to reference a libvirt secret by its UUID.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                          "description_kind": "markdown",
+                          "required": true
+                        },
+                        "uuid": {
+                          "type": "string",
+                          "description": "Exposes the UUID of the libvirt secret object providing the encryption key; this is filled from the referenced secret and is read-only.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                          "description_kind": "markdown",
+                          "computed": true
+                        }
+                      },
+                      "nesting_mode": "single"
+                    },
+                    "description": "Configures the libvirt secret used to supply the encryption key material for the volume.",
+                    "description_kind": "markdown",
+                    "optional": true
+                  }
+                },
+                "nesting_mode": "single"
+              },
+              "description": "Enables and configures encryption for the volume’s data, defining the cipher parameters for an encrypted image.",
+              "description_kind": "markdown",
+              "optional": true
+            },
+            "features": {
+              "nested_type": {
+                "nesting_mode": "list"
+              },
+              "description": "Configures per-volume feature flags for the target format (such as qcow2 features); contents are user-provided according to the image format.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+              "description_kind": "markdown",
+              "optional": true
+            },
+            "format": {
+              "nested_type": {
+                "attributes": {
+                  "type": {
+                    "type": "string",
+                    "description": "Specifies the backing store format type string (for example, \"raw\" or \"qcow2\"), which must be a format supported by the hypervisor.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "required": true
+                  }
+                },
+                "nesting_mode": "single"
+              },
+              "description": "Sets the on-disk format metadata for the backing store volume; this must match the actual format of the backing image.",
+              "description_kind": "markdown",
+              "optional": true
+            },
+            "path": {
+              "type": "string",
+              "description": "Volume path on the host filesystem",
+              "description_kind": "plain",
+              "computed": true
+            },
+            "permissions": {
+              "nested_type": {
+                "attributes": {
+                  "group": {
+                    "type": "string",
+                    "description": "Sets the numeric group ID (gid) that owns the backing store file or device; the value is user-provided, for example `107`.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "optional": true
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "Sets an SELinux security label for the backing store, when SELinux labeling is in use; the value is user-provided.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "optional": true
+                  },
+                  "mode": {
+                    "type": "string",
+                    "description": "Sets the numeric file mode (permission bits) for the backing store, typically as an octal value such as `0640`.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "optional": true
+                  },
+                  "owner": {
+                    "type": "string",
+                    "description": "Sets the numeric user ID (uid) that owns the backing store file or device; the value is user-provided, for example `107`.\n\nSee: <https://libvirt.org/formatstorage.html#backing-store-elements>",
+                    "description_kind": "markdown",
+                    "optional": true
+                  }
+                },
+                "nesting_mode": "single"
+              },
+              "description": "Configures POSIX ownership and SELinux label metadata for the backing store volume, controlling how the backing file is labeled and accessed on the host.",
+              "description_kind": "markdown",
+              "optional": true
+            },
+            "timestamps": {
+              "nested_type": {
+                "attributes": {
+                  "atime": {
+                    "type": "string",
+                    "description": "Sets the last access time of the volume, typically as a UNIX timestamp in seconds (and optional nanoseconds) since the epoch.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                    "description_kind": "markdown",
+                    "required": true
+                  },
+                  "ctime": {
+                    "type": "string",
+                    "description": "Sets the last metadata change time of the volume, typically as a UNIX timestamp in seconds (and optional nanoseconds) since the epoch.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                    "description_kind": "markdown",
+                    "required": true
+                  },
+                  "mtime": {
+                    "type": "string",
+                    "description": "Sets the last modification time (mtime) metadata for the volume target, using a user-provided timestamp value (seconds plus optional nanoseconds) that must be present for the volume definition. Examples: `seconds = 1716900000`, `seconds = 1716900000`, `nanoseconds = 123456789`.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-target-elements>",
+                    "description_kind": "markdown",
+                    "required": true
+                  }
+                },
+                "nesting_mode": "single"
+              },
+              "description": "Configures stored timestamps for the volume target, such as access and change times.",
+              "description_kind": "markdown",
+              "optional": true
+            }
+          },
+          "nesting_mode": "single"
+        },
+        "description_kind": "plain",
+        "optional": true
+      },
+      "type": {
+        "type": "string",
+        "description": "Sets the actual storage volume type reported by libvirt (for example `file`, `block`, `dir`, `network`, `netdir`, or `ploop`), matching the `type` attribute libvirt exposes for the volume; the value is user-provided and should be consistent with the underlying storage backend.\n\nSee: <https://libvirt.org/formatstorage.html#storage-volume-xml>",
+        "description_kind": "markdown",
+        "optional": true
+      }
+    },
+    "description_kind": "plain"
+  }
+}

@@ -1,0 +1,83 @@
+---
+- name: Install btop system monitor across all nodes
+  hosts: all
+  become: true
+  vars:
+    btop_version: "1.3.2"
+    btop_install_dir: "/usr/local/bin"
+  
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install required dependencies
+      apt:
+        name:
+          - wget
+          - tar
+          - bzip2
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Check if btop is already installed
+      stat:
+        path: "{{ btop_install_dir }}/btop"
+      register: btop_binary
+
+    - name: Get installed btop version
+      command: "{{ btop_install_dir }}/btop --version"
+      register: installed_version
+      when: btop_binary.stat.exists
+      changed_when: false
+      failed_when: false
+
+    - name: Download and extract btop
+      shell: |
+        cd /tmp
+        wget -q https://github.com/aristocratos/btop/releases/download/v{{ btop_version }}/btop-x86_64-linux-musl.tbz
+        tar -xjf btop-x86_64-linux-musl.tbz
+      args:
+        creates: /tmp/btop/bin/btop
+      when: not btop_binary.stat.exists or btop_version not in installed_version.stdout | default('')
+
+    - name: Install btop binary
+      copy:
+        src: "/tmp/btop/bin/btop"
+        dest: "{{ btop_install_dir }}/btop"
+        mode: '0755'
+        remote_src: yes
+      when: not btop_binary.stat.exists or btop_version not in installed_version.stdout | default('')
+
+    - name: Create btop themes directory
+      file:
+        path: "/root/.config/btop/themes"
+        state: directory
+        mode: '0755'
+
+    - name: Copy btop themes if they exist
+      shell: |
+        if [ -d /tmp/btop/themes ]; then
+          mkdir -p /root/.config/btop/themes
+          cp -r /tmp/btop/themes/* /root/.config/btop/themes/ 2>/dev/null || true
+        fi
+      when: not btop_binary.stat.exists or btop_version not in installed_version.stdout | default('')
+
+    - name: Clean up temporary files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/btop-x86_64-linux-musl.tbz"
+        - "/tmp/btop"
+
+    - name: Verify btop installation
+      command: btop --version
+      register: btop_verify
+      changed_when: false
+
+    - name: Display btop version
+      debug:
+        msg: "btop {{ btop_verify.stdout }} installed successfully on {{ inventory_hostname }}"
