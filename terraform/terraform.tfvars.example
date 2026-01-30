@@ -1,0 +1,6 @@
+vm_count       = 1
+vm_memory      = 2048
+vm_vcpu        = 2
+vm_prefix      = "k3s-worker"
+base_ip_octet  = 221
+ssh_public_key = "YOUR_SSH_PUBLIC_KEY_HERE"
