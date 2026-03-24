@@ -1,0 +1,133 @@
+---
+- name: Uninstall additional tools from all nodes
+  hosts: k8s_cluster
+  become: yes
+
+  vars_prompt:
+    - name: confirm
+      prompt: |
+        Available tags: tools, btop, lazydocker, k9s, aliases, vim
+        No tags = removes everything listed above.
+        Type 'yes' to confirm
+      private: no
+      default: "no"
+
+  tasks:
+
+    - name: Abort if not confirmed
+      fail:
+        msg: "Cancelled."
+      when: confirm != "yes"
+      tags: always
+
+    # ===== CLI TOOLS (apt) =====
+    - name: Remove CLI tools
+      apt:
+        name:
+          - htop
+          - vim
+          - jq
+          - tree
+          - ncdu
+          - iotop
+          - tmux
+          - screen
+          - nmap
+          - net-tools
+          - dnsutils
+          - tcpdump
+          - rsync
+          - unzip
+          - zip
+          - neofetch
+          - bat
+          - fd-find
+          - ripgrep
+          - sysstat
+          - iftop
+          - nethogs
+          - nload
+        state: absent
+        purge: yes
+      ignore_errors: yes
+      tags: tools
+
+    # ===== BTOP =====
+    - name: Remove btop binary
+      file:
+        path: /usr/local/bin/btop
+        state: absent
+      tags: btop
+
+    - name: Remove btop apt package
+      apt:
+        name: btop
+        state: absent
+        purge: yes
+      ignore_errors: yes
+      tags: btop
+
+    - name: Remove btop config
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /root/.config/btop
+        - /home/andy/.config/btop
+      tags: btop
+
+    # ===== LAZYDOCKER =====
+    - name: Remove lazydocker from all locations
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/lazydocker
+        - /root/.local/bin/lazydocker
+        - /home/andy/.local/bin/lazydocker
+      tags: lazydocker
+
+    # ===== K9S =====
+    - name: Remove k9s binary
+      file:
+        path: /usr/local/bin/k9s
+        state: absent
+      when: "'k8s_cluster' in group_names"
+      tags: k9s
+
+    # ===== SHELL CONFIGURATION =====
+    - name: Remove bash aliases
+      file:
+        path: /home/andy/.bash_aliases
+        state: absent
+      tags: aliases
+
+    - name: Remove vim config
+      file:
+        path: /home/andy/.vimrc
+        state: absent
+      tags: vim
+
+    # ===== CLEANUP =====
+    - name: Clean up apt
+      apt:
+        autoremove: yes
+        autoclean: yes
+      tags: always
+
+    # ===== SUMMARY =====
+    - name: Check remaining binaries
+      stat:
+        path: "/usr/local/bin/{{ item }}"
+      loop:
+        - btop
+        - lazydocker
+        - k9s
+      register: check
+      tags: always
+
+    - name: Summary
+      debug:
+        msg: "{{ item.item }}: {{ 'still present' if item.stat.exists else 'removed' }}"
+      loop: "{{ check.results }}"
+      tags: always

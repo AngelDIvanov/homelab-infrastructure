@@ -18,7 +18,7 @@ resource "libvirt_volume" "worker" {
   name             = "${var.vm_prefix}-${count.index + 2}.qcow2"
   pool             = "default"
   base_volume_pool = "default"
-  base_volume_name = "ubuntu-22.04-base.qcow2"
+  base_volume_name = "ubuntu-cloud-base.qcow2"
   size             = 21474836480
 }
 
@@ -47,7 +47,7 @@ resource "libvirt_domain" "worker" {
 
   network_interface {
     network_name   = "default"
-    wait_for_lease = true
+    wait_for_lease = false
   }
 
   disk {
