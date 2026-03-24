@@ -1,0 +1,143 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-webhook
+  namespace: monitoring
+data:
+  webhook.py: |
+    #!/usr/bin/env python3
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import json, urllib.request, urllib.error, os, hashlib, logging
+
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+    log = logging.getLogger(__name__)
+
+    GITLAB_URL        = os.environ.get('GITLAB_URL',        'http://192.168.122.220')
+    GITLAB_TOKEN      = os.environ.get('GITLAB_TOKEN',      '')
+    GITLAB_PROJECT_ID = os.environ.get('GITLAB_PROJECT_ID', '1')
+
+    SEVERITY_LABELS = {
+        'critical': ['incident', 'critical', 'bug'],
+        'warning':  ['incident', 'warning'],
+        'info':     ['incident', 'info'],
+    }
+    SEVERITY_EMOJI = {'critical': '🚨', 'warning': '⚠️', 'info': 'ℹ️'}
+
+    def inc_number(alert):
+        fp = alert.get('fingerprint', alert['labels'].get('alertname', 'unknown'))
+        return int(hashlib.md5(fp.encode()).hexdigest()[:5], 16) % 90000 + 10000
+
+    def gitlab_request(method, path, data=None):
+        url = f"{GITLAB_URL}/api/v4/projects/{GITLAB_PROJECT_ID}{path}"
+        headers = {'PRIVATE-TOKEN': GITLAB_TOKEN, 'Content-Type': 'application/json'}
+        body = json.dumps(data).encode() if data else None
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            log.error(f"GitLab API error {e.code}: {e.read()}")
+            return None
+
+    def find_open_issue(inc_num):
+        issues = gitlab_request('GET', f'/issues?state=opened&search=INC-{inc_num}&labels=incident')
+        if issues:
+            for issue in issues:
+                if f'INC-{inc_num}' in issue['title']:
+                    return issue
+        return None
+
+    def create_issue(alert, inc_num):
+        severity  = alert['labels'].get('severity', 'info')
+        alertname = alert['labels'].get('alertname', 'Unknown')
+        namespace = alert['labels'].get('namespace', 'N/A')
+        summary   = alert['annotations'].get('summary', alertname)
+        desc      = alert['annotations'].get('description', '')
+        emoji     = SEVERITY_EMOJI.get(severity, 'ℹ️')
+        labels    = SEVERITY_LABELS.get(severity, ['incident'])
+        title     = f"{emoji} INC-{inc_num} | {severity.upper()} | {alertname}"
+        body = f"""## {emoji} Incident INC-{inc_num}\n\n**Severity:** {severity.upper()}\n**Alert:** {alertname}\n**Namespace:** {namespace}\n**Summary:** {summary}\n\n### Description\n{desc}\n\n### Timeline\n- 🔴 **Fired:** {alert.get('startsAt', 'N/A')}\n\n---\n*Auto-created by Alertmanager*\n"""
+        issue = gitlab_request('POST', '/issues', {'title': title, 'description': body, 'labels': ','.join(labels)})
+        if issue:
+            log.info(f"Created issue #{issue['iid']} — {title}")
+        return issue
+
+    def close_issue(issue, alert, inc_num):
+        gitlab_request('POST', f"/issues/{issue['iid']}/notes", {'body': f"✅ **RESOLVED** — Alert cleared at {alert.get('endsAt', 'N/A')}\n\n*Auto-resolved by Alertmanager*"})
+        gitlab_request('PUT',  f"/issues/{issue['iid']}", {'state_event': 'close'})
+        log.info(f"Closed issue #{issue['iid']} — INC-{inc_num}")
+
+    class WebhookHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body    = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+            try:    payload = json.loads(body)
+            except: self.send_response(400); self.end_headers(); return
+            for alert in payload.get('alerts', []):
+                inc_num = inc_number(alert)
+                if payload.get('status') == 'firing':
+                    if not find_open_issue(inc_num):
+                        create_issue(alert, inc_num)
+                elif payload.get('status') == 'resolved':
+                    issue = find_open_issue(inc_num)
+                    if issue:
+                        close_issue(issue, alert, inc_num)
+            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+        def log_message(self, *args): pass
+
+    if __name__ == '__main__':
+        log.info(f"Starting webhook on :8080 | GitLab: {GITLAB_URL} | Project: {GITLAB_PROJECT_ID}")
+        HTTPServer(('0.0.0.0', 8080), WebhookHandler).serve_forever()
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager-webhook
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager-webhook
+  template:
+    metadata:
+      labels:
+        app: alertmanager-webhook
+    spec:
+      containers:
+        - name: webhook
+          image: python:3.11-alpine
+          command: ["python3", "/app/webhook.py"]
+          ports:
+            - containerPort: 8080
+          env:
+            - name: GITLAB_URL
+              value: "http://192.168.122.220"
+            - name: GITLAB_PROJECT_ID
+              value: "1"
+            - name: GITLAB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gitlab-token
+                  key: token
+          volumeMounts:
+            - name: webhook-script
+              mountPath: /app
+      volumes:
+        - name: webhook-script
+          configMap:
+            name: alertmanager-webhook
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-webhook
+  namespace: monitoring
+spec:
+  selector:
+    app: alertmanager-webhook
+  ports:
+    - port: 8080
+      targetPort: 8080
