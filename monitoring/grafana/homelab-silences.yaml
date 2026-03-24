@@ -1,0 +1,92 @@
+---
+# ============================================================
+#  Silence noisy / false-positive upstream rules
+#  These override upstream kube-prometheus-stack rules by
+#  redefining them with expr: "false" so they never fire.
+# ============================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: homelab-silences
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app: kube-prometheus-stack
+spec:
+  groups:
+    - name: homelab-silences
+      rules:
+        - alert: Watchdog
+          expr: "false"
+          labels:
+            severity: none
+          annotations:
+            summary: "Silenced — Watchdog is a heartbeat, not a real alert"
+
+        - alert: KubeDaemonSetRolloutStuck
+          expr: "false"
+          labels:
+            severity: none
+          annotations:
+            summary: "Silenced — false positive in homelab"
+
+        - alert: KubeDaemonSetMisScheduled
+          expr: "false"
+          labels:
+            severity: none
+          annotations:
+            summary: "Silenced — false positive in homelab"
+
+        - alert: AlertmanagerFailedToSendAlerts
+          expr: "false"
+          labels:
+            severity: none
+          annotations:
+            summary: "Silenced — replaced by verified Slack integration"
+
+        - alert: KubeVersionMismatch
+          expr: "false"
+          labels:
+            severity: none
+          annotations:
+            summary: "Silenced — expected in mixed k3s environment"
+
+---
+# ============================================================
+#  k3s false-positive silences
+#  k3s embeds scheduler, controller-manager and kube-proxy
+#  inside the k3s binary — they don't run as separate pods
+#  so standard Prometheus rules fire incorrectly.
+# ============================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: k3s-false-positive-silences
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app: kube-prometheus-stack
+spec:
+  groups:
+    - name: k3s-false-positive-silences
+      rules:
+        - alert: KubeSchedulerDown
+          expr: "false"
+          labels:
+            severity: none
+          annotations:
+            summary: "Silenced — k3s embeds the scheduler in the k3s binary"
+
+        - alert: KubeControllerManagerDown
+          expr: "false"
+          labels:
+            severity: none
+          annotations:
+            summary: "Silenced — k3s embeds the controller manager in the k3s binary"
+
+        - alert: KubeProxyDown
+          expr: "false"
+          labels:
+            severity: none
+          annotations:
+            summary: "Silenced — k3s embeds kube-proxy in the k3s binary"
