@@ -1,0 +1,66 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: homelab-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app: kube-prometheus-stack
+spec:
+  groups:
+    - name: homelab.rules
+      rules:
+
+        - alert: TrengoAppDown
+          expr: kube_deployment_status_replicas_available{deployment="trengo-search"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Trengo app is completely down"
+            description: "Deployment trengo-search has 0 available replicas for more than 1 minute."
+
+        - alert: TrengoAppDegraded
+          expr: kube_deployment_status_replicas_available{deployment="trengo-search"} < kube_deployment_spec_replicas{deployment="trengo-search"}
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Trengo app is degraded (fewer replicas than desired)"
+            description: "Deployment trengo-search has fewer available replicas than desired for more than 2 minutes."
+
+        - alert: PodImagePullError
+          expr: kube_pod_container_status_waiting_reason{reason=~"ErrImagePull|ImagePullBackOff|ErrImageNeverPull"} == 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod stuck on image pull error"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} cannot pull image ({{ $labels.reason }})."
+
+        - alert: PodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod is crash-looping"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted more than 3 times in the last 15 minutes."
+
+        - alert: NodeDiskHigh
+          expr: 100 - ((node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100) > 75
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node disk usage is high"
+            description: "Node {{ $labels.instance }} disk usage is above 75% (current: {{ $value | printf \"%.1f\" }}%)."
+
+        - alert: NodeMemoryHigh
+          expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node memory usage is high"
+            description: "Node {{ $labels.instance }} memory usage is above 85% (current: {{ $value | printf \"%.1f\" }}%)."
