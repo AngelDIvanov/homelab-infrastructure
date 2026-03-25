@@ -1,11 +1,4 @@
 ---
-# ============================================================
-#  Grafana Provisioned Dashboard — All Nodes Resource Overview
-#  ConfigMap with label grafana_dashboard=1 so Grafana
-#  auto-discovers and loads it on startup.
-#
-#  Apply: kubectl apply -f grafana-dashboards-configmap.yaml
-# ============================================================
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -81,15 +74,7 @@ data:
               "unit": "percent",
               "min": 0,
               "max": 100,
-              "color": { "mode": "palette-classic" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "yellow", "value": 70 },
-                  { "color": "red", "value": 90 }
-                ]
-              }
+              "color": { "mode": "palette-classic" }
             }
           },
           "options": {
@@ -183,9 +168,6 @@ data:
     }
 
 ---
-# ============================================================
-#  Grafana Provisioned Dashboard — Cluster Health / API dash
-# ============================================================
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -201,7 +183,7 @@ data:
       "title": "API dash",
       "uid": "homelab-apidash",
       "schemaVersion": 38,
-      "version": 1,
+      "version": 2,
       "refresh": "30s",
       "tags": ["homelab"],
       "time": { "from": "now-1h", "to": "now" },
@@ -223,10 +205,7 @@ data:
             }
           ],
           "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "color": { "mode": "palette-classic" }
-            }
+            "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" } }
           },
           "options": {
             "legend": { "displayMode": "list", "placement": "bottom" },
@@ -235,9 +214,49 @@ data:
         },
         {
           "id": 2,
-          "title": "API Server — Error Rate (4xx/5xx)",
+          "title": "API Server — Error Rate vs Total Rate",
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(apiserver_request_total{job=\"apiserver\"}[5m]))",
+              "legendFormat": "Total",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(rate(apiserver_request_total{job=\"apiserver\",code=~\"4..|5..\"}[5m]))",
+              "legendFormat": "Errors (4xx+5xx)",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" } },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Errors (4xx+5xx)" },
+                "properties": [
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Total" },
+                "properties": [
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          }
+        },
+        {
+          "id": 3,
+          "title": "API Server — Error Rate by HTTP Code",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
@@ -247,17 +266,7 @@ data:
             }
           ],
           "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "color": { "mode": "fixed", "fixedColor": "red" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "green", "value": null },
-                  { "color": "red", "value": 0.1 }
-                ]
-              }
-            }
+            "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" } }
           },
           "options": {
             "legend": { "displayMode": "list", "placement": "bottom" },
@@ -265,10 +274,110 @@ data:
           }
         },
         {
-          "id": 3,
+          "id": 4,
+          "title": "API Server — Errors by Verb (GET/POST/DELETE/etc)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(apiserver_request_total{job=\"apiserver\",code=~\"4..|5..\"}[5m])) by (verb)",
+              "legendFormat": "{{verb}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" } }
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          }
+        },
+        {
+          "id": 5,
+          "title": "API Server — Errors by Resource (pods/deployments/etc)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(apiserver_request_total{job=\"apiserver\",code=~\"4..|5..\"}[5m])) by (resource)",
+              "legendFormat": "{{resource}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" } }
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          }
+        },
+        {
+          "id": 6,
+          "title": "API Server — Top Erroring Endpoints",
+          "type": "table",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "topk(15, sum(rate(apiserver_request_total{job=\"apiserver\",code=~\"4..|5..\"}[5m])) by (verb, resource, code))",
+              "legendFormat": "{{verb}} {{resource}} {{code}}",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqps" },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "code" },
+                "properties": [
+                  {
+                    "id": "custom.displayMode",
+                    "value": "color-background"
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      { "options": { "pattern": "4..", "result": { "color": "yellow" } }, "type": "regex" },
+                      { "options": { "pattern": "5..", "result": { "color": "red" } }, "type": "regex" }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Value" },
+                "properties": [
+                  { "id": "displayName", "value": "req/s" },
+                  { "id": "unit", "value": "reqps" }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "sortBy": [{ "displayName": "req/s", "desc": true }],
+            "footer": { "show": false }
+          },
+          "transformations": [
+            { "id": "labelsToFields", "options": { "mode": "columns" } },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true, "__name__": true, "job": true, "instance": true },
+                "indexByName": { "verb": 0, "resource": 1, "code": 2, "Value": 3 }
+              }
+            }
+          ]
+        },
+        {
+          "id": 7,
           "title": "API Server — p99 Latency",
           "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
@@ -278,10 +387,7 @@ data:
             }
           ],
           "fieldConfig": {
-            "defaults": {
-              "unit": "s",
-              "color": { "mode": "palette-classic" }
-            }
+            "defaults": { "unit": "s", "color": { "mode": "palette-classic" } }
           },
           "options": {
             "legend": { "displayMode": "list", "placement": "bottom" },
@@ -289,10 +395,10 @@ data:
           }
         },
         {
-          "id": 4,
+          "id": 8,
           "title": "Scheduler — Attempts by Result",
           "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
@@ -302,10 +408,7 @@ data:
             }
           ],
           "fieldConfig": {
-            "defaults": {
-              "unit": "ops",
-              "color": { "mode": "palette-classic" }
-            }
+            "defaults": { "unit": "ops", "color": { "mode": "palette-classic" } }
           },
           "options": {
             "legend": { "displayMode": "list", "placement": "bottom" },
@@ -313,10 +416,10 @@ data:
           }
         },
         {
-          "id": 5,
+          "id": 9,
           "title": "Controller Manager — Work Queue",
           "type": "timeseries",
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
@@ -326,10 +429,7 @@ data:
             }
           ],
           "fieldConfig": {
-            "defaults": {
-              "unit": "ops",
-              "color": { "mode": "palette-classic" }
-            }
+            "defaults": { "unit": "ops", "color": { "mode": "palette-classic" } }
           },
           "options": {
             "legend": { "displayMode": "list", "placement": "bottom" },
@@ -337,10 +437,10 @@ data:
           }
         },
         {
-          "id": 6,
+          "id": 10,
           "title": "Pod Restarts (last 6h) — Top 10",
           "type": "bargauge",
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
@@ -367,9 +467,227 @@ data:
           "options": {
             "orientation": "horizontal",
             "displayMode": "gradient",
-            "reduceOptions": {
-              "calcs": ["lastNotNull"]
+            "reduceOptions": { "calcs": ["lastNotNull"] }
+          }
+        }
+      ]
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-log-explorer
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  log-explorer.json: |
+    {
+      "title": "Log Explorer",
+      "uid": "homelab-logexplorer",
+      "schemaVersion": 38,
+      "version": 2,
+      "refresh": "30s",
+      "tags": ["homelab", "loki"],
+      "time": { "from": "now-1h", "to": "now" },
+      "timezone": "browser",
+      "editable": true,
+      "graphTooltip": 1,
+      "templating": {
+        "list": [
+          {
+            "name": "namespace",
+            "label": "Namespace",
+            "type": "query",
+            "datasource": { "type": "loki", "uid": "loki" },
+            "query": "label_values(namespace)",
+            "refresh": 2,
+            "sort": 1,
+            "multi": false,
+            "includeAll": false,
+            "current": { "text": "default", "value": "default" }
+          },
+          {
+            "name": "pod",
+            "label": "Pod",
+            "type": "query",
+            "datasource": { "type": "loki", "uid": "loki" },
+            "query": "label_values({namespace=\"$namespace\"}, pod)",
+            "refresh": 2,
+            "sort": 1,
+            "multi": false,
+            "includeAll": true,
+            "allValue": ".+",
+            "current": {}
+          },
+          {
+            "name": "level",
+            "label": "Level",
+            "type": "custom",
+            "query": "All,error,warn,info,debug",
+            "current": { "text": "error", "value": "error" },
+            "options": [
+              { "text": "All", "value": ".*", "selected": false },
+              { "text": "error", "value": "error", "selected": true },
+              { "text": "warn", "value": "warn", "selected": false },
+              { "text": "info", "value": "info", "selected": false },
+              { "text": "debug", "value": "debug", "selected": false }
+            ],
+            "multi": false,
+            "includeAll": false
+          },
+          {
+            "name": "search",
+            "label": "Search",
+            "type": "textbox",
+            "current": { "text": "", "value": "" },
+            "query": ""
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Log Volume — $namespace / $pod",
+          "type": "timeseries",
+          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+          "datasource": { "type": "loki", "uid": "loki" },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({namespace=\"$namespace\", pod=~\"$pod\"} | label_format msg=\"\" | drop __error__, __error_details__ [1m]))",
+              "legendFormat": "All logs",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(count_over_time({namespace=\"$namespace\", pod=~\"$pod\"} | label_format msg=\"\" | drop __error__, __error_details__ |~ \"(?i)error|exception|fatal|panic\" [1m]))",
+              "legendFormat": "Errors",
+              "refId": "B"
             }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short", "color": { "mode": "palette-classic" } },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Errors" },
+                "properties": [
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "All logs" },
+                "properties": [
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          }
+        },
+        {
+          "id": 2,
+          "title": "Log Volume by Pod — $namespace",
+          "type": "timeseries",
+          "gridPos": { "h": 6, "w": 12, "x": 0, "y": 6 },
+          "datasource": { "type": "loki", "uid": "loki" },
+          "targets": [
+            {
+              "expr": "sum by (pod) (count_over_time({namespace=\"$namespace\"} | drop __error__, __error_details__ [1m]))",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short", "color": { "mode": "palette-classic" } }
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          }
+        },
+        {
+          "id": 3,
+          "title": "Error Rate by Pod — $namespace",
+          "type": "timeseries",
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 6 },
+          "datasource": { "type": "loki", "uid": "loki" },
+          "targets": [
+            {
+              "expr": "sum by (pod) (count_over_time({namespace=\"$namespace\"} | drop __error__, __error_details__ |~ \"(?i)error|exception|fatal|panic\" [1m]))",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "palette-classic" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "red", "value": 10 }
+                ]
+              }
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          }
+        },
+        {
+          "id": 4,
+          "title": "Live Logs — $namespace / $pod  [level=$level]",
+          "type": "logs",
+          "gridPos": { "h": 16, "w": 24, "x": 0, "y": 12 },
+          "datasource": { "type": "loki", "uid": "loki" },
+          "targets": [
+            {
+              "expr": "{namespace=\"$namespace\", pod=~\"$pod\"} | drop __error__, __error_details__ | drop caller | not_contains_field(\"caller\", \"metrics.go\") |~ \"(?i)$level\" |~ \"$search\"",
+              "refId": "A",
+              "maxLines": 500
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": false,
+            "showCommonLabels": true,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Errors Only — $namespace / $pod  (excludes Loki internals)",
+          "type": "logs",
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 28 },
+          "datasource": { "type": "loki", "uid": "loki" },
+          "targets": [
+            {
+              "expr": "{namespace=\"$namespace\", pod=~\"$pod\"} | drop __error__, __error_details__ != \"caller=metrics.go\" != \"caller=roundtrip.go\" != \"caller=engine.go\" != \"caller=querier.go\" |~ \"(?i)error|exception|fatal|panic|warn\"",
+              "refId": "A",
+              "maxLines": 100
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
           }
         }
       ]
