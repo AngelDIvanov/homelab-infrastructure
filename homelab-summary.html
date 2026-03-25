@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Homelab Build — Interview Summary</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --dim: #8b949e; --red: #ff4444;
+    --green: #3fb950; --yellow: #d29922; --blue: #58a6ff;
+    --orange: #f0883e; --purple: #a371f7;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-weight: 300; line-height: 1.7; padding: 2rem; max-width: 960px; margin: 0 auto; }
+  header { padding: 3rem 0 2rem; border-bottom: 1px solid var(--border); margin-bottom: 3rem; }
+  header .label { font-family: var(--mono); font-size: 0.7rem; color: var(--blue); text-transform: uppercase; letter-spacing: 0.2em; margin-bottom: 0.8rem; }
+  header h1 { font-size: 2.4rem; font-weight: 700; line-height: 1.2; color: #fff; }
+  header h1 em { color: var(--red); font-style: normal; }
+  header .meta { font-family: var(--mono); font-size: 0.8rem; color: var(--dim); margin-top: 0.8rem; }
+  .section { margin-bottom: 3rem; }
+  .section-header { font-family: var(--mono); font-size: 0.72rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.15em; margin-bottom: 1.2rem; display: flex; align-items: center; gap: 1rem; }
+  .section-header::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .section-header span { color: var(--blue); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.4rem 1.6rem; margin-bottom: 0.8rem; }
+  .card.critical { border-left: 3px solid var(--red); }
+  .card.success { border-left: 3px solid var(--green); }
+  .card.warning { border-left: 3px solid var(--yellow); }
+  .card.info { border-left: 3px solid var(--blue); }
+  .card h3 { font-size: 0.95rem; font-weight: 600; color: #fff; margin-bottom: 0.4rem; }
+  .card p { font-size: 0.88rem; color: var(--dim); }
+  .card .lesson { font-family: var(--mono); font-size: 0.78rem; color: var(--purple); margin-top: 0.6rem; }
+  .arch-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem; margin-bottom: 1rem; }
+  .arch-node { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem 1.2rem; }
+  .arch-node .name { font-family: var(--mono); font-size: 0.8rem; color: var(--green); font-weight: 600; }
+  .arch-node .ip { font-family: var(--mono); font-size: 0.72rem; color: var(--dim); margin-bottom: 0.4rem; }
+  .arch-node .role { font-size: 0.82rem; color: var(--text); }
+  .stack-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; }
+  .stack-item { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem 1rem; text-align: center; }
+  .stack-item .tool { font-family: var(--mono); font-size: 0.8rem; color: var(--orange); font-weight: 600; }
+  .stack-item .desc { font-size: 0.78rem; color: var(--dim); margin-top: 0.2rem; }
+  .quote { background: var(--surface); border-left: 3px solid var(--purple); border-radius: 0 6px 6px 0; padding: 1rem 1.4rem; margin: 1rem 0; font-style: italic; color: var(--dim); font-size: 0.9rem; }
+  .quote strong { color: var(--text); font-style: normal; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { font-family: var(--mono); font-size: 0.72rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); text-align: left; }
+  td { padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); color: var(--text); }
+  td:first-child { font-family: var(--mono); font-size: 0.82rem; color: var(--orange); }
+  tr:last-child td { border-bottom: none; }
+  footer { border-top: 1px solid var(--border); padding-top: 2rem; margin-top: 3rem; font-family: var(--mono); font-size: 0.75rem; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="label">Red Hat Interview — Technical Preparation</div>
+  <h1>Homelab <em>DevOps</em> Build<br>What I Built, What Broke, What I Learned</h1>
+  <div class="meta">Angel · Senior SRE · March 2026 · Ubuntu 22.04 · KVM/libvirt · k3s · 30GB RAM · i7-1270P</div>
+</header>
+
+<!-- ARCHITECTURE -->
+<div class="section">
+  <div class="section-header"><span>01</span> Infrastructure Architecture</div>
+  <div class="arch-grid">
+    <div class="arch-node">
+      <div class="name">k3s-control</div>
+      <div class="ip">192.168.122.218 — 4GB RAM — manual, permanent</div>
+      <div class="role">k3s control plane. Tainted to prevent app workloads. SQLite datastore (not etcd — single control plane).</div>
+    </div>
+    <div class="arch-node">
+      <div class="name">k3s-infra</div>
+      <div class="ip">192.168.122.230 — 3GB RAM — Terraform, permanent</div>
+      <div class="role">Dedicated monitoring node. Tainted node-role=infra:NoSchedule. Hosts entire observability stack: Prometheus, Grafana, Alertmanager, Loki, webhook.</div>
+    </div>
+    <div class="arch-node">
+      <div class="name">k3s-worker-1</div>
+      <div class="ip">192.168.122.219 — 1.5GB RAM — manual, permanent</div>
+      <div class="role">Primary app worker. Always running. Base node for image syncing during upscale.</div>
+    </div>
+    <div class="arch-node">
+      <div class="name">k3s-worker-2+</div>
+      <div class="ip">192.168.122.221+ — Terraform, scalable</div>
+      <div class="role">Auto-provisioned workers. Terraform managed. Scales on demand via lab-control.py.</div>
+    </div>
+    <div class="arch-node">
+      <div class="name">ci-runner</div>
+      <div class="ip">192.168.122.220 — 8GB RAM — manual, permanent</div>
+      <div class="role">GitLab CE + GitLab Runner. Handles CI/CD pipelines. Tuned: puma workers=2, sidekiq concurrency=5. Nightly restart cron at 3am to reclaim memory.</div>
+    </div>
+  </div>
+</div>
+
+<!-- TOOLSTACK -->
+<div class="section">
+  <div class="section-header"><span>02</span> Technology Stack</div>
+  <div class="stack-grid">
+    <div class="stack-item"><div class="tool">Terraform</div><div class="desc">VM provisioning via libvirt provider</div></div>
+    <div class="stack-item"><div class="tool">Ansible</div><div class="desc">Node configuration & tool installation</div></div>
+    <div class="stack-item"><div class="tool">k3s</div><div class="desc">Lightweight Kubernetes distribution</div></div>
+    <div class="stack-item"><div class="tool">Prometheus</div><div class="desc">Metrics collection & alerting rules</div></div>
+    <div class="stack-item"><div class="tool">Grafana</div><div class="desc">3 dashboards — nodes, cluster, log explorer</div></div>
+    <div class="stack-item"><div class="tool">Loki + Promtail</div><div class="desc">Log aggregation from all nodes</div></div>
+    <div class="stack-item"><div class="tool">Alertmanager</div><div class="desc">Alert routing — Slack + GitLab Issues</div></div>
+    <div class="stack-item"><div class="tool">GitLab CE</div><div class="desc">Source control + CI/CD pipelines</div></div>
+    <div class="stack-item"><div class="tool">Helm</div><div class="desc">kube-prometheus-stack, Loki, Promtail</div></div>
+  </div>
+</div>
+
+<!-- WHAT WAS BUILT -->
+<div class="section">
+  <div class="section-header"><span>03</span> What Was Built</div>
+
+  <div class="card success">
+    <h3>Unified Control Panel — lab-control.py</h3>
+    <p>Single Python script managing the entire lab. Dynamic VM status banner via virsh. Start ALL / Stop ALL (force-kills stragglers with virsh destroy). K3s start/stop/status. Scale up/down workers (Terraform → SSH ready → k3s join → image sync → replica scaling). Ansible playbook runner. Nuke Test — scales app to 0, waits for alert to fire, restores, confirms resolved. Service Links — all URLs and SSH access in one view.</p>
+    <div class="lesson">Key point: Stop ALL discovers running VMs dynamically — no hardcoded list. Graceful shutdown first, force destroy after 5s for any stragglers.</div>
+  </div>
+
+  <div class="card success">
+    <h3>GitLab CI/CD Pipeline — 5 Stages</h3>
+    <p>test → build → deploy-staging → integration-test → deploy-prod (manual gate). Dynamic node discovery — pipeline queries k3s API for all node IPs at runtime, no hardcoded lists. Reusable SSH anchor and image prune anchor eliminate duplication. Auto-prunes old images from all nodes after every deploy.</p>
+    <div class="lesson">Key point: imagePullPolicy: Never — images must exist on every node before deployment. Artifact expiry set to 1 week to allow manual production deploys days after the pipeline ran.</div>
+  </div>
+
+  <div class="card success">
+    <h3>Observability Stack — Full PLG + 3 Grafana Dashboards</h3>
+    <p>Prometheus scraping all nodes including ci-runner. Loki receiving logs from all k3s pods via Promtail DaemonSet. All dashboards provisioned as ConfigMaps (grafana_dashboard=1 label) — permanent across pod restarts and PVC loss. Three dashboards: All Nodes (CPU/RAM/Disk/Network with node_uname_info hostname join), API Dash (request rate, error rate by HTTP code/verb/resource, top erroring endpoints table, p99 latency, scheduler, work queue, pod restarts), Log Explorer (cluster health row with pod restarts/OOMKills/not-running pods, monitoring namespace errors, custom namespace/pod explorer).</p>
+    <div class="lesson">Key point: node_uname_info join trick converts IP addresses to hostnames in all node metrics. Dashboards as code — never lost again.</div>
+  </div>
+
+  <div class="card success">
+    <h3>Alerting Pipeline — Full Lifecycle with Auto-Remediation</h3>
+    <p>Three severity tiers: CRITICAL → #incidents + GitLab issue + auto-remediation, WARNING → #all-homelab-alerts, INFO → #all-homelab-alerts. Dynamic title template shows RESOLVED in green vs CRITICAL in red — visually distinct. Resolved notifications arrive within 60 seconds of metric recovery. Custom webhook.py auto-creates GitLab Issues (INC numbers, severity labels, timeline) on fire and auto-closes on resolve. RUNBOOKS dict in webhook.py drives auto-remediation: NodeMemoryHigh on ci-runner → gitlab-ctl restart via SSH, NodeDiskHigh on any node → crictl rmi --prune. Auto-remediation result (success/fail + output) embedded in the GitLab issue. 6 custom PrometheusRules. Two-tier memory alerting: warning at 80%, critical + auto-fix at 85%.</p>
+    <div class="lesson">Key point: Auto-remediation runs before creating the GitLab issue so the issue includes the remediation result. The webhook pod mounts an SSH key secret to reach nodes inside the cluster network.</div>
+  </div>
+
+  <div class="card success">
+    <h3>IaC — Terraform + Ansible</h3>
+    <p>Workers provisioned via libvirt provider with cloud-init. Separate infra.tf for permanent k3s-infra node. Dynamic Ansible inventory regenerated on every scale operation. install-apps.yml targets k8s_cluster group only — ci-runner excluded intentionally. k3s-start.sh fully dynamic — discovers all k3s-worker-* VMs from virsh at runtime, skips missing VMs gracefully.</p>
+    <div class="lesson">Key point: infra_enabled = true/false toggle in tfvars controls infra node independently from worker count.</div>
+  </div>
+
+  <div class="card success">
+    <h3>GitLab Memory Tuning</h3>
+    <p>GitLab CE was consuming 8.4GB idle on a 10GB VM — creeping to OOM over time. Tuned via gitlab.rb: puma worker_processes=2 (down from 4), sidekiq concurrency=5 (down from 25), prometheus_monitoring disabled (replaced by kube-prometheus-stack). Result: idle memory dropped from 8.4GB to 3.3GB — a 60% reduction. Nightly cron restarts GitLab at 3am to reclaim any leaked memory before the working day.</p>
+    <div class="lesson">Key point: GitLab ships with production-scale defaults. For a single-user homelab, reducing Puma workers and Sidekiq threads is safe and dramatically reduces memory pressure.</div>
+  </div>
+</div>
+
+<!-- ISSUES ENCOUNTERED -->
+<div class="section">
+  <div class="section-header"><span>04</span> Issues Encountered & Lessons Learned</div>
+
+  <div class="card critical">
+    <h3>Stateful workload on a scalable node (Loki PVC lost)</h3>
+    <p>Loki was initially pinned to k3s-worker-2 — a Terraform-managed node. When the node was downscaled and destroyed, the PVC was deleted with it. Loki lost all logs and failed to restart on the replacement node.</p>
+    <div class="lesson">Lesson: Stateful workloads MUST live on permanent nodes. Solution: dedicated k3s-infra node with NoSchedule taint, never part of the scaling pool.</div>
+  </div>
+
+  <div class="card critical">
+    <h3>Grafana dashboards lost on pod restart</h3>
+    <p>Grafana deployed without a PVC uses emptyDir. Any pod restart wipes all manually created dashboards. Discovered after a Helm upgrade.</p>
+    <div class="lesson">Lesson: Enable grafana.persistence.enabled=true. Better: provision dashboards as ConfigMaps with label grafana_dashboard=1 — version-controlled, survive even PVC loss.</div>
+  </div>
+
+  <div class="card critical">
+    <h3>Alertmanager config overwritten on every Helm upgrade</h3>
+    <p>Every helm upgrade overwrote the Alertmanager secret with the default null receiver. Also: a Sprig trunc function in the title template caused all critical alerts to fail — Alertmanager uses standard Go templates, not Sprig.</p>
+    <div class="lesson">Lesson: All Alertmanager config must live in fix-values.yaml and always passed with -f flag. Never edit the secret directly.</div>
+  </div>
+
+  <div class="card critical">
+    <h3>App pods scheduling on control plane (ErrImageNeverPull)</h3>
+    <p>k3s does not taint the control plane by default. Pods scheduled on k3s-control had no container images. imagePullPolicy: Never means it won't pull — if the image isn't there, it fails.</p>
+    <div class="lesson">Lesson: Always taint the control plane in k3s. Pre-sync images to all nodes before scaling.</div>
+  </div>
+
+  <div class="card warning">
+    <h3>k3s false-positive alerts (KubeSchedulerDown etc.)</h3>
+    <p>kube-prometheus-stack expects scheduler, controller-manager and kube-proxy as separate pods. k3s embeds all three in the k3s binary — they never appear as pods so the rules fire immediately after install.</p>
+    <div class="lesson">Lesson: Disable via Helm defaultRules.disabled. The expr: "false" override approach doesn't work — the original upstream rules still fire alongside it.</div>
+  </div>
+
+  <div class="card warning">
+    <h3>Grafana PVC init container permission denied</h3>
+    <p>After enabling Grafana persistence, the init-chown-data container failed with "Permission denied" on /var/lib/grafana — blocking the pod in CrashLoopBackOff.</p>
+    <div class="lesson">Lesson: Disable via grafana.initChownData.enabled=false in Helm values. Unnecessary for fresh PVCs.</div>
+  </div>
+
+  <div class="card warning">
+    <h3>Alertmanager resolved notifications not arriving</h3>
+    <p>send_resolved: true was set but resolved notifications were invisible — the title template had no resolved indicator so firing and resolved messages looked identical. Also: repeat_interval: 1h was racing against resolve causing timing issues.</p>
+    <div class="lesson">Lesson: Use dynamic title template: {{ if eq .Status "resolved" }}RESOLVED{{ else }}CRITICAL{{ end }}. Set group_interval: 30s and resolve_timeout: 30s for fast resolution delivery.</div>
+  </div>
+
+  <div class="card warning">
+    <h3>k3s uses SQLite not etcd</h3>
+    <p>The etcd Grafana dashboard was empty. k3s uses SQLite by default for single control-plane setups.</p>
+    <div class="lesson">Lesson: k3s SQLite is appropriate for non-HA setups. For production HA: use --cluster-init for embedded etcd, or external datastore.</div>
+  </div>
+
+  <div class="card warning">
+    <h3>GitLab memory leak + OOM on ci-runner</h3>
+    <p>GitLab CE leaks memory over time — reached 8.4GB on a 9GB VM causing node-exporter OOM kill, which stopped Prometheus scraping ci-runner, which stopped the NodeMemoryHigh alert from resolving (no metric = no recovery signal).</p>
+    <div class="lesson">Lesson: Tune GitLab puma/sidekiq workers down for homelab. Add nightly restart cron. Monitor node-exporter health separately — if it dies, alerts from that node can't resolve.</div>
+  </div>
+
+  <div class="card info">
+    <h3>k3s version mismatch between nodes</h3>
+    <p>k3s-infra provisioned with a newer version than existing nodes because the install script pulled latest.</p>
+    <div class="lesson">Lesson: Pin k3s version: INSTALL_K3S_VERSION=v1.33.6+k3s1. In production: consistent version management across all nodes.</div>
+  </div>
+
+  <div class="card info">
+    <h3>GitLab GPG key expiry broke apt on ci-runner</h3>
+    <p>GitLab's package repo signing key expired, cascading to broken apt and missing curl/wget.</p>
+    <div class="lesson">Lesson: Third-party apt repositories can silently expire. Refresh keyrings at /etc/apt/keyrings/.</div>
+  </div>
+</div>
+
+<!-- INTERVIEW TALKING POINTS -->
+<div class="section">
+  <div class="section-header"><span>05</span> Key Interview Talking Points</div>
+
+  <div class="quote">
+    <strong>"I built a homelab that mirrors a real production SRE environment."</strong> Everything is automated — infrastructure provisioned by Terraform, nodes configured by Ansible, applications deployed via GitLab CI/CD, observed by a full PLG stack, and alerts routed automatically to Slack and GitLab with auto-remediation.
+  </div>
+
+  <div class="card info">
+    <h3>On the Incident Demo</h3>
+    <p>"Let me show you a live incident. I'll scale the app to zero — within 90 seconds you'll see a CRITICAL alert in Slack, a GitLab issue auto-created with an INC number. When I restore it, the RESOLVED notification arrives in green within 60 seconds and the issue closes automatically. The whole lifecycle is automated."</p>
+  </div>
+
+  <div class="card info">
+    <h3>On Auto-Remediation</h3>
+    <p>"When NodeMemoryHigh fires on ci-runner, the webhook SSHes into the node and restarts GitLab services automatically. The GitLab issue includes the remediation result — success or failure with full output. If it fails, the issue stays open for manual investigation. No human needed for known, recoverable failures."</p>
+  </div>
+
+  <div class="card info">
+    <h3>On Observability</h3>
+    <p>"I have metrics, logs, and alerting integrated. Prometheus scrapes every node. Loki aggregates all pod logs. Three Grafana dashboards: node resources, API server health with error drilldown by verb/resource/code, and a Log Explorer with cluster health panels showing pod restarts, OOMKills, and monitoring namespace errors. All dashboards are provisioned as code — they survive any restart."</p>
+  </div>
+
+  <div class="card info">
+    <h3>On Architecture Decisions</h3>
+    <p>"I learned the hard way that stateful workloads need dedicated permanent nodes. After losing Loki's data during a scale-down, I created a separate infra node with NoSchedule taints — the same pattern used in production OpenShift infra nodes. Similarly, after losing Grafana dashboards to a pod restart, I moved to ConfigMap provisioning — infrastructure as code for observability config."</p>
+  </div>
+
+  <div class="card info">
+    <h3>On k3s vs OpenShift</h3>
+    <p>"k3s gave me hands-on Kubernetes in a resource-constrained environment. Key differences: no etcd by default (SQLite for single-node), no SCCs (just PSA), control plane not tainted by default, scheduler/controller-manager/kube-proxy embedded in the binary. OpenShift adds enterprise security, RBAC depth, operator framework, and HA etcd."</p>
+  </div>
+
+  <div class="card info">
+    <h3>On Resource Management</h3>
+    <p>"Running 4 VMs on a 30GB laptop for an interview required careful tuning. GitLab CE defaults to production-scale settings — I reduced Puma workers from 4 to 2 and Sidekiq concurrency from 25 to 5, cutting idle memory from 8.4GB to 3.3GB. Added a nightly restart cron to reclaim leaked memory. The alerting system itself monitors memory and auto-restarts GitLab if it breaches 85%."</p>
+  </div>
+</div>
+
+<!-- SERVICES TABLE -->
+<div class="section">
+  <div class="section-header"><span>06</span> Running Services Reference</div>
+  <div class="card">
+    <table>
+      <tr><th>Service</th><th>URL</th><th>Node</th></tr>
+      <tr><td>Grafana</td><td>http://192.168.122.218:30080</td><td>k3s-infra</td></tr>
+      <tr><td>Prometheus</td><td>http://192.168.122.218:30090</td><td>k3s-infra</td></tr>
+      <tr><td>Alertmanager</td><td>http://192.168.122.218:30093</td><td>k3s-infra</td></tr>
+      <tr><td>Loki</td><td>http://loki:3100 (ClusterIP)</td><td>k3s-infra</td></tr>
+      <tr><td>Alertmanager Webhook</td><td>http://alertmanager-webhook:8080 (ClusterIP)</td><td>k3s-infra</td></tr>
+      <tr><td>Trengo App</td><td>http://192.168.122.218:32504</td><td>k3s-worker-1</td></tr>
+      <tr><td>GitLab</td><td>http://192.168.122.220</td><td>ci-runner</td></tr>
+      <tr><td>K8s Dashboard</td><td>https://192.168.122.218:30443</td><td>k3s-control</td></tr>
+      <tr><td>Portainer</td><td>http://192.168.122.218:30777</td><td>k3s-control</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- CONFIG FILES -->
+<div class="section">
+  <div class="section-header"><span>07</span> Key Config Files Reference</div>
+  <div class="card">
+    <table>
+      <tr><th>File</th><th>Purpose</th><th>Location</th></tr>
+      <tr><td>fix-values.yaml</td><td>Helm values — Grafana persistence, Alertmanager config, disabled rules, timing</td><td>monitoring/fix-values.yaml</td></tr>
+      <tr><td>grafana-dashboards-configmap.yaml</td><td>All 3 Grafana dashboards as ConfigMaps</td><td>monitoring/grafana/</td></tr>
+      <tr><td>homelab-alerts.yaml</td><td>6 custom PrometheusRules incl. two-tier memory alerting</td><td>monitoring/grafana/</td></tr>
+      <tr><td>homelab-silences.yaml</td><td>False-positive silence rules</td><td>monitoring/grafana/</td></tr>
+      <tr><td>webhook-deployment.yaml</td><td>Webhook pod with SSH key mount + RUNBOOKS auto-remediation</td><td>scripts/</td></tr>
+      <tr><td>lab-control.py</td><td>Unified lab control panel</td><td>scripts/</td></tr>
+      <tr><td>k3s-start.sh</td><td>Dynamic VM start script</td><td>scripts/</td></tr>
+    </table>
+  </div>
+</div>
+
+<footer>
+  Generated for Red Hat Senior SRE Interview · Angel · March 2026 · homelab.local · Last updated: 25 March 2026
+</footer>
+
+</body>
+</html>
