@@ -486,116 +486,451 @@ metadata:
 data:
   log-explorer.json: |
     {
-      "title": "Log Explorer",
-      "uid": "homelab-logexplorer",
-      "schemaVersion": 38,
-      "version": 7,
-      "refresh": "30s",
-      "tags": [
-        "homelab",
-        "loki"
-      ],
-      "time": {
-        "from": "now-6h",
-        "to": "now"
-      },
-      "timezone": "browser",
-      "editable": true,
-      "graphTooltip": 1,
-      "templating": {
+      "annotations": {
         "list": [
           {
-            "name": "namespace",
-            "label": "Namespace",
-            "type": "query",
+            "builtIn": 1,
             "datasource": {
-              "type": "loki",
-              "uid": "loki"
+              "type": "grafana",
+              "uid": "-- Grafana --"
             },
-            "query": "label_values(namespace)",
-            "refresh": 2,
-            "sort": 1,
-            "multi": false,
-            "includeAll": false,
-            "current": {
-              "text": "default",
-              "value": "default"
-            }
-          },
-          {
-            "name": "pod",
-            "label": "Pod",
-            "type": "query",
-            "datasource": {
-              "type": "loki",
-              "uid": "loki"
-            },
-            "query": "label_values({namespace=\"$namespace\"}, pod)",
-            "refresh": 2,
-            "sort": 1,
-            "multi": false,
-            "includeAll": true,
-            "allValue": ".+",
-            "current": {}
-          },
-          {
-            "name": "search",
-            "label": "Search",
-            "type": "textbox",
-            "current": {
-              "text": "",
-              "value": ""
-            },
-            "query": ""
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
           }
         ]
       },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
       "panels": [
         {
-          "id": 100,
-          "title": "Cluster Health",
-          "type": "row",
-          "gridPos": {
-            "h": 1,
-            "w": 24,
-            "x": 0,
-            "y": 0
-          },
-          "collapsed": false
-        },
-        {
-          "id": 1,
-          "title": "Pod Restarts \u2014 All Namespaces (last 1h)",
-          "type": "timeseries",
-          "gridPos": {
-            "h": 7,
-            "w": 8,
-            "x": 0,
-            "y": 1
-          },
           "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
+            "type": "loki",
+            "uid": "loki"
           },
-          "targets": [
-            {
-              "expr": "sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total[1h])) > 0",
-              "legendFormat": "{{namespace}}/{{pod}}",
-              "refId": "A"
-            }
-          ],
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
               "color": {
                 "mode": "palette-classic"
               },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
                     "color": "green",
-                    "value": null
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "id": 5,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.4.1",
+          "targets": [
+            {
+              "expr": "sum by (pod) (count_over_time({namespace=\"monitoring\"}[1m]))",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Log Volume by Pod \u2014 monitoring",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "id": 6,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.4.1",
+          "targets": [
+            {
+              "expr": "sum by (pod) (count_over_time({namespace=\"monitoring\"} |~ \"(?i)level=error|level=warn\" [1m]))",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Error Rate by Pod \u2014 monitoring",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 7
+          },
+          "id": 100,
+          "panels": [],
+          "title": "Cluster Health",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 12,
+            "w": 24,
+            "x": 0,
+            "y": 8
+          },
+          "id": 7,
+          "options": {
+            "dedupStrategy": "none",
+            "enableInfiniteScrolling": false,
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showControls": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "unwrappedColumns": false,
+            "wrapLogMessage": true
+          },
+          "pluginVersion": "12.4.1",
+          "targets": [
+            {
+              "expr": "{namespace=\"monitoring\"} != \"caller=metrics.go\" != \"caller=roundtrip.go\" != \"caller=engine.go\" != \"caller=querier.go\" != \"caller=client.go\" |~ \"(?i)level=error|level=warn|msg=\\\"Error\"",
+              "maxLines": 200,
+              "refId": "A"
+            }
+          ],
+          "title": "Monitoring Errors \u2014 Alertmanager / Prometheus / Grafana",
+          "type": "logs"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 16,
+            "w": 24,
+            "x": 0,
+            "y": 20
+          },
+          "id": 9,
+          "options": {
+            "dedupStrategy": "none",
+            "enableInfiniteScrolling": false,
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": true,
+            "showControls": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "unwrappedColumns": false,
+            "wrapLogMessage": true
+          },
+          "pluginVersion": "12.4.1",
+          "targets": [
+            {
+              "expr": "{namespace=\"$namespace\", pod=~\"$pod\"} != \"kube-probe\" |~ \"$search\"",
+              "maxLines": 500,
+              "refId": "A"
+            }
+          ],
+          "title": "Live Logs \u2014 $namespace / $pod",
+          "type": "logs"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "blue",
+                "mode": "fixed"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 36
+          },
+          "id": 8,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.4.1",
+          "targets": [
+            {
+              "expr": "sum(count_over_time({namespace=\"$namespace\", pod=~\"$pod\"}[1m]))",
+              "legendFormat": "All logs",
+              "refId": "A"
+            }
+          ],
+          "title": "Log Volume \u2014 $namespace / $pod",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
                   },
                   {
                     "color": "yellow",
@@ -606,33 +941,126 @@ data:
                     "value": 5
                   }
                 ]
-              }
-            }
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom"
+              },
+              "unit": "short"
             },
-            "tooltip": {
-              "mode": "multi"
-            }
-          }
-        },
-        {
-          "id": 2,
-          "title": "OOMKilled Pods \u2014 All Namespaces",
-          "type": "timeseries",
+            "overrides": []
+          },
           "gridPos": {
             "h": 7,
             "w": 8,
-            "x": 8,
-            "y": 1
+            "x": 0,
+            "y": 42
           },
+          "id": 1,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.4.1",
+          "targets": [
+            {
+              "expr": "sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total[1h])) > 0",
+              "legendFormat": "{{namespace}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Pod Restarts \u2014 All Namespaces (last 1h)",
+          "type": "timeseries"
+        },
+        {
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "red",
+                "mode": "fixed"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 42
+          },
+          "id": 2,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.4.1",
           "targets": [
             {
               "expr": "sum by (namespace, pod, container) (kube_pod_container_status_last_terminated_reason{reason=\"OOMKilled\"}) > 0",
@@ -640,39 +1068,92 @@ data:
               "refId": "A"
             }
           ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "color": {
-                "mode": "fixed",
-                "fixedColor": "red"
-              }
-            }
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom"
-            },
-            "tooltip": {
-              "mode": "multi"
-            }
-          }
+          "title": "OOMKilled Pods \u2014 All Namespaces",
+          "type": "timeseries"
         },
         {
-          "id": 3,
-          "title": "Pods Not Running \u2014 All Namespaces",
-          "type": "timeseries",
-          "gridPos": {
-            "h": 7,
-            "w": 8,
-            "x": 16,
-            "y": 1
-          },
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
           },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "showValues": false,
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 0
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 42
+          },
+          "id": 3,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "12.4.1",
           "targets": [
             {
               "expr": "sum by (namespace, pod, phase) (kube_pod_status_phase{phase!~\"Running|Succeeded\"}) > 0",
@@ -680,261 +1161,151 @@ data:
               "refId": "A"
             }
           ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "color": {
-                "mode": "palette-classic"
-              }
-            }
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom"
-            },
-            "tooltip": {
-              "mode": "multi"
-            }
-          }
+          "title": "Pods Not Running \u2014 All Namespaces",
+          "type": "timeseries"
         },
         {
-          "id": 4,
-          "title": "k8s Warning Events \u2014 Cluster Wide",
-          "type": "logs",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
           "gridPos": {
             "h": 10,
             "w": 24,
             "x": 0,
-            "y": 8
+            "y": 49
           },
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
+          "id": 4,
+          "options": {
+            "dedupStrategy": "none",
+            "enableInfiniteScrolling": false,
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showControls": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "unwrappedColumns": false,
+            "wrapLogMessage": true
           },
+          "pluginVersion": "12.4.1",
           "targets": [
             {
               "expr": "{job=\"integrations/kubernetes/eventhandler\"} |~ \"(?i)warning|failed|error|backoff|oom|evict|kill|unhealthy|CrashLoop\"",
-              "refId": "A",
-              "maxLines": 200
+              "maxLines": 200,
+              "refId": "A"
             }
           ],
-          "options": {
-            "showTime": true,
-            "showLabels": true,
-            "showCommonLabels": false,
-            "wrapLogMessage": true,
-            "prettifyLogMessage": false,
-            "enableLogDetails": true,
-            "dedupStrategy": "none",
-            "sortOrder": "Descending"
-          }
+          "title": "k8s Warning Events \u2014 Cluster Wide",
+          "type": "logs"
         },
         {
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 59
+          },
           "id": 101,
+          "panels": [],
           "title": "Monitoring Namespace",
-          "type": "row",
+          "type": "row"
+        },
+        {
+          "collapsed": false,
           "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 18
+            "y": 60
           },
-          "collapsed": false
-        },
-        {
-          "id": 5,
-          "title": "Log Volume by Pod \u2014 monitoring",
-          "type": "timeseries",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 0,
-            "y": 19
-          },
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "targets": [
-            {
-              "expr": "sum by (pod) (count_over_time({namespace=\"monitoring\"}[1m]))",
-              "legendFormat": "{{pod}}",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "color": {
-                "mode": "palette-classic"
-              }
-            }
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom"
-            },
-            "tooltip": {
-              "mode": "multi"
-            }
-          }
-        },
-        {
-          "id": 6,
-          "title": "Error Rate by Pod \u2014 monitoring",
-          "type": "timeseries",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 19
-          },
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "targets": [
-            {
-              "expr": "sum by (pod) (count_over_time({namespace=\"monitoring\"} |~ \"(?i)level=error|level=warn\" [1m]))",
-              "legendFormat": "{{pod}}",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "color": {
-                "mode": "palette-classic"
-              }
-            }
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom"
-            },
-            "tooltip": {
-              "mode": "multi"
-            }
-          }
-        },
-        {
-          "id": 7,
-          "title": "Monitoring Errors \u2014 Alertmanager / Prometheus / Grafana",
-          "type": "logs",
-          "gridPos": {
-            "h": 12,
-            "w": 24,
-            "x": 0,
-            "y": 26
-          },
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "targets": [
-            {
-              "expr": "{namespace=\"monitoring\"} != \"caller=metrics.go\" != \"caller=roundtrip.go\" != \"caller=engine.go\" != \"caller=querier.go\" != \"caller=client.go\" |~ \"(?i)level=error|level=warn|msg=\\\"Error\"",
-              "refId": "A",
-              "maxLines": 200
-            }
-          ],
-          "options": {
-            "showTime": true,
-            "showLabels": true,
-            "showCommonLabels": false,
-            "wrapLogMessage": true,
-            "prettifyLogMessage": false,
-            "enableLogDetails": true,
-            "dedupStrategy": "none",
-            "sortOrder": "Descending"
-          }
-        },
-        {
           "id": 102,
+          "panels": [],
           "title": "Custom Explorer",
-          "type": "row",
-          "gridPos": {
-            "h": 1,
-            "w": 24,
-            "x": 0,
-            "y": 38
-          },
-          "collapsed": false
-        },
-        {
-          "id": 8,
-          "title": "Log Volume \u2014 $namespace / $pod",
-          "type": "timeseries",
-          "gridPos": {
-            "h": 6,
-            "w": 24,
-            "x": 0,
-            "y": 39
-          },
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "targets": [
-            {
-              "expr": "sum(count_over_time({namespace=\"$namespace\", pod=~\"$pod\"}[1m]))",
-              "legendFormat": "All logs",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "color": {
-                "mode": "fixed",
-                "fixedColor": "blue"
-              }
-            }
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom"
-            },
-            "tooltip": {
-              "mode": "multi"
-            }
-          }
-        },
-        {
-          "id": 9,
-          "title": "Live Logs \u2014 $namespace / $pod",
-          "type": "logs",
-          "gridPos": {
-            "h": 16,
-            "w": 24,
-            "x": 0,
-            "y": 45
-          },
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "targets": [
-            {
-              "expr": "{namespace=\"$namespace\", pod=~\"$pod\"} != \"kube-probe\" |~ \"$search\"",
-              "refId": "A",
-              "maxLines": 500
-            }
-          ],
-          "options": {
-            "showTime": true,
-            "showLabels": false,
-            "showCommonLabels": true,
-            "wrapLogMessage": true,
-            "prettifyLogMessage": false,
-            "enableLogDetails": true,
-            "dedupStrategy": "none",
-            "sortOrder": "Descending"
-          }
+          "type": "row"
         }
-      ]
+      ],
+      "preload": false,
+      "refresh": "30s",
+      "schemaVersion": 42,
+      "tags": [
+        "homelab",
+        "loki"
+      ],
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "text": "default",
+              "value": "default"
+            },
+            "datasource": {
+              "type": "loki",
+              "uid": "loki"
+            },
+            "includeAll": false,
+            "label": "Namespace",
+            "name": "namespace",
+            "options": [],
+            "query": "label_values(namespace)",
+            "refresh": 2,
+            "regexApplyTo": "value",
+            "sort": 1,
+            "type": "query"
+          },
+          {
+            "allValue": ".+",
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            },
+            "datasource": {
+              "type": "loki",
+              "uid": "loki"
+            },
+            "includeAll": true,
+            "label": "Pod",
+            "name": "pod",
+            "options": [],
+            "query": "label_values({namespace=\"$namespace\"}, pod)",
+            "refresh": 2,
+            "regexApplyTo": "value",
+            "sort": 1,
+            "type": "query"
+          },
+          {
+            "current": {
+              "text": "",
+              "value": ""
+            },
+            "label": "Search",
+            "name": "search",
+            "options": [
+              {
+                "selected": true,
+                "text": "",
+                "value": ""
+              }
+            ],
+            "query": "",
+            "type": "textbox"
+          }
+        ]
+      },
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Log Explorer",
+      "uid": "homelab-logexplorer",
+      "version": 1,
+      "weekStart": ""
     }
