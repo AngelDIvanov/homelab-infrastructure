@@ -7,30 +7,152 @@ metadata:
 data:
   webhook.py: |
     #!/usr/bin/env python3
+    """
+    Alertmanager -> GitLab Issues webhook receiver
+    Runs inside k3s, receives Alertmanager webhooks and creates/closes GitLab issues.
+    Also performs auto-remediation for known alert patterns.
+    """
+    
     from http.server import HTTPServer, BaseHTTPRequestHandler
-    import json, urllib.request, urllib.error, os, hashlib, logging
-
+    import json
+    import urllib.request
+    import urllib.error
+    import os
+    import hashlib
+    import logging
+    import subprocess
+    
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     log = logging.getLogger(__name__)
-
+    
     GITLAB_URL        = os.environ.get('GITLAB_URL',        'http://192.168.122.220')
     GITLAB_TOKEN      = os.environ.get('GITLAB_TOKEN',      '')
     GITLAB_PROJECT_ID = os.environ.get('GITLAB_PROJECT_ID', '1')
-
+    SSH_KEY           = os.environ.get('SSH_KEY',           '/root/.ssh/id_rsa')
+    SSH_USER          = os.environ.get('SSH_USER',          'andy')
+    
     SEVERITY_LABELS = {
         'critical': ['incident', 'critical', 'bug'],
         'warning':  ['incident', 'warning'],
         'info':     ['incident', 'info'],
     }
-    SEVERITY_EMOJI = {'critical': '🚨', 'warning': '⚠️', 'info': 'ℹ️'}
-
+    
+    # ─────────────────────────────────────────────────────────────
+    #  AUTO-REMEDIATION RUNBOOKS
+    #  Each entry maps an alertname to a list of remediations.
+    #  instance_contains: partial match against the instance label
+    #  host: SSH target
+    #  cmd: command to run
+    #  description: shown in the GitLab issue note
+    # ─────────────────────────────────────────────────────────────
+    RUNBOOKS = {
+        'NodeMemoryHigh': [
+            {
+                'instance_contains': '192.168.122.220',  # ci-runner
+                'host': '192.168.122.220',
+                'cmd': 'sudo gitlab-ctl restart',
+                'description': 'Restarted GitLab services on ci-runner to reclaim leaked memory.'
+            }
+        ],
+        'NodeDiskHigh': [
+            {
+                'instance_contains': '192.168.122.218',  # k3s-control
+                'host': '192.168.122.218',
+                'cmd': 'sudo k3s crictl rmi --prune',
+                'description': 'Pruned unused container images on k3s-control to free disk space.'
+            },
+            {
+                'instance_contains': '192.168.122.219',  # k3s-worker-1
+                'host': '192.168.122.219',
+                'cmd': 'sudo k3s crictl rmi --prune',
+                'description': 'Pruned unused container images on k3s-worker-1 to free disk space.'
+            },
+            {
+                'instance_contains': '192.168.122.230',  # k3s-infra
+                'host': '192.168.122.230',
+                'cmd': 'sudo k3s crictl rmi --prune',
+                'description': 'Pruned unused container images on k3s-infra to free disk space.'
+            }
+        ]
+    }
+    
+    def run_remediation(alert, inc_num):
+        """Run auto-remediation if a runbook exists for this alert."""
+        alertname = alert['labels'].get('alertname', '')
+        instance  = alert['labels'].get('instance', '')
+    
+        if alertname not in RUNBOOKS:
+            return None
+    
+        for runbook in RUNBOOKS[alertname]:
+            if runbook['instance_contains'] not in instance:
+                continue
+    
+            host = runbook['host']
+            cmd  = runbook['cmd']
+            desc = runbook['description']
+    
+            log.info(f"Auto-remediation: {alertname} on {host} — running: {cmd}")
+    
+            try:
+                result = subprocess.run(
+                    ['ssh', '-i', SSH_KEY,
+                     '-o', 'StrictHostKeyChecking=no',
+                     '-o', 'ConnectTimeout=10',
+                     f'{SSH_USER}@{host}', cmd],
+                    capture_output=True, text=True, timeout=120
+                )
+                if result.returncode == 0:
+                    log.info(f"Remediation succeeded on {host}")
+                    return {
+                        'success': True,
+                        'host': host,
+                        'cmd': cmd,
+                        'description': desc,
+                        'output': result.stdout[:500] if result.stdout else '(no output)'
+                    }
+                else:
+                    log.error(f"Remediation failed on {host}: {result.stderr[:200]}")
+                    return {
+                        'success': False,
+                        'host': host,
+                        'cmd': cmd,
+                        'description': desc,
+                        'output': result.stderr[:500]
+                    }
+            except subprocess.TimeoutExpired:
+                log.error(f"Remediation timed out on {host}")
+                return {
+                    'success': False,
+                    'host': host,
+                    'cmd': cmd,
+                    'description': desc,
+                    'output': 'SSH command timed out after 120s'
+                }
+            except Exception as e:
+                log.error(f"Remediation error on {host}: {e}")
+                return {
+                    'success': False,
+                    'host': host,
+                    'cmd': cmd,
+                    'description': desc,
+                    'output': str(e)
+                }
+    
+        return None
+    
     def inc_number(alert):
+        """Generate a stable INC number from alert fingerprint."""
         fp = alert.get('fingerprint', alert['labels'].get('alertname', 'unknown'))
         return int(hashlib.md5(fp.encode()).hexdigest()[:5], 16) % 90000 + 10000
-
+    
     def gitlab_request(method, path, data=None):
+        """Make a GitLab API request."""
         url = f"{GITLAB_URL}/api/v4/projects/{GITLAB_PROJECT_ID}{path}"
-        headers = {'PRIVATE-TOKEN': GITLAB_TOKEN, 'Content-Type': 'application/json'}
+        headers = {
+            'PRIVATE-TOKEN': GITLAB_TOKEN,
+            'Content-Type': 'application/json',
+        }
         body = json.dumps(data).encode() if data else None
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
@@ -39,55 +161,135 @@ data:
         except urllib.error.HTTPError as e:
             log.error(f"GitLab API error {e.code}: {e.read()}")
             return None
-
+    
     def find_open_issue(inc_num):
+        """Find an open issue with this INC number."""
         issues = gitlab_request('GET', f'/issues?state=opened&search=INC-{inc_num}&labels=incident')
         if issues:
             for issue in issues:
                 if f'INC-{inc_num}' in issue['title']:
                     return issue
         return None
-
-    def create_issue(alert, inc_num):
+    
+    def create_issue(alert, inc_num, remediation=None):
+        """Create a GitLab issue for a firing alert."""
         severity  = alert['labels'].get('severity', 'info')
         alertname = alert['labels'].get('alertname', 'Unknown')
         namespace = alert['labels'].get('namespace', 'N/A')
+        instance  = alert['labels'].get('instance', 'N/A')
         summary   = alert['annotations'].get('summary', alertname)
         desc      = alert['annotations'].get('description', '')
-        emoji     = SEVERITY_EMOJI.get(severity, 'ℹ️')
         labels    = SEVERITY_LABELS.get(severity, ['incident'])
-        title     = f"{emoji} INC-{inc_num} | {severity.upper()} | {alertname}"
-        body = f"""## {emoji} Incident INC-{inc_num}\n\n**Severity:** {severity.upper()}\n**Alert:** {alertname}\n**Namespace:** {namespace}\n**Summary:** {summary}\n\n### Description\n{desc}\n\n### Timeline\n- 🔴 **Fired:** {alert.get('startsAt', 'N/A')}\n\n---\n*Auto-created by Alertmanager*\n"""
-        issue = gitlab_request('POST', '/issues', {'title': title, 'description': body, 'labels': ','.join(labels)})
+    
+        title = f"INC-{inc_num} | {severity.upper()} | {alertname}"
+    
+        remediation_section = ""
+        if remediation:
+            status  = "SUCCESS" if remediation['success'] else "FAILED"
+            remediation_section = f"""
+    ### Auto-remediation
+    - **Status:** {status}
+    - **Host:** {remediation['host']}
+    - **Command:** `{remediation['cmd']}`
+    - **Action:** {remediation['description']}
+    - **Output:**
+    ```
+    {remediation['output']}
+    ```
+    """
+    
+        body = f"""## Incident INC-{inc_num}
+    
+    **Severity:** {severity.upper()}
+    **Alert:** {alertname}
+    **Namespace:** {namespace}
+    **Instance:** {instance}
+    **Summary:** {summary}
+    
+    ### Description
+    {desc}
+    
+    ### Alert Labels
+    ```
+    {json.dumps(alert['labels'], indent=2)}
+    ```
+    {remediation_section}
+    ### Timeline
+    - Fired: {alert.get('startsAt', 'N/A')}
+    
+    ---
+    Auto-created by Alertmanager webhook
+    """
+    
+        issue = gitlab_request('POST', '/issues', {
+            'title': title,
+            'description': body,
+            'labels': ','.join(labels),
+        })
+    
         if issue:
             log.info(f"Created issue #{issue['iid']} — {title}")
         return issue
-
+    
     def close_issue(issue, alert, inc_num):
-        gitlab_request('POST', f"/issues/{issue['iid']}/notes", {'body': f"✅ **RESOLVED** — Alert cleared at {alert.get('endsAt', 'N/A')}\n\n*Auto-resolved by Alertmanager*"})
-        gitlab_request('PUT',  f"/issues/{issue['iid']}", {'state_event': 'close'})
+        """Close a GitLab issue when alert resolves."""
+        ends_at = alert.get('endsAt', 'N/A')
+    
+        gitlab_request('POST', f"/issues/{issue['iid']}/notes", {
+            'body': f"RESOLVED — Alert cleared at {ends_at}\n\nAuto-resolved by Alertmanager"
+        })
+    
+        gitlab_request('PUT', f"/issues/{issue['iid']}", {'state_event': 'close'})
         log.info(f"Closed issue #{issue['iid']} — INC-{inc_num}")
-
+    
     class WebhookHandler(BaseHTTPRequestHandler):
         def do_POST(self):
-            body    = self.rfile.read(int(self.headers.get('Content-Length', 0)))
-            try:    payload = json.loads(body)
-            except: self.send_response(400); self.end_headers(); return
-            for alert in payload.get('alerts', []):
-                inc_num = inc_number(alert)
-                if payload.get('status') == 'firing':
-                    if not find_open_issue(inc_num):
-                        create_issue(alert, inc_num)
-                elif payload.get('status') == 'resolved':
-                    issue = find_open_issue(inc_num)
-                    if issue:
-                        close_issue(issue, alert, inc_num)
-            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
-        def log_message(self, *args): pass
-
+            length = int(self.headers.get('Content-Length', 0))
+            body   = self.rfile.read(length)
+    
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError:
+                self.send_response(400)
+                self.end_headers()
+                return
+    
+            status = payload.get('status', '')
+            alerts = payload.get('alerts', [])
+    
+            log.info(f"Received {status} with {len(alerts)} alerts")
+    
+            for alert in alerts:
+                inc_num   = inc_number(alert)
+                alertname = alert['labels'].get('alertname', 'Unknown')
+    
+                if status == 'firing':
+                    existing = find_open_issue(inc_num)
+                    if not existing:
+                        # Run remediation before creating issue
+                        remediation = run_remediation(alert, inc_num)
+                        create_issue(alert, inc_num, remediation)
+                    else:
+                        log.info(f"Issue already exists for INC-{inc_num} — skipping")
+    
+                elif status == 'resolved':
+                    existing = find_open_issue(inc_num)
+                    if existing:
+                        close_issue(existing, alert, inc_num)
+                    else:
+                        log.info(f"No open issue found for INC-{inc_num} — nothing to close")
+    
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'ok')
+    
+        def log_message(self, format, *args):
+            pass  # Suppress default HTTP logs
+    
     if __name__ == '__main__':
-        log.info(f"Starting webhook on :8080 | GitLab: {GITLAB_URL} | Project: {GITLAB_PROJECT_ID}")
-        HTTPServer(('0.0.0.0', 8080), WebhookHandler).serve_forever()
+        port = int(os.environ.get('PORT', 8080))
+        log.info(f"Starting webhook on :{port} | GitLab: {GITLAB_URL} | Project: {GITLAB_PROJECT_ID}")
+        HTTPServer(('0.0.0.0', port), WebhookHandler).serve_forever()
 
 ---
 apiVersion: apps/v1
@@ -108,7 +310,7 @@ spec:
       containers:
         - name: webhook
           image: python:3.11-alpine
-          command: ["python3", "/app/webhook.py"]
+          command: ["sh", "-c", "apk add --no-cache openssh-client && python3 /app/webhook.py"]
           ports:
             - containerPort: 8080
           env:
@@ -121,13 +323,24 @@ spec:
                 secretKeyRef:
                   name: gitlab-token
                   key: token
+            - name: SSH_KEY
+              value: "/root/.ssh/id_rsa"
+            - name: SSH_USER
+              value: "andy"
           volumeMounts:
             - name: webhook-script
               mountPath: /app
+            - name: ssh-key
+              mountPath: /root/.ssh
+              readOnly: true
       volumes:
         - name: webhook-script
           configMap:
             name: alertmanager-webhook
+        - name: ssh-key
+          secret:
+            secretName: webhook-ssh-key
+            defaultMode: 0400
 
 ---
 apiVersion: v1
