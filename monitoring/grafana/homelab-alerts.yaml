@@ -56,11 +56,20 @@ spec:
             summary: "Node disk usage is high"
             description: "Node {{ $labels.instance }} disk usage is above 75% (current: {{ $value | printf \"%.1f\" }}%)."
 
-        - alert: NodeMemoryHigh
-          expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 85
+        - alert: NodeMemoryWarning
+          expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 80
           for: 5m
           labels:
             severity: warning
           annotations:
             summary: "Node memory usage is high"
-            description: "Node {{ $labels.instance }} memory usage is above 85% (current: {{ $value | printf \"%.1f\" }}%)."
+            description: "Node {{ $labels.instance }} memory usage is above 80% (current: {{ $value | printf \"%.1f\" }}%). Monitor closely."
+
+        - alert: NodeMemoryHigh
+          expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 85
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node memory usage is critical — auto-remediation triggered"
+            description: "Node {{ $labels.instance }} memory usage is above 85% (current: {{ $value | printf \"%.1f\" }}%). Auto-restart initiated."
