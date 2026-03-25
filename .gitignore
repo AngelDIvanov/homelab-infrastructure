@@ -1,0 +1,18 @@
+# Terraform state — contains sensitive data, never commit
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+*.tfstate
+*.tfstate.backup
+
+# Terraform working files
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor
+.vscode/
+.idea/
+*.swp
