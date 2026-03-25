@@ -489,7 +489,7 @@ data:
       "title": "Log Explorer",
       "uid": "homelab-logexplorer",
       "schemaVersion": 38,
-      "version": 2,
+      "version": 3,
       "refresh": "30s",
       "tags": ["homelab", "loki"],
       "time": { "from": "now-1h", "to": "now" },
@@ -528,13 +528,13 @@ data:
             "label": "Level",
             "type": "custom",
             "query": "All,error,warn,info,debug",
-            "current": { "text": "error", "value": "error" },
+            "current": { "text": "All", "value": ".*" },
             "options": [
-              { "text": "All", "value": ".*", "selected": false },
-              { "text": "error", "value": "error", "selected": true },
-              { "text": "warn", "value": "warn", "selected": false },
-              { "text": "info", "value": "info", "selected": false },
-              { "text": "debug", "value": "debug", "selected": false }
+              { "text": "All",   "value": ".*",   "selected": true  },
+              { "text": "error", "value": "error","selected": false },
+              { "text": "warn",  "value": "warn", "selected": false },
+              { "text": "info",  "value": "info", "selected": false },
+              { "text": "debug", "value": "debug","selected": false }
             ],
             "multi": false,
             "includeAll": false
@@ -557,12 +557,12 @@ data:
           "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
-              "expr": "sum(count_over_time({namespace=\"$namespace\", pod=~\"$pod\"} | label_format msg=\"\" | drop __error__, __error_details__ [1m]))",
+              "expr": "sum(count_over_time({namespace=\"$namespace\", pod=~\"$pod\"}[1m]))",
               "legendFormat": "All logs",
               "refId": "A"
             },
             {
-              "expr": "sum(count_over_time({namespace=\"$namespace\", pod=~\"$pod\"} | label_format msg=\"\" | drop __error__, __error_details__ |~ \"(?i)error|exception|fatal|panic\" [1m]))",
+              "expr": "sum(count_over_time({namespace=\"$namespace\", pod=~\"$pod\"} |~ \"(?i)error|exception|fatal|panic\"[1m]))",
               "legendFormat": "Errors",
               "refId": "B"
             }
@@ -572,15 +572,11 @@ data:
             "overrides": [
               {
                 "matcher": { "id": "byName", "options": "Errors" },
-                "properties": [
-                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
-                ]
+                "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
               },
               {
                 "matcher": { "id": "byName", "options": "All logs" },
-                "properties": [
-                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }
-                ]
+                "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
               }
             ]
           },
@@ -597,7 +593,7 @@ data:
           "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
-              "expr": "sum by (pod) (count_over_time({namespace=\"$namespace\"} | drop __error__, __error_details__ [1m]))",
+              "expr": "sum by (pod) (count_over_time({namespace=\"$namespace\"}[1m]))",
               "legendFormat": "{{pod}}",
               "refId": "A"
             }
@@ -618,7 +614,7 @@ data:
           "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
-              "expr": "sum by (pod) (count_over_time({namespace=\"$namespace\"} | drop __error__, __error_details__ |~ \"(?i)error|exception|fatal|panic\" [1m]))",
+              "expr": "sum by (pod) (count_over_time({namespace=\"$namespace\"} |~ \"(?i)error|exception|fatal|panic\"[1m]))",
               "legendFormat": "{{pod}}",
               "refId": "A"
             }
@@ -650,7 +646,7 @@ data:
           "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
-              "expr": "{namespace=\"$namespace\", pod=~\"$pod\"} | drop __error__, __error_details__ | drop caller | not_contains_field(\"caller\", \"metrics.go\") |~ \"(?i)$level\" |~ \"$search\"",
+              "expr": "{namespace=\"$namespace\", pod=~\"$pod\"} != \"caller=metrics.go\" != \"caller=roundtrip.go\" != \"caller=engine.go\" != \"caller=querier.go\" |~ \"(?i)$level\" |~ \"$search\"",
               "refId": "A",
               "maxLines": 500
             }
@@ -668,13 +664,13 @@ data:
         },
         {
           "id": 5,
-          "title": "Errors Only — $namespace / $pod  (excludes Loki internals)",
+          "title": "Errors Only — $namespace / $pod",
           "type": "logs",
           "gridPos": { "h": 12, "w": 24, "x": 0, "y": 28 },
           "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
-              "expr": "{namespace=\"$namespace\", pod=~\"$pod\"} | drop __error__, __error_details__ != \"caller=metrics.go\" != \"caller=roundtrip.go\" != \"caller=engine.go\" != \"caller=querier.go\" |~ \"(?i)error|exception|fatal|panic|warn\"",
+              "expr": "{namespace=\"$namespace\", pod=~\"$pod\"} != \"caller=metrics.go\" != \"caller=roundtrip.go\" != \"caller=engine.go\" != \"caller=querier.go\" |~ \"(?i)error|exception|fatal|panic|warn\"",
               "refId": "A",
               "maxLines": 100
             }
