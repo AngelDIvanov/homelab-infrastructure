@@ -19,12 +19,12 @@ alertmanager:
     logLevel: info
   config:
     global:
-      resolve_timeout: 1m
+      resolve_timeout: 30s
       slack_api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
     route:
       group_by: ['alertname', 'namespace', 'severity']
-      group_wait: 30s
-      group_interval: 1m
+      group_wait: 10s
+      group_interval: 30s
       repeat_interval: 4h
       receiver: 'slack-info'
       routes:
