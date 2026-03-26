@@ -9,18 +9,10 @@ data:
     #!/usr/bin/env python3
     """
     Alertmanager -> GitLab Issues webhook receiver
-    Runs inside k3s, receives Alertmanager webhooks and creates/closes GitLab issues.
-    Also performs auto-remediation for known alert patterns.
+    Auto-remediates known alerts via SSH runbooks.
     """
-    
     from http.server import HTTPServer, BaseHTTPRequestHandler
-    import json
-    import urllib.request
-    import urllib.error
-    import os
-    import hashlib
-    import logging
-    import subprocess
+    import json, urllib.request, urllib.error, os, hashlib, logging, subprocess
     
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     log = logging.getLogger(__name__)
@@ -37,18 +29,22 @@ data:
         'info':     ['incident', 'info'],
     }
     
-    # ─────────────────────────────────────────────────────────────
-    #  AUTO-REMEDIATION RUNBOOKS
-    #  Each entry maps an alertname to a list of remediations.
-    #  instance_contains: partial match against the instance label
-    #  host: SSH target
-    #  cmd: command to run
-    #  description: shown in the GitLab issue note
-    # ─────────────────────────────────────────────────────────────
+    WIKI_BASE = 'http://192.168.122.220/root/homelab-infrastructure/-/wikis'
+    
+    RUNBOOK_URLS = {
+        'TrengoAppDown':     f'{WIKI_BASE}/runbooks/TrengoAppDown',
+        'TrengoAppDegraded': f'{WIKI_BASE}/runbooks/TrengoAppDegraded',
+        'NodeMemoryHigh':    f'{WIKI_BASE}/runbooks/NodeMemoryHigh',
+        'NodeMemoryWarning': f'{WIKI_BASE}/runbooks/NodeMemoryWarning',
+        'NodeDiskHigh':      f'{WIKI_BASE}/runbooks/NodeDiskHigh',
+        'PodCrashLooping':   f'{WIKI_BASE}/runbooks/PodCrashLooping',
+        'PodImagePullError': f'{WIKI_BASE}/runbooks/PodImagePullError',
+    }
+    
     RUNBOOKS = {
         'NodeMemoryHigh': [
             {
-                'instance_contains': '192.168.122.220',  # ci-runner
+                'instance_contains': '192.168.122.220',
                 'host': '192.168.122.220',
                 'cmd': 'sudo gitlab-ctl restart',
                 'description': 'Restarted GitLab services on ci-runner to reclaim leaked memory.'
@@ -56,114 +52,63 @@ data:
         ],
         'NodeDiskHigh': [
             {
-                'instance_contains': '192.168.122.218',  # k3s-control
+                'instance_contains': '192.168.122.218',
                 'host': '192.168.122.218',
                 'cmd': 'sudo k3s crictl rmi --prune',
-                'description': 'Pruned unused container images on k3s-control to free disk space.'
+                'description': 'Pruned unused container images on k3s-control.'
             },
             {
-                'instance_contains': '192.168.122.219',  # k3s-worker-1
+                'instance_contains': '192.168.122.219',
                 'host': '192.168.122.219',
                 'cmd': 'sudo k3s crictl rmi --prune',
-                'description': 'Pruned unused container images on k3s-worker-1 to free disk space.'
+                'description': 'Pruned unused container images on k3s-worker-1.'
             },
             {
-                'instance_contains': '192.168.122.230',  # k3s-infra
+                'instance_contains': '192.168.122.230',
                 'host': '192.168.122.230',
                 'cmd': 'sudo k3s crictl rmi --prune',
-                'description': 'Pruned unused container images on k3s-infra to free disk space.'
+                'description': 'Pruned unused container images on k3s-infra.'
             }
         ]
     }
     
-RUNBOOK_URLS = {
-    'TrengoAppDown':     'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/TrengoAppDown',
-    'TrengoAppDegraded': 'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/TrengoAppDegraded',
-    'NodeMemoryHigh':    'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/NodeMemoryHigh',
-    'NodeMemoryWarning': 'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/NodeMemoryWarning',
-    'NodeDiskHigh':      'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/NodeDiskHigh',
-    'PodCrashLooping':   'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/PodCrashLooping',
-    'PodImagePullError': 'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/PodImagePullError',
-}
-    def run_remediation(alert, inc_num):
-        """Run auto-remediation if a runbook exists for this alert."""
+    def run_remediation(alert):
         alertname = alert['labels'].get('alertname', '')
         instance  = alert['labels'].get('instance', '')
-    
         if alertname not in RUNBOOKS:
             return None
-    
         for runbook in RUNBOOKS[alertname]:
             if runbook['instance_contains'] not in instance:
                 continue
-    
             host = runbook['host']
             cmd  = runbook['cmd']
-            desc = runbook['description']
-    
-            log.info(f"Auto-remediation: {alertname} on {host} — running: {cmd}")
-    
+            log.info(f"Auto-remediation: {alertname} on {host} — {cmd}")
             try:
                 result = subprocess.run(
-                    ['ssh', '-i', SSH_KEY,
-                     '-o', 'StrictHostKeyChecking=no',
-                     '-o', 'ConnectTimeout=10',
-                     f'{SSH_USER}@{host}', cmd],
+                    ['ssh', '-i', SSH_KEY, '-o', 'StrictHostKeyChecking=no',
+                     '-o', 'ConnectTimeout=10', f'{SSH_USER}@{host}', cmd],
                     capture_output=True, text=True, timeout=120
                 )
-                if result.returncode == 0:
-                    log.info(f"Remediation succeeded on {host}")
-                    return {
-                        'success': True,
-                        'host': host,
-                        'cmd': cmd,
-                        'description': desc,
-                        'output': result.stdout[:500] if result.stdout else '(no output)'
-                    }
-                else:
-                    log.error(f"Remediation failed on {host}: {result.stderr[:200]}")
-                    return {
-                        'success': False,
-                        'host': host,
-                        'cmd': cmd,
-                        'description': desc,
-                        'output': result.stderr[:500]
-                    }
-            except subprocess.TimeoutExpired:
-                log.error(f"Remediation timed out on {host}")
-                return {
-                    'success': False,
-                    'host': host,
-                    'cmd': cmd,
-                    'description': desc,
-                    'output': 'SSH command timed out after 120s'
-                }
+                success = result.returncode == 0
+                output  = result.stdout[:500] if success else result.stderr[:500]
+                log.info(f"Remediation {'succeeded' if success else 'FAILED'} on {host}")
+                return {'success': success, 'host': host, 'cmd': cmd,
+                        'description': runbook['description'], 'output': output}
             except Exception as e:
                 log.error(f"Remediation error on {host}: {e}")
-                return {
-                    'success': False,
-                    'host': host,
-                    'cmd': cmd,
-                    'description': desc,
-                    'output': str(e)
-                }
-    
+                return {'success': False, 'host': host, 'cmd': cmd,
+                        'description': runbook['description'], 'output': str(e)}
         return None
     
     def inc_number(alert):
-        """Generate a stable INC number from alert fingerprint."""
         fp = alert.get('fingerprint', alert['labels'].get('alertname', 'unknown'))
         return int(hashlib.md5(fp.encode()).hexdigest()[:5], 16) % 90000 + 10000
     
     def gitlab_request(method, path, data=None):
-        """Make a GitLab API request."""
-        url = f"{GITLAB_URL}/api/v4/projects/{GITLAB_PROJECT_ID}{path}"
-        headers = {
-            'PRIVATE-TOKEN': GITLAB_TOKEN,
-            'Content-Type': 'application/json',
-        }
+        url  = f"{GITLAB_URL}/api/v4/projects/{GITLAB_PROJECT_ID}{path}"
+        headers = {'PRIVATE-TOKEN': GITLAB_TOKEN, 'Content-Type': 'application/json'}
         body = json.dumps(data).encode() if data else None
-        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        req  = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req) as resp:
                 return json.loads(resp.read())
@@ -172,7 +117,6 @@ RUNBOOK_URLS = {
             return None
     
     def find_open_issue(inc_num):
-        """Find an open issue with this INC number."""
         issues = gitlab_request('GET', f'/issues?state=opened&search=INC-{inc_num}&labels=incident')
         if issues:
             for issue in issues:
@@ -181,7 +125,6 @@ RUNBOOK_URLS = {
         return None
     
     def create_issue(alert, inc_num, remediation=None):
-        """Create a GitLab issue for a firing alert."""
         severity  = alert['labels'].get('severity', 'info')
         alertname = alert['labels'].get('alertname', 'Unknown')
         namespace = alert['labels'].get('namespace', 'N/A')
@@ -189,12 +132,14 @@ RUNBOOK_URLS = {
         summary   = alert['annotations'].get('summary', alertname)
         desc      = alert['annotations'].get('description', '')
         labels    = SEVERITY_LABELS.get(severity, ['incident'])
+        title     = f"INC-{inc_num} | {severity.upper()} | {alertname}"
     
-        title = f"INC-{inc_num} | {severity.upper()} | {alertname}"
+        runbook_url = RUNBOOK_URLS.get(alertname, '')
+        runbook_section = f"\n### Runbook\n{runbook_url}\n" if runbook_url else ""
     
         remediation_section = ""
         if remediation:
-            status  = "SUCCESS" if remediation['success'] else "FAILED"
+            status = "SUCCESS" if remediation['success'] else "FAILED"
             remediation_section = f"""
     ### Auto-remediation
     - **Status:** {status}
@@ -217,11 +162,7 @@ RUNBOOK_URLS = {
     
     ### Description
     {desc}
-    
-    ### Alert Labels
-    ```
-    {json.dumps(alert['labels'], indent=2)}
-    ```
+    {runbook_section}
     {remediation_section}
     ### Timeline
     - Fired: {alert.get('startsAt', 'N/A')}
@@ -229,76 +170,52 @@ RUNBOOK_URLS = {
     ---
     Auto-created by Alertmanager webhook
     """
-    
         issue = gitlab_request('POST', '/issues', {
-            'title': title,
-            'description': body,
-            'labels': ','.join(labels),
+            'title': title, 'description': body, 'labels': ','.join(labels)
         })
-    
         if issue:
             log.info(f"Created issue #{issue['iid']} — {title}")
         return issue
     
     def close_issue(issue, alert, inc_num):
-        """Close a GitLab issue when alert resolves."""
-        ends_at = alert.get('endsAt', 'N/A')
-    
         gitlab_request('POST', f"/issues/{issue['iid']}/notes", {
-            'body': f"RESOLVED — Alert cleared at {ends_at}\n\nAuto-resolved by Alertmanager"
+            'body': f"RESOLVED — Alert cleared at {alert.get('endsAt', 'N/A')}\n\nAuto-resolved by Alertmanager webhook"
         })
-    
         gitlab_request('PUT', f"/issues/{issue['iid']}", {'state_event': 'close'})
         log.info(f"Closed issue #{issue['iid']} — INC-{inc_num}")
     
     class WebhookHandler(BaseHTTPRequestHandler):
         def do_POST(self):
-            length = int(self.headers.get('Content-Length', 0))
-            body   = self.rfile.read(length)
-    
-            try:
-                payload = json.loads(body)
-            except json.JSONDecodeError:
-                self.send_response(400)
-                self.end_headers()
-                return
+            body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+            try:    payload = json.loads(body)
+            except: self.send_response(400); self.end_headers(); return
     
             status = payload.get('status', '')
             alerts = payload.get('alerts', [])
-    
             log.info(f"Received {status} with {len(alerts)} alerts")
     
             for alert in alerts:
-                inc_num   = inc_number(alert)
-                alertname = alert['labels'].get('alertname', 'Unknown')
-    
+                inc_num = inc_number(alert)
                 if status == 'firing':
-                    existing = find_open_issue(inc_num)
-                    if not existing:
-                        # Run remediation before creating issue
-                        remediation = run_remediation(alert, inc_num)
+                    if not find_open_issue(inc_num):
+                        remediation = run_remediation(alert)
                         create_issue(alert, inc_num, remediation)
                     else:
                         log.info(f"Issue already exists for INC-{inc_num} — skipping")
-    
                 elif status == 'resolved':
-                    existing = find_open_issue(inc_num)
-                    if existing:
-                        close_issue(existing, alert, inc_num)
+                    issue = find_open_issue(inc_num)
+                    if issue:
+                        close_issue(issue, alert, inc_num)
                     else:
                         log.info(f"No open issue found for INC-{inc_num} — nothing to close")
     
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'ok')
+            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
     
-        def log_message(self, format, *args):
-            pass  # Suppress default HTTP logs
+        def log_message(self, *args): pass
     
     if __name__ == '__main__':
-        port = int(os.environ.get('PORT', 8080))
-        log.info(f"Starting webhook on :{port} | GitLab: {GITLAB_URL} | Project: {GITLAB_PROJECT_ID}")
-        HTTPServer(('0.0.0.0', port), WebhookHandler).serve_forever()
+        log.info(f"Starting webhook on :8080 | GitLab: {GITLAB_URL} | Project: {GITLAB_PROJECT_ID}")
+        HTTPServer(('0.0.0.0', 8080), WebhookHandler).serve_forever()
 
 ---
 apiVersion: apps/v1
