@@ -7,6 +7,13 @@ grafana:
     nodePort: 30080
   initChownData:
     enabled: false
+  nodeSelector:
+    kubernetes.io/hostname: k3s-infra
+  tolerations:
+    - key: node-role
+      operator: Equal
+      value: infra
+      effect: NoSchedule
 
 prometheus:
   verticalPodAutoscaler:
