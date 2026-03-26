@@ -1,53 +1,28 @@
 ---
-- name: Install additional tools on all nodes
+- name: Install demo tools on all k8s nodes
   hosts: k8s_cluster
   become: yes
 
   tasks:
+
     - name: Update apt cache
       apt:
         update_cache: yes
         cache_valid_time: 3600
       ignore_errors: yes
-      tags: always
 
-    # ===== CLI TOOLS (apt) =====
-    - name: Install CLI tools
+    # ── neofetch ──────────────────────────────────────────────
+    - name: Install neofetch
       apt:
-        name:
-          - htop
-          - vim
-          - jq
-          - tree
-          - ncdu
-          - iotop
-          - tmux
-          - screen
-          - nmap
-          - net-tools
-          - dnsutils
-          - tcpdump
-          - rsync
-          - unzip
-          - zip
-          - neofetch
-          - bat
-          - fd-find
-          - ripgrep
-          - sysstat
-          - iftop
-          - nethogs
-          - nload
+        name: neofetch
         state: present
       ignore_errors: yes
-      tags: tools
 
-    # ===== BTOP (manual) =====
-    - name: Check if btop is installed
+    # ── btop ──────────────────────────────────────────────────
+    - name: Check if btop is already installed
       stat:
         path: /usr/local/bin/btop
       register: btop_check
-      tags: btop
 
     - name: Install btop
       shell: |
@@ -58,39 +33,14 @@
         chmod 755 /usr/local/bin/btop
         rm -rf /tmp/btop /tmp/btop-x86_64-linux-musl.tbz
       when: not btop_check.stat.exists
-      tags: btop
 
-    # ===== LAZYDOCKER =====
-    - name: Check if lazydocker is installed
-      stat:
-        path: /usr/local/bin/lazydocker
-      register: lazydocker_check
-      tags: lazydocker
-
-    - name: Install lazydocker
-      shell: |
-        curl -fsSL https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
-        for dir in /root/.local/bin /home/andy/.local/bin; do
-          if [ -f "$dir/lazydocker" ]; then
-            mv "$dir/lazydocker" /usr/local/bin/lazydocker
-            chmod 755 /usr/local/bin/lazydocker
-            break
-          fi
-        done
-      args:
-        creates: /usr/local/bin/lazydocker
-      when: not lazydocker_check.stat.exists
-      tags: lazydocker
-
-    # ===== K9S (k8s nodes only) =====
-    - name: Check if k9s is installed
+    # ── k9s ───────────────────────────────────────────────────
+    - name: Check if k9s is already installed
       stat:
         path: /usr/local/bin/k9s
       register: k9s_check
-      when: "'k8s_cluster' in group_names"
-      tags: k9s
 
-    - name: Download and install k9s
+    - name: Install k9s
       shell: |
         cd /tmp
         wget -q https://github.com/derailed/k9s/releases/download/v0.32.4/k9s_Linux_amd64.tar.gz
@@ -98,70 +48,17 @@
         mv k9s /usr/local/bin/k9s
         chmod 755 /usr/local/bin/k9s
         rm -f /tmp/k9s_Linux_amd64.tar.gz
-      when: "'k8s_cluster' in group_names and not k9s_check.stat.exists"
-      tags: k9s
+      when: not k9s_check.stat.exists
 
-    # ===== SHELL CONFIGURATION =====
-    - name: Create bash aliases for andy
-      blockinfile:
-        path: /home/andy/.bash_aliases
-        create: yes
-        owner: andy
-        group: andy
-        mode: '0644'
-        block: |
-          alias k='kubectl'
-          alias kgp='kubectl get pods'
-          alias kgpa='kubectl get pods -A'
-          alias kgs='kubectl get svc'
-          alias kgn='kubectl get nodes'
-          alias kd='kubectl describe'
-          alias kl='kubectl logs'
-          alias klf='kubectl logs -f'
-          alias ll='ls -alF'
-          alias la='ls -A'
-          alias ..='cd ..'
-          alias ...='cd ../..'
-          alias ports='netstat -tulanp'
-          alias meminfo='free -h'
-          alias diskinfo='df -h'
-          alias d='docker'
-          alias dps='docker ps'
-          alias dpsa='docker ps -a'
-          alias di='docker images'
-      tags: aliases
-
-    - name: Configure vim for andy
-      copy:
-        dest: /home/andy/.vimrc
-        owner: andy
-        group: andy
-        mode: '0644'
-        content: |
-          syntax on
-          set number
-          set tabstop=2
-          set shiftwidth=2
-          set expandtab
-          set hlsearch
-          set incsearch
-          set ignorecase
-          set ruler
-          set mouse=a
-          colorscheme desert
-      tags: vim
-
-    # ===== SUMMARY =====
+    # ── verify ────────────────────────────────────────────────
     - name: Verify installations
       shell: |
-        echo "btop:       $(btop --version 2>/dev/null || echo 'not installed')"
-        echo "lazydocker: $(/usr/local/bin/lazydocker --version 2>/dev/null | head -1 || echo 'not installed')"
-        echo "k9s:        $(/usr/local/bin/k9s version --short 2>/dev/null || echo 'not installed')"
+        echo "neofetch: $(neofetch --version 2>/dev/null || echo 'not installed')"
+        echo "btop:     $(btop --version 2>/dev/null || echo 'not installed')"
+        echo "k9s:      $(/usr/local/bin/k9s version --short 2>/dev/null || echo 'not installed')"
       register: summary
       changed_when: false
-      tags: always
 
     - name: Display summary
       debug:
         msg: "{{ summary.stdout_lines }}"
-      tags: always
