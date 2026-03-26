@@ -243,7 +243,7 @@ spec:
             - name: GITLAB_URL
               value: "http://192.168.122.220"
             - name: GITLAB_PROJECT_ID
-              value: "1"
+              value: "2"
             - name: GITLAB_TOKEN
               valueFrom:
                 secretKeyRef:
