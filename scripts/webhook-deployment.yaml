@@ -29,7 +29,7 @@ data:
         'info':     ['incident', 'info'],
     }
     
-    WIKI_BASE = 'http://192.168.122.220/root/homelab-infrastructure/-/wikis'
+    WIKI_BASE = 'http://192.168.122.220/root/trengo-search/-/wikis'
     
     RUNBOOK_URLS = {
         'TrengoAppDown':     f'{WIKI_BASE}/runbooks/TrengoAppDown',
