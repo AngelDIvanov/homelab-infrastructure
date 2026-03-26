@@ -31,35 +31,30 @@ alertmanager:
       group_wait: 10s
       group_interval: 30s
       repeat_interval: 4h
-      receiver: 'gitlab-webhook'
+      receiver: gitlab-webhook
       routes:
-        - matchers:
-            - name: severity
-              value: critical
-          receiver: 'gitlab-webhook'
+        - match:
+            severity: critical
+          receiver: gitlab-webhook
           repeat_interval: 4h
-        - matchers:
-            - name: severity
-              value: warning
-          receiver: 'gitlab-webhook'
+        - match:
+            severity: warning
+          receiver: gitlab-webhook
           repeat_interval: 4h
-        - matchers:
-            - name: severity
-              value: info
-          receiver: 'gitlab-webhook'
+        - match:
+            severity: info
+          receiver: gitlab-webhook
           repeat_interval: 24h
     receivers:
-      - name: 'gitlab-webhook'
+      - name: gitlab-webhook
         webhook_configs:
           - url: 'http://alertmanager-webhook:8080'
             send_resolved: true
     inhibit_rules:
-      - source_matchers:
-          - name: severity
-            value: critical
-        target_matchers:
-          - name: severity
-            value: warning
+      - source_match:
+          severity: critical
+        target_match:
+          severity: warning
         equal:
           - alertname
           - namespace
