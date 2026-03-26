@@ -1,133 +1,111 @@
 ---
-- name: Uninstall additional tools from all nodes
-  hosts: k8s_cluster
+- name: Remove applications from nodes
+  hosts: all
   become: yes
-
+  
   vars_prompt:
-    - name: confirm
-      prompt: |
-        Available tags: tools, btop, lazydocker, k9s, aliases, vim
-        No tags = removes everything listed above.
-        Type 'yes' to confirm
+    - name: packages_to_remove
+      prompt: "Enter packages to remove (comma-separated, e.g., htop,neofetch)"
+      private: no
+
+    - name: confirm_removal
+      prompt: "Are you sure you want to remove these packages? (yes/no)"
       private: no
       default: "no"
 
   tasks:
-
     - name: Abort if not confirmed
       fail:
-        msg: "Cancelled."
-      when: confirm != "yes"
-      tags: always
+        msg: "Removal cancelled by user"
+      when: confirm_removal != "yes"
 
-    # ===== CLI TOOLS (apt) =====
-    - name: Remove CLI tools
+    - name: Parse package list
+      set_fact:
+        package_list: "{{ packages_to_remove.split(',') | map('trim') | list }}"
+
+    - name: Display packages to remove
+      debug:
+        msg: "Will remove: {{ package_list }}"
+
+    - name: Remove specified packages
       apt:
-        name:
-          - htop
-          - vim
-          - jq
-          - tree
-          - ncdu
-          - iotop
-          - tmux
-          - screen
-          - nmap
-          - net-tools
-          - dnsutils
-          - tcpdump
-          - rsync
-          - unzip
-          - zip
-          - neofetch
-          - bat
-          - fd-find
-          - ripgrep
-          - sysstat
-          - iftop
-          - nethogs
-          - nload
+        name: "{{ package_list }}"
         state: absent
         purge: yes
-      ignore_errors: yes
-      tags: tools
+      register: removal_result
 
-    # ===== BTOP =====
-    - name: Remove btop binary
-      file:
-        path: /usr/local/bin/btop
-        state: absent
-      tags: btop
-
-    - name: Remove btop apt package
-      apt:
-        name: btop
-        state: absent
-        purge: yes
-      ignore_errors: yes
-      tags: btop
-
-    - name: Remove btop config
-      file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /root/.config/btop
-        - /home/andy/.config/btop
-      tags: btop
-
-    # ===== LAZYDOCKER =====
-    - name: Remove lazydocker from all locations
-      file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /usr/local/bin/lazydocker
-        - /root/.local/bin/lazydocker
-        - /home/andy/.local/bin/lazydocker
-      tags: lazydocker
-
-    # ===== K9S =====
-    - name: Remove k9s binary
-      file:
-        path: /usr/local/bin/k9s
-        state: absent
-      when: "'k8s_cluster' in group_names"
-      tags: k9s
-
-    # ===== SHELL CONFIGURATION =====
-    - name: Remove bash aliases
-      file:
-        path: /home/andy/.bash_aliases
-        state: absent
-      tags: aliases
-
-    - name: Remove vim config
-      file:
-        path: /home/andy/.vimrc
-        state: absent
-      tags: vim
-
-    # ===== CLEANUP =====
-    - name: Clean up apt
+    - name: Clean up dependencies
       apt:
         autoremove: yes
         autoclean: yes
-      tags: always
 
-    # ===== SUMMARY =====
-    - name: Check remaining binaries
-      stat:
-        path: "/usr/local/bin/{{ item }}"
-      loop:
-        - btop
-        - lazydocker
-        - k9s
-      register: check
-      tags: always
-
-    - name: Summary
+    - name: Display removal result
       debug:
-        msg: "{{ item.item }}: {{ 'still present' if item.stat.exists else 'removed' }}"
-      loop: "{{ check.results }}"
+        msg: "Packages removed successfully from {{ inventory_hostname }}"
+      when: removal_result.changed
+
+---
+# Alternative: Remove predefined groups of packages
+- name: Remove package groups
+  hosts: all
+  become: yes
+  
+  vars:
+    # Define package groups that can be removed
+    monitoring_packages:
+      - htop
+      - btop
+      - iotop
+      - iftop
+      - nethogs
+      - nload
+      - sysstat
+
+    optional_packages:
+      - neofetch
+      - bat
+      - fd-find
+      - ripgrep
+
+    dev_packages:
+      - git
+      - vim
+      - tmux
+      - screen
+
+  tasks:
+    - name: Remove monitoring packages
+      apt:
+        name: "{{ monitoring_packages }}"
+        state: absent
+        purge: yes
+      when: remove_monitoring | default(false) | bool
+      tags: monitoring
+
+    - name: Remove optional packages
+      apt:
+        name: "{{ optional_packages }}"
+        state: absent
+        purge: yes
+      when: remove_optional | default(false) | bool
+      tags: optional
+
+    - name: Remove k9s
+      file:
+        path: /usr/local/bin/k9s
+        state: absent
+      when: remove_k9s | default(false) | bool
+      tags: k9s
+
+    - name: Remove lazydocker
+      file:
+        path: /usr/local/bin/lazydocker
+        state: absent
+      when: remove_lazydocker | default(false) | bool
+      tags: lazydocker
+
+    - name: Clean up after removal
+      apt:
+        autoremove: yes
+        autoclean: yes
       tags: always
