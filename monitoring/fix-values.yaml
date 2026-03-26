@@ -11,97 +11,58 @@ grafana:
 prometheus:
   verticalPodAutoscaler:
     enabled: false
+  service:
+    type: NodePort
+    nodePort: 30090
 
 alertmanager:
   verticalPodAutoscaler:
     enabled: false
   alertmanagerSpec:
     logLevel: info
+  service:
+    type: NodePort
+    nodePort: 30093
   config:
     global:
       resolve_timeout: 30s
-      slack_api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
     route:
       group_by: ['alertname', 'namespace', 'severity']
       group_wait: 10s
       group_interval: 30s
       repeat_interval: 4h
-      receiver: 'slack-info'
+      receiver: 'gitlab-webhook'
       routes:
-        - match:
-            severity: critical
-          receiver: 'slack-critical'
-          repeat_interval: 4h
-          continue: true
-        - match:
-            severity: critical
+        - matchers:
+            - name: severity
+              value: critical
           receiver: 'gitlab-webhook'
           repeat_interval: 4h
-        - match:
-            severity: warning
-          receiver: 'slack-warning'
+        - matchers:
+            - name: severity
+              value: warning
+          receiver: 'gitlab-webhook'
           repeat_interval: 4h
-        - match:
-            severity: info
-          receiver: 'slack-info'
+        - matchers:
+            - name: severity
+              value: info
+          receiver: 'gitlab-webhook'
           repeat_interval: 24h
     receivers:
-      - name: 'slack-critical'
-        slack_configs:
-          - channel: '#incidents'
-            api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
-            send_resolved: true
-            color: '{{ if eq .Status "resolved" }}good{{ else }}danger{{ end }}'
-            title: '{{ if eq .Status "resolved" }}RESOLVED{{ else }}CRITICAL{{ end }} | {{ .GroupLabels.alertname }}'
-            title_link: 'http://192.168.122.218:30090/alerts'
-            text: |
-              {{ range .Alerts -}}
-              *Summary:* {{ .Annotations.summary }}
-              *Description:* {{ .Annotations.description }}
-              *Namespace:* `{{ .Labels.namespace }}`
-              *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
-              {{ if eq $.Status "resolved" }}*Resolved:* {{ .EndsAt.Format "2006-01-02 15:04:05 UTC" }}{{ else }}*On-call:* <!here> <!here> — please investigate{{ end }}
-              {{ end }}
-            footer: 'Homelab Alertmanager | http://192.168.122.218:30093'
       - name: 'gitlab-webhook'
         webhook_configs:
           - url: 'http://alertmanager-webhook:8080'
             send_resolved: true
-      - name: 'slack-warning'
-        slack_configs:
-          - channel: '#all-homelab-alerts'
-            send_resolved: true
-            color: '{{ if eq .Status "resolved" }}good{{ else }}warning{{ end }}'
-            title: '{{ if eq .Status "resolved" }}RESOLVED{{ else }}WARNING{{ end }} | {{ .GroupLabels.alertname }}'
-            title_link: 'http://192.168.122.218:30090/alerts'
-            text: |
-              {{ range .Alerts -}}
-              *Summary:* {{ .Annotations.summary }}
-              *Description:* {{ .Annotations.description }}
-              *Namespace:* `{{ .Labels.namespace }}`
-              *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
-              {{ if eq $.Status "resolved" }}*Resolved:* {{ .EndsAt.Format "2006-01-02 15:04:05 UTC" }}{{ else }}*FYI:* <!here> <!here>{{ end }}
-              {{ end }}
-            footer: 'Homelab Alertmanager | http://192.168.122.218:30093'
-      - name: 'slack-info'
-        slack_configs:
-          - channel: '#all-homelab-alerts'
-            send_resolved: true
-            color: 'good'
-            title: '{{ if eq .Status "resolved" }}RESOLVED{{ else }}INFO{{ end }} | {{ .GroupLabels.alertname }}'
-            title_link: 'http://192.168.122.218:30090/alerts'
-            text: |
-              {{ range .Alerts -}}
-              *Summary:* {{ .Annotations.summary }}
-              *Description:* {{ .Annotations.description }}
-              {{ end }}
-            footer: 'Homelab Alertmanager | http://192.168.122.218:30093'
     inhibit_rules:
-      - source_match:
-          severity: critical
-        target_match:
-          severity: warning
-        equal: ['alertname', 'namespace']
+      - source_matchers:
+          - name: severity
+            value: critical
+        target_matchers:
+          - name: severity
+            value: warning
+        equal:
+          - alertname
+          - namespace
 
 defaultRules:
   disabled:
