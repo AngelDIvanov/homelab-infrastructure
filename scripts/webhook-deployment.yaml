@@ -76,6 +76,15 @@ data:
         ]
     }
     
+RUNBOOK_URLS = {
+    'TrengoAppDown':     'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/TrengoAppDown',
+    'TrengoAppDegraded': 'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/TrengoAppDegraded',
+    'NodeMemoryHigh':    'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/NodeMemoryHigh',
+    'NodeMemoryWarning': 'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/NodeMemoryWarning',
+    'NodeDiskHigh':      'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/NodeDiskHigh',
+    'PodCrashLooping':   'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/PodCrashLooping',
+    'PodImagePullError': 'http://192.168.122.220/root/homelab-infrastructure/-/wikis/runbooks/PodImagePullError',
+}
     def run_remediation(alert, inc_num):
         """Run auto-remediation if a runbook exists for this alert."""
         alertname = alert['labels'].get('alertname', '')
