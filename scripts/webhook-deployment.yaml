@@ -8,11 +8,14 @@ data:
   webhook.py: |
     #!/usr/bin/env python3
     """
-    Alertmanager -> GitLab Issues webhook receiver
-    Auto-remediates known alerts via SSH runbooks.
+    Alertmanager -> Slack + GitLab webhook receiver.
+    Handles ALL notifications — Alertmanager routes everything here.
+    CRITICAL: GitLab issue + Slack with runbook + incident URL
+    WARNING:  Slack only with runbook link
+    INFO:     Slack only simple message
     """
     from http.server import HTTPServer, BaseHTTPRequestHandler
-    import json, urllib.request, urllib.error, os, hashlib, logging, subprocess
+    import json, urllib.request, urllib.error, urllib.parse, os, hashlib, logging, subprocess
     
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     log = logging.getLogger(__name__)
@@ -23,13 +26,23 @@ data:
     SSH_KEY           = os.environ.get('SSH_KEY',           '/root/.ssh/id_rsa')
     SSH_USER          = os.environ.get('SSH_USER',          'andy')
     
+    SLACK_CRITICAL_URL = os.environ.get('SLACK_CRITICAL_URL', '')
+    SLACK_WARNING_URL  = os.environ.get('SLACK_WARNING_URL',  '')
+    SLACK_INFO_URL     = os.environ.get('SLACK_INFO_URL',     '')
+    
+    SLACK_CRITICAL_CHANNEL = '#incidents'
+    SLACK_WARNING_CHANNEL  = '#incidents'
+    SLACK_INFO_CHANNEL     = '#all-homelab-alerts'
+    
+    ONCALL = '<!here> <!here>'
+    
     SEVERITY_LABELS = {
         'critical': ['incident', 'critical', 'bug'],
         'warning':  ['incident', 'warning'],
         'info':     ['incident', 'info'],
     }
     
-    WIKI_BASE = 'http://192.168.122.220/root/trengo-search/-/wikis'
+    WIKI_BASE = 'http://192.168.122.220/root/homelab-infrastructure/-/wikis'
     
     RUNBOOK_URLS = {
         'TrengoAppDown':     f'{WIKI_BASE}/runbooks/TrengoAppDown',
@@ -39,6 +52,12 @@ data:
         'NodeDiskHigh':      f'{WIKI_BASE}/runbooks/NodeDiskHigh',
         'PodCrashLooping':   f'{WIKI_BASE}/runbooks/PodCrashLooping',
         'PodImagePullError': f'{WIKI_BASE}/runbooks/PodImagePullError',
+    }
+    
+    POSTMORTEM_URLS = {
+        'TrengoAppDown':     f'{WIKI_BASE}/post-mortems/PM-001-Grafana-Dashboards-Lost',
+        'NodeMemoryHigh':    f'{WIKI_BASE}/post-mortems/PM-003-CI-Runner-OOM',
+        'PodImagePullError': f'{WIKI_BASE}/post-mortems/PM-002-Alertmanager-Trunc-Function',
     }
     
     RUNBOOKS = {
@@ -116,6 +135,19 @@ data:
             log.error(f"GitLab API error {e.code}: {e.read()}")
             return None
     
+    def slack_send(webhook_url, payload):
+        if not webhook_url:
+            log.warning("Slack webhook URL not configured — skipping")
+            return
+        body = json.dumps(payload).encode()
+        req  = urllib.request.Request(webhook_url, data=body,
+                                       headers={'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req) as resp:
+                log.info(f"Slack notification sent: {resp.status}")
+        except Exception as e:
+            log.error(f"Slack error: {e}")
+    
     def find_open_issue(inc_num):
         issues = gitlab_request('GET', f'/issues?state=opened&search=INC-{inc_num}&labels=incident')
         if issues:
@@ -134,8 +166,10 @@ data:
         labels    = SEVERITY_LABELS.get(severity, ['incident'])
         title     = f"INC-{inc_num} | {severity.upper()} | {alertname}"
     
-        runbook_url = RUNBOOK_URLS.get(alertname, '')
+        runbook_url  = RUNBOOK_URLS.get(alertname, '')
+        postmortem_url = POSTMORTEM_URLS.get(alertname, '')
         runbook_section = f"\n### Runbook\n{runbook_url}\n" if runbook_url else ""
+        postmortem_section = f"\n### Related Post-Mortem\n{postmortem_url}\n" if postmortem_url else ""
     
         remediation_section = ""
         if remediation:
@@ -162,8 +196,7 @@ data:
     
     ### Description
     {desc}
-    {runbook_section}
-    {remediation_section}
+    {runbook_section}{postmortem_section}{remediation_section}
     ### Timeline
     - Fired: {alert.get('startsAt', 'N/A')}
     
@@ -184,6 +217,97 @@ data:
         gitlab_request('PUT', f"/issues/{issue['iid']}", {'state_event': 'close'})
         log.info(f"Closed issue #{issue['iid']} — INC-{inc_num}")
     
+    def notify_firing(alert, inc_num, issue=None, remediation=None):
+        severity  = alert['labels'].get('severity', 'info')
+        alertname = alert['labels'].get('alertname', 'Unknown')
+        namespace = alert['labels'].get('namespace', 'N/A')
+        summary   = alert['annotations'].get('summary', alertname)
+        desc      = alert['annotations'].get('description', '')
+        started   = alert.get('startsAt', 'N/A')
+        runbook_url   = RUNBOOK_URLS.get(alertname, '')
+        postmortem_url = POSTMORTEM_URLS.get(alertname, '')
+    
+        if severity == 'critical':
+            webhook_url = SLACK_CRITICAL_URL
+            channel     = SLACK_CRITICAL_CHANNEL
+            color       = 'danger'
+            header      = f"CRITICAL | {alertname}"
+            oncall_line = f"*On-call:* {ONCALL} — please investigate"
+        elif severity == 'warning':
+            webhook_url = SLACK_WARNING_URL or SLACK_CRITICAL_URL
+            channel     = SLACK_WARNING_CHANNEL
+            color       = 'warning'
+            header      = f"WARNING | {alertname}"
+            oncall_line = f"*FYI:* {ONCALL}"
+        else:
+            webhook_url = SLACK_INFO_URL or SLACK_CRITICAL_URL
+            channel     = SLACK_INFO_CHANNEL
+            color       = 'good'
+            header      = f"INFO | {alertname}"
+            oncall_line = ''
+    
+        text_lines = [
+            f"*Summary:* {summary}",
+            f"*Description:* {desc}",
+            f"*Namespace:* `{namespace}`",
+            f"*Started:* {started}",
+        ]
+        if oncall_line:
+            text_lines.append(oncall_line)
+        if runbook_url:
+            text_lines.append(f"*Runbook:* {runbook_url}")
+        if postmortem_url:
+            text_lines.append(f"*Post-mortem:* {postmortem_url}")
+        if issue:
+            text_lines.append(f"*Incident:* {issue.get('web_url', '')}")
+        if remediation:
+            status = "SUCCESS" if remediation['success'] else "FAILED"
+            text_lines.append(f"*Auto-remediation:* {status} — {remediation['description']}")
+    
+        payload = {
+            'channel': channel,
+            'attachments': [{
+                'color': color,
+                'title': header,
+                'title_link': f'http://192.168.122.218:30090/alerts',
+                'text': '\n'.join(text_lines),
+                'footer': 'Homelab Alertmanager | http://192.168.122.218:30093'
+            }]
+        }
+        slack_send(webhook_url, payload)
+    
+    def notify_resolved(alert, inc_num, issue=None):
+        severity  = alert['labels'].get('severity', 'info')
+        alertname = alert['labels'].get('alertname', 'Unknown')
+        namespace = alert['labels'].get('namespace', 'N/A')
+        summary   = alert['annotations'].get('summary', alertname)
+        started   = alert.get('startsAt', 'N/A')
+        ended     = alert.get('endsAt', 'N/A')
+    
+        webhook_url = SLACK_CRITICAL_URL if severity == 'critical' else (SLACK_WARNING_URL or SLACK_CRITICAL_URL)
+        channel     = SLACK_CRITICAL_CHANNEL if severity == 'critical' else SLACK_WARNING_CHANNEL
+    
+        text_lines = [
+            f"*Summary:* {summary}",
+            f"*Namespace:* `{namespace}`",
+            f"*Started:* {started}",
+            f"*Resolved:* {ended}",
+        ]
+        if issue:
+            text_lines.append(f"*Incident:* {issue.get('web_url', '')} (closed)")
+    
+        payload = {
+            'channel': channel,
+            'attachments': [{
+                'color': 'good',
+                'title': f"RESOLVED | {alertname}",
+                'title_link': f'http://192.168.122.218:30090/alerts',
+                'text': '\n'.join(text_lines),
+                'footer': 'Homelab Alertmanager | http://192.168.122.218:30093'
+            }]
+        }
+        slack_send(webhook_url, payload)
+    
     class WebhookHandler(BaseHTTPRequestHandler):
         def do_POST(self):
             body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
@@ -195,19 +319,27 @@ data:
             log.info(f"Received {status} with {len(alerts)} alerts")
     
             for alert in alerts:
-                inc_num = inc_number(alert)
+                inc_num   = inc_number(alert)
+                severity  = alert['labels'].get('severity', 'info')
+                alertname = alert['labels'].get('alertname', 'Unknown')
+    
                 if status == 'firing':
-                    if not find_open_issue(inc_num):
+                    existing = find_open_issue(inc_num)
+                    if not existing:
                         remediation = run_remediation(alert)
-                        create_issue(alert, inc_num, remediation)
+                        if severity == 'critical':
+                            issue = create_issue(alert, inc_num, remediation)
+                            notify_firing(alert, inc_num, issue, remediation)
+                        else:
+                            notify_firing(alert, inc_num, None, remediation)
                     else:
                         log.info(f"Issue already exists for INC-{inc_num} — skipping")
+    
                 elif status == 'resolved':
-                    issue = find_open_issue(inc_num)
+                    issue = find_open_issue(inc_num) if severity == 'critical' else None
                     if issue:
                         close_issue(issue, alert, inc_num)
-                    else:
-                        log.info(f"No open issue found for INC-{inc_num} — nothing to close")
+                    notify_resolved(alert, inc_num, issue)
     
             self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
     
@@ -243,7 +375,7 @@ spec:
             - name: GITLAB_URL
               value: "http://192.168.122.220"
             - name: GITLAB_PROJECT_ID
-              value: "2"
+              value: "1"
             - name: GITLAB_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -253,6 +385,16 @@ spec:
               value: "/root/.ssh/id_rsa"
             - name: SSH_USER
               value: "andy"
+            - name: SLACK_CRITICAL_URL
+              valueFrom:
+                secretKeyRef:
+                  name: slack-webhook-urls
+                  key: critical
+            - name: SLACK_WARNING_URL
+              valueFrom:
+                secretKeyRef:
+                  name: slack-webhook-urls
+                  key: warning
           volumeMounts:
             - name: webhook-script
               mountPath: /app
