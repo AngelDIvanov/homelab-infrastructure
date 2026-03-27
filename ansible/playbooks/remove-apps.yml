@@ -43,8 +43,6 @@
       debug:
         msg: "Packages removed successfully from {{ inventory_hostname }}"
       when: removal_result.changed
-
----
 # Alternative: Remove predefined groups of packages
 - name: Remove package groups
   hosts: all
