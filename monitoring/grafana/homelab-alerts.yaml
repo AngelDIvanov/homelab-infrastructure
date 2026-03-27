@@ -18,7 +18,7 @@ spec:
             severity: critical
           annotations:
             summary: "Trengo app is completely down"
-            description: "Deployment trengo-search has 0 available replicas for more than 1 minute."
+            description: "Deployment trengo-search has 0 available replicas for more than 30 seconds."
 
         - alert: TrengoAppDegraded
           expr: kube_deployment_status_replicas_available{deployment="trengo-search"} < kube_deployment_spec_replicas{deployment="trengo-search"}
