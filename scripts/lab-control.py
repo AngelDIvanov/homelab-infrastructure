@@ -816,11 +816,12 @@ def do_ram_nuke_test():
 
     # ── Dynamic calculation ───────────────────────────────────
     mem_raw = run(
-        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m | awk \'NR==2{{print $2, $3}}\'"',
+        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m"',
         capture=True
-    ).stdout.strip().split()
-    total_mb  = int(mem_raw[0])
-    used_mb   = int(mem_raw[1])
+    ).stdout.strip().splitlines()
+    mem_line = [x for x in mem_raw if x.startswith('Mem:')][0].split()
+    total_mb  = int(mem_line[1])
+    used_mb   = int(mem_line[2])
     current_pct = (used_mb / total_mb) * 100
     phase1_mb = int(total_mb * 0.87) - used_mb + 200   # aim for 87%
     phase2_mb = int(total_mb * 0.05) + 300              # push extra ~5% more
