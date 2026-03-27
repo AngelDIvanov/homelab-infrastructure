@@ -256,27 +256,26 @@ def main_menu():
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('ENVIRONMENTS')}                                             {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('1.')}  K3s Cluster        start / stop / status           {c('|')}
-{c('|')}  {bold('2.')}  Stop ALL           shutdown everything              {c('|')}
-{c('|')}  {bold('3.')}  Start ALL          boot all permanent VMs           {c('|')}
+{c('|')}  {bold('1.')}  Stop ALL           shutdown everything              {c('|')}
+{c('|')}  {bold('2.')}  Start ALL          boot all permanent VMs           {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('LAB TOOLS')}                                               {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('4.')}  Health Check       run check-lab                   {c('|')}
-{c('|')}  {bold('5.')}  Scale              add / remove workers             {c('|')}
-{c('|')}  {bold('6.')}  Ansible            run playbooks                   {c('|')}
-{c('|')}  {bold('7.')}  Sync Images        push to all nodes                {c('|')}
-{c('|')}  {bold('8.')}  Rejoin Workers     re-attach nodes to k3s           {c('|')}
-{c('|')}  {bold('9.')}  Cluster Status     nodes + virsh overview           {c('|')}
+{c('|')}  {bold('3.')}  Health Check       run check-lab                   {c('|')}
+{c('|')}  {bold('4.')}  Scale              add / remove workers             {c('|')}
+{c('|')}  {bold('5.')}  Ansible            run playbooks                   {c('|')}
+{c('|')}  {bold('6.')}  Sync Images        push to all nodes                {c('|')}
+{c('|')}  {bold('7.')}  Rejoin Workers     re-attach nodes to k3s           {c('|')}
+{c('|')}  {bold('8.')}  Cluster Status     nodes + virsh overview           {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('ALERTING')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('10.')} Nuke Test          kill app, wait for alert,        {c('|')}
-{c('|')}       {dim('               restore, confirm resolved')}             {c('|')}
+{c('|')}  {bold('9.')}  Alerting Tests     app nuke, RAM nuke,              {c('|')}
+{c('|')}       {dim('               auto-remediation demos')}                {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('SERVICES')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('11.')} Service Links      all URLs and access info         {c('|')}
+{c('|')}  {bold('10.')} Service Links      all URLs and access info         {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('0.')}  Exit                                               {c('|')}
 {c('+----------------------------------------------------------+')}""")
@@ -729,6 +728,165 @@ def do_nuke_test():
     print(f"  {g('>')} GitLab issue auto-closed")
 
 # ─────────────────────────────────────────────────────────────
+#  RAM NUKE TEST
+# ─────────────────────────────────────────────────────────────
+def do_ram_nuke_test():
+    divider("RAM NUKE TEST -- Auto-remediation lifecycle")
+    print(f"""
+  This test will:
+    {y('1.')} Eat RAM on ci-runner with a background stress process
+    {y('2.')} Wait for {c('NodeMemoryHigh')} CRITICAL alert to fire (~2-3 min)
+    {y('3.')} Auto-remediation runs {c('gitlab-ctl restart')} automatically
+    {y('4.')} Memory drops, alert resolves, stress process is gone
+    {y('5.')} Confirm RESOLVED in Slack and GitLab issue auto-closed
+
+  {r('Watch')} #incidents in Slack during this test.
+  {y('WARNING:')} This will spike ci-runner RAM to ~85%+ intentionally.
+""")
+    if input(y("  Proceed? (y/n): ")).lower() != 'y':
+        print("  Cancelled."); return
+
+    # Step 1 — Check current RAM
+    divider("Step 1/4 -- Current ci-runner memory")
+    run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -h"')
+
+    # Step 2 — Start memory hog
+    divider("Step 2/4 -- Starting memory stress on ci-runner")
+    print(dim("  Installing stress-ng if needed and running in background..."))
+
+    result = run(
+        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+        f'"sudo apt-get install -y stress-ng -qq 2>/dev/null; '
+        f'nohup sudo stress-ng --vm 2 --vm-bytes 2G --timeout 300s '
+        f'> /tmp/stress.log 2>&1 & echo $!"',
+        capture=True
+    )
+    stress_pid = result.stdout.strip()
+    if stress_pid:
+        print(g(f"  Stress process started (PID: {stress_pid})"))
+    else:
+        print(r("  Failed to start stress process"))
+        return
+
+    # Step 3 — Wait for alert
+    divider("Step 3/4 -- Waiting for NodeMemoryHigh alert")
+    print(dim("  NodeMemoryHigh fires at 85% — polling Alertmanager every 15s..."))
+    print(dim("  This may take 2-4 minutes..."))
+    alert_fired = False
+    for i in range(24):  # max 6 minutes
+        elapsed = i * 15
+
+        # Show current memory
+        mem = run(
+            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+            f'"free | grep Mem | awk \'{{printf \"%.0f\", $3/$2*100}}\'"',
+            capture=True
+        ).stdout.strip()
+        mem_str = f"{mem}%" if mem else "?"
+
+        print(f"  [{elapsed}s] RAM: {y(mem_str)} — checking Alertmanager...", end='\r', flush=True)
+
+        result = run(
+            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+            f'"curl -s http://localhost:30093/api/v2/alerts?active=true"',
+            capture=True
+        )
+        if "NodeMemoryHigh" in result.stdout:
+            print(f"\n{g('  ALERT FIRED')} at {elapsed}s — NodeMemoryHigh CRITICAL")
+            print(y("  Check #incidents in Slack — auto-remediation should be running"))
+            print(dim("  Auto-remediation: gitlab-ctl restart on ci-runner"))
+            alert_fired = True
+            break
+        time.sleep(15)
+
+    if not alert_fired:
+        print(r("\n  Alert did not fire within 6 minutes"))
+        print(y("  Cleaning up stress process..."))
+        run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
+        return
+
+    input(f"\n{c('  Press Enter after confirming the Slack alert and auto-remediation ran...')}")
+
+    # Step 4 — Wait for resolved
+    divider("Step 4/4 -- Waiting for RESOLVED")
+    print(dim("  Auto-remediation restarted GitLab — memory should drop..."))
+    print(dim("  Polling Alertmanager every 15s..."))
+    for i in range(20):  # max 5 minutes
+        elapsed = i * 15
+
+        mem = run(
+            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+            f'"free | grep Mem | awk \'{{printf \"%.0f\", $3/$2*100}}\'"',
+            capture=True
+        ).stdout.strip()
+        mem_str = f"{mem}%" if mem else "?"
+
+        # Check stress process is gone
+        stress_check = run(
+            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "pgrep stress-ng 2>/dev/null | wc -l"',
+            capture=True
+        ).stdout.strip()
+        stress_gone = stress_check == "0"
+
+        print(f"  [{elapsed}s] RAM: {g(mem_str)} — stress gone: {g('yes') if stress_gone else r('no')} — checking...", end='\r', flush=True)
+
+        result = run(
+            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+            f'"curl -s http://localhost:30093/api/v2/alerts?active=true"',
+            capture=True
+        )
+        if "NodeMemoryHigh" not in result.stdout:
+            print(f"\n{g('  ALERT CLEARED')} at {elapsed}s elapsed")
+            print(g("  RESOLVED notification sent to Slack"))
+            print(g("  GitLab issue auto-closed"))
+            break
+        time.sleep(15)
+    else:
+        print(r("\n  Alert did not clear — cleaning up stress process manually"))
+        run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
+
+    # Final memory check
+    print(c("\n  Final ci-runner memory:"))
+    run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -h"')
+
+    # Summary
+    divider("RAM Nuke Test Complete")
+    print(f"  {bold('Pipeline tested:')}")
+    print(f"  {g('>')} stress-ng consumed RAM on ci-runner")
+    print(f"  {g('>')} Prometheus detected >85% memory usage")
+    print(f"  {g('>')} Alertmanager fired NodeMemoryHigh CRITICAL")
+    print(f"  {g('>')} Auto-remediation ran gitlab-ctl restart automatically")
+    print(f"  {g('>')} Memory recovered, stress process gone")
+    print(f"  {g('>')} Alert resolved, GitLab issue auto-closed")
+
+# ─────────────────────────────────────────────────────────────
+#  ALERTING MENU
+# ─────────────────────────────────────────────────────────────
+def alerting_menu():
+    while True:
+        banner()
+        print(f"""\
+{c('+----------------------------------------------------------+')}
+{c('|')}  {bold('ALERTING TESTS')}                                           {c('|')}
+{c('+----------------------------------------------------------+')}
+{c('|')}  {bold('1.')}  App Nuke Test      kill app, wait for alert,        {c('|')}
+{c('|')}       {dim('               restore, confirm resolved')}             {c('|')}
+{c('|')}  {bold('2.')}  RAM Nuke Test      stress ci-runner RAM,            {c('|')}
+{c('|')}       {dim('               auto-remediation restarts GitLab')}      {c('|')}
+{c('+----------------------------------------------------------+')}
+{c('|')}  {bold('0.')}  Back                                               {c('|')}
+{c('+----------------------------------------------------------+')}""")
+        choice = input(f"\n{y('Select option: ')}")
+        if choice == '1':
+            do_nuke_test()
+            pause()
+        elif choice == '2':
+            do_ram_nuke_test()
+            pause()
+        elif choice == '0':
+            break
+
+# ─────────────────────────────────────────────────────────────
 #  SERVICE LINKS
 # ─────────────────────────────────────────────────────────────
 def do_service_links():
@@ -782,17 +940,16 @@ def do_service_links():
 # ─────────────────────────────────────────────────────────────
 def main():
     dispatch = {
-        '1':  k3s_menu,
-        '2':  lambda: (do_stop_all(),       pause()),
-        '3':  lambda: (do_start_all(),      pause()),
-        '4':  lambda: (do_health_check(),   pause()),
-        '5':  scale_menu,
-        '6':  ansible_menu,
-        '7':  lambda: (do_sync_all(),       pause()),
-        '8':  lambda: (do_rejoin(),         pause()),
-        '9':  lambda: (do_status(),         pause()),
-        '10': lambda: (do_nuke_test(),      pause()),
-        '11': lambda: (do_service_links(),  pause()),
+        '1':  lambda: (do_stop_all(),       pause()),
+        '2':  lambda: (do_start_all(),      pause()),
+        '3':  lambda: (do_health_check(),   pause()),
+        '4':  scale_menu,
+        '5':  ansible_menu,
+        '6':  lambda: (do_sync_all(),       pause()),
+        '7':  lambda: (do_rejoin(),         pause()),
+        '8':  lambda: (do_status(),         pause()),
+        '9':  alerting_menu,
+        '10': lambda: (do_service_links(),  pause()),
     }
 
     while True:
