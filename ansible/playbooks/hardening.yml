@@ -1,68 +1,15 @@
 ---
-- name: Security hardening for all nodes
-  hosts: all
+- name: Security hardening — infra node
+  hosts: infra
   become: yes
-  vars:
-    ssh_port: 22
-    allowed_users:
-      - andy
-    
+
   tasks:
-    - name: Update all packages
-      apt:
-        update_cache: yes
-        upgrade: safe
-      tags: updates
 
-    - name: Install security packages
+    - name: Install fail2ban
       apt:
-        name:
-          - ufw
-          - fail2ban
-          - unattended-upgrades
-          - apt-listchanges
+        name: fail2ban
         state: present
-      tags: packages
-
-    - name: Configure SSH - Disable root login
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^#?PermitRootLogin'
-        line: 'PermitRootLogin no'
-      notify: Restart SSH
-      tags: ssh
-
-    - name: Configure SSH - Disable empty passwords
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^#?PermitEmptyPasswords'
-        line: 'PermitEmptyPasswords no'
-      notify: Restart SSH
-      tags: ssh
-
-    - name: Configure SSH - Use SSH protocol 2
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^#?Protocol'
-        line: 'Protocol 2'
-      notify: Restart SSH
-      tags: ssh
-
-    - name: Configure SSH - Set max auth tries
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^#?MaxAuthTries'
-        line: 'MaxAuthTries 3'
-      notify: Restart SSH
-      tags: ssh
-
-    - name: Configure SSH - Set login grace time
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^#?LoginGraceTime'
-        line: 'LoginGraceTime 60'
-      notify: Restart SSH
-      tags: ssh
+        update_cache: yes
 
     - name: Configure fail2ban for SSH
       copy:
@@ -75,139 +22,46 @@
 
           [sshd]
           enabled = true
-          port = {{ ssh_port }}
+          port = 22
           filter = sshd
           logpath = /var/log/auth.log
           maxretry = 3
           bantime = 3600
-      notify: Restart fail2ban
-      tags: fail2ban
 
     - name: Enable and start fail2ban
       systemd:
         name: fail2ban
         enabled: yes
-        state: started
-      tags: fail2ban
+        state: restarted
 
-    - name: Configure UFW defaults - deny incoming
-      ufw:
-        direction: incoming
-        policy: deny
-      tags: firewall
-
-    - name: Configure UFW defaults - allow outgoing
-      ufw:
-        direction: outgoing
-        policy: allow
-      tags: firewall
-
-    - name: UFW - Allow SSH
-      ufw:
-        rule: allow
-        port: "{{ ssh_port }}"
-        proto: tcp
-      tags: firewall
-
-    - name: UFW - Allow k3s API (control plane only)
-      ufw:
-        rule: allow
-        port: 6443
-        proto: tcp
-      when: "'control_plane' in group_names"
-      tags: firewall
-
-    - name: UFW - Allow k3s node ports
-      ufw:
-        rule: allow
-        port: 30000:32767
-        proto: tcp
-      when: "'k8s_cluster' in group_names"
-      tags: firewall
-
-    - name: UFW - Allow kubelet
-      ufw:
-        rule: allow
-        port: 10250
-        proto: tcp
-      when: "'k8s_cluster' in group_names"
-      tags: firewall
-
-    - name: UFW - Allow flannel VXLAN
-      ufw:
-        rule: allow
-        port: 8472
-        proto: udp
-      when: "'k8s_cluster' in group_names"
-      tags: firewall
-
-    - name: UFW - Allow HTTP (CI runner)
-      ufw:
-        rule: allow
-        port: 80
-        proto: tcp
-      when: "'ci_cd' in group_names"
-      tags: firewall
-
-    - name: UFW - Allow HTTPS (CI runner)
-      ufw:
-        rule: allow
-        port: 443
-        proto: tcp
-      when: "'ci_cd' in group_names"
-      tags: firewall
-
-    - name: Enable UFW
-      ufw:
-        state: enabled
-      tags: firewall
-
-    - name: Configure automatic security updates
+    - name: Set SSH login banner
       copy:
-        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        dest: /etc/issue.net
         content: |
-          APT::Periodic::Update-Package-Lists "1";
-          APT::Periodic::Unattended-Upgrade "1";
-          APT::Periodic::AutocleanInterval "7";
-      tags: updates
+          ******************************************
+          *   Homelab Infrastructure Node         *
+          *   Unauthorized access is prohibited   *
+          *   All activity is monitored           *
+          ******************************************
 
-    - name: Set secure permissions on home directories
-      file:
-        path: "/home/{{ item }}"
-        mode: '0750'
-      loop: "{{ allowed_users }}"
-      tags: permissions
-
-    - name: Disable core dumps
+    - name: Enable SSH banner
       lineinfile:
-        path: /etc/security/limits.conf
-        line: "* hard core 0"
-        create: yes
-      tags: kernel
+        path: /etc/ssh/sshd_config
+        regexp: '^#?Banner'
+        line: 'Banner /etc/issue.net'
+      notify: Restart SSH
 
-    - name: Set secure sysctl parameters
-      sysctl:
-        name: "{{ item.name }}"
-        value: "{{ item.value }}"
-        state: present
-        reload: yes
-      loop:
-        - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
-        - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
-        - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
-        - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
-        - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
-        - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
-        - { name: 'net.ipv4.conf.all.log_martians', value: '1' }
-      tags: kernel
+    - name: Verify fail2ban is running
+      command: fail2ban-client status sshd
+      register: f2b_status
+      changed_when: false
+
+    - name: Display fail2ban status
+      debug:
+        msg: "{{ f2b_status.stdout_lines }}"
 
   handlers:
     - name: Restart SSH
       systemd:
         name: sshd
-        state: restarted
-
-    - name: Restart fail2ban
-      systemd:
-        name: fail2ban
         state: restarted

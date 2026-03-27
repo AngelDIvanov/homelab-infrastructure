@@ -1,13 +1,9 @@
 ---
-- name: Revert security hardening
-  hosts: all
+- name: Revert security hardening — infra node
+  hosts: infra
   become: yes
-  
+
   tasks:
-    - name: Disable UFW
-      ufw:
-        state: disabled
-      tags: firewall
 
     - name: Stop and disable fail2ban
       systemd:
@@ -15,29 +11,18 @@
         state: stopped
         enabled: no
       ignore_errors: yes
-      tags: fail2ban
-
-    - name: Revert SSH - Allow root login
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^PermitRootLogin'
-        line: '#PermitRootLogin prohibit-password'
-      notify: Restart SSH
-      tags: ssh
-
-    - name: Revert SSH - Max auth tries
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^MaxAuthTries'
-        line: '#MaxAuthTries 6'
-      notify: Restart SSH
-      tags: ssh
 
     - name: Remove fail2ban jail config
       file:
         path: /etc/fail2ban/jail.local
         state: absent
-      tags: fail2ban
+
+    - name: Remove SSH banner
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^Banner'
+        line: '#Banner none'
+      notify: Restart SSH
 
   handlers:
     - name: Restart SSH
