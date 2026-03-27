@@ -757,7 +757,7 @@ def do_ram_nuke_test():
     result = run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
         f'"sudo apt-get install -y stress-ng -qq 2>/dev/null; '
-        f'nohup sudo stress-ng --vm 2 --vm-bytes 2G --timeout 300s '
+        f'nohup sudo stress-ng --vm 1 --vm-bytes 1500M --timeout 180s '
         f'> /tmp/stress.log 2>&1 & echo $!"',
         capture=True
     )
