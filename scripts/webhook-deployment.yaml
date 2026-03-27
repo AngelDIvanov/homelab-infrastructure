@@ -61,7 +61,7 @@ data:
     }
     
     RUNBOOKS = {
-        'NodeMemoryHigh': [
+        'NodeMemoryCritical': [
             {
                 'instance_contains': '192.168.122.220',
                 'host': '192.168.122.220',
