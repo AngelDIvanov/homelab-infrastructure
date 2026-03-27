@@ -814,15 +814,33 @@ def do_ram_nuke_test():
         capture=True
     )
 
+    # ── Dynamic calculation ───────────────────────────────────
+    mem_raw = run(
+        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m | awk 'NR==2{print $2, $3}'"',
+        capture=True
+    ).stdout.strip().split()
+    total_mb  = int(mem_raw[0])
+    used_mb   = int(mem_raw[1])
+    current_pct = (used_mb / total_mb) * 100
+    phase1_mb = int(total_mb * 0.87) - used_mb + 200   # aim for 87%
+    phase2_mb = int(total_mb * 0.05) + 300              # push extra ~5% more
+
+    print(f"  {bold('Node RAM state:')}  {y(str(total_mb))}MB total  |  {y(str(used_mb))}MB used  |  {y(f'{current_pct:.0f}%')} current")
+    print(f"  {bold('Phase 1 stress:')} {g(str(phase1_mb))}MB  →  target ~87%")
+    print(f"  {bold('Phase 2 stress:')} {g(str(phase2_mb))}MB  →  target ~92%")
+
+    if phase1_mb <= 0:
+        print(r("  Node already above 85% — no stress needed, alerts should already be firing"))
+        return
+
     # ── Phase 1 — hit ~85% ────────────────────────────────────
-    divider("Phase 1 — Stressing to ~85%  (2.5G)")
+    divider(f"Phase 1 — Stressing to ~87%  ({phase1_mb}MB)")
     run(
-        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-        '"nohup sudo stress-ng --vm 1 --vm-bytes 3G --timeout 300s '
-        '> /tmp/stress1.log 2>&1 & echo started"',
+        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} ' +
+        f'"nohup sudo stress-ng --vm 1 --vm-bytes {phase1_mb}M --timeout 300s > /tmp/stress1.log 2>&1 & echo started"',
         capture=True
     )
-    print(g("  Phase 1 stress started (2.5G)"))
+    print(g(f"  Phase 1 stress started ({phase1_mb}MB)"))
     print(dim("  Waiting for NodeMemoryHigh to fire at 85%..."))
 
     fired = wait_for_alert("NodeMemoryHigh", timeout_s=180)
@@ -834,15 +852,14 @@ def do_ram_nuke_test():
     print(y("\n  Check #incidents in Slack — CRITICAL | NodeMemoryHigh should be there"))
     input(c("  Press Enter when you have confirmed the Slack alert to start Phase 2..."))
 
-    # ── Phase 2 — push to ~90%+ ───────────────────────────────
-    divider("Phase 2 — Pushing to ~90%+  (adding 1.5G more)")
+    # ── Phase 2 — push to ~92%+ ───────────────────────────────
+    divider(f"Phase 2 — Pushing to ~92%+  (adding {phase2_mb}MB more)")
     run(
-        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-        '"nohup sudo stress-ng --vm 1 --vm-bytes 1G --timeout 60s '
-        '> /tmp/stress2.log 2>&1 & echo started"',
+        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} ' +
+        f'"nohup sudo stress-ng --vm 1 --vm-bytes {phase2_mb}M --timeout 60s > /tmp/stress2.log 2>&1 & echo started"',
         capture=True
     )
-    print(g("  Phase 2 stress started (additional 1.5G)"))
+    print(g(f"  Phase 2 stress started (additional {phase2_mb}MB)"))
     print(dim("  Waiting for NodeMemoryCritical to fire at 90%..."))
 
     fired2 = wait_for_alert("NodeMemoryCritical", timeout_s=180)
