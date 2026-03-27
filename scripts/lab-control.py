@@ -754,16 +754,15 @@ def do_ram_nuke_test():
     divider("Step 2/4 -- Starting memory stress on ci-runner")
     print(dim("  Installing stress-ng if needed and running in background..."))
 
-    result = run(
+    stress_cmd = (
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-        f'"sudo apt-get install -y stress-ng -qq 2>/dev/null; '
-        f'nohup sudo stress-ng --vm 1 --vm-bytes 1500M --timeout 180s '
-        f'> /tmp/stress.log 2>&1 & echo $!"',
-        capture=True
+        '"sudo apt-get install -y stress-ng -qq 2>/dev/null; '
+        'nohup sudo stress-ng --vm 1 --vm-bytes 1500M --timeout 240s '
+        '> /tmp/stress.log 2>&1 & echo started"'
     )
-    stress_pid = result.stdout.strip()
-    if stress_pid:
-        print(g(f"  Stress process started (PID: {stress_pid})"))
+    result = run(stress_cmd, capture=True)
+    if "started" in result.stdout:
+        print(g("  Stress process started on ci-runner"))
     else:
         print(r("  Failed to start stress process"))
         return
