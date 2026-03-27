@@ -66,10 +66,19 @@ spec:
             description: "Node {{ $labels.instance }} memory usage is above 80% (current: {{ $value | printf \"%.1f\" }}%). Monitor closely."
 
         - alert: NodeMemoryHigh
-          expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+          expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 85
           for: 30s
           labels:
             severity: critical
           annotations:
             summary: "Node memory usage is critical — auto-remediation triggered"
             description: "Node {{ $labels.instance }} memory usage is above 85% (current: {{ $value | printf \"%.1f\" }}%). Auto-restart initiated."
+
+        - alert: NodeMemoryCritical
+          expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+          for: 30s
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node memory critical — auto-remediation triggered"
+            description: "Node {{ $labels.instance }} memory above 90% (current: {{ $value | printf \"%.1f\" }}%). Auto-restart initiated."
