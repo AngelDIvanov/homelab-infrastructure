@@ -853,14 +853,24 @@ def do_ram_nuke_test():
     print(y("\n  Check #incidents in Slack — CRITICAL | NodeMemoryHigh should be there"))
     input(c("  Press Enter when you have confirmed the Slack alert to start Phase 2..."))
 
-    # ── Phase 2 — push to ~92%+ ───────────────────────────────
-    divider(f"Phase 2 — Pushing to ~92%+  (adding {phase2_mb}MB more)")
+    # ── Phase 2 — kill Phase 1, fresh stress to ~93% ─────────
+    print(dim("  Killing Phase 1 stress to free headroom..."))
+    run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo kill -9 \$(pgrep -f stress-ng) 2>/dev/null || true"', capture=True)
+    time.sleep(3)
+    mem_raw2  = run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m"', capture=True).stdout.strip().splitlines()
+    mem_line2 = [x for x in mem_raw2 if x.startswith('Mem:')][0].split()
+    total_mb2 = int(mem_line2[1])
+    used_mb2  = int(mem_line2[2])
+    phase2_mb = int(total_mb2 * 0.93) - used_mb2
+    current2  = round(used_mb2 / total_mb2 * 100)
+    print(f"  {bold('Phase 2 state:')} {y(str(used_mb2))}MB used ({y(str(current2)+'%')}) — stressing {g(str(phase2_mb))}MB → 93%")
+    divider(f"Phase 2 — Fresh stress to ~93%  ({phase2_mb}MB)")
     run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} ' +
         f'"nohup sudo stress-ng --vm 1 --vm-bytes {phase2_mb}M --timeout 60s > /tmp/stress2.log 2>&1 & echo started"',
         capture=True
     )
-    print(g(f"  Phase 2 stress started (additional {phase2_mb}MB)"))
+    print(g(f"  Phase 2 stress started ({phase2_mb}MB)"))
     print(dim("  Waiting for NodeMemoryCritical to fire at 90%..."))
 
     fired2 = wait_for_alert("NodeMemoryCritical", timeout_s=180)
