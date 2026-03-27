@@ -407,7 +407,7 @@ done
 
 section "🔄  AUTO-FIX: POD HEALTH"
 
-STUCK_APP_PODS=$($K3S_CMD "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep -v Running | awk '{print \$1}'" 2>/dev/null)
+STUCK_APP_PODS=$($K3S_CMD "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep -v Running | grep -v Completed | grep -v Succeeded | awk '{print \$1}'" 2>/dev/null)
 
 if [ -n "$STUCK_APP_PODS" ]; then
     echo -e "  ${YELLOW}⚠️  Found stuck pods, attempting rollback...${NC}"
@@ -440,7 +440,7 @@ if [ -n "$STUCK_APP_PODS" ]; then
     else
         echo -e "  ${YELLOW}No rollback history - trying pod recreation...${NC}"
         
-        STUCK_POD_NAMES=$($K3S_CMD "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep -v Running | awk '{print \$1}'" 2>/dev/null)
+        STUCK_POD_NAMES=$($K3S_CMD "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep -v Running | grep -v Completed | grep -v Succeeded | awk '{print \$1}'" 2>/dev/null)
         
         if [ -n "$STUCK_POD_NAMES" ]; then
             echo -e "  ${DIM}Force-deleting stuck pods...${NC}"
