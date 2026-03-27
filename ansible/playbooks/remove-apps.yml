@@ -1,109 +1,40 @@
 ---
-- name: Remove applications from nodes
-  hosts: all
+- name: Remove demo tools from all k8s nodes
+  hosts: k8s_cluster
   become: yes
-  
-  vars_prompt:
-    - name: packages_to_remove
-      prompt: "Enter packages to remove (comma-separated, e.g., htop,neofetch)"
-      private: no
-
-    - name: confirm_removal
-      prompt: "Are you sure you want to remove these packages? (yes/no)"
-      private: no
-      default: "no"
 
   tasks:
-    - name: Abort if not confirmed
-      fail:
-        msg: "Removal cancelled by user"
-      when: confirm_removal != "yes"
 
-    - name: Parse package list
-      set_fact:
-        package_list: "{{ packages_to_remove.split(',') | map('trim') | list }}"
-
-    - name: Display packages to remove
-      debug:
-        msg: "Will remove: {{ package_list }}"
-
-    - name: Remove specified packages
+    - name: Remove neofetch
       apt:
-        name: "{{ package_list }}"
+        name: neofetch
         state: absent
         purge: yes
-      register: removal_result
+      ignore_errors: yes
 
-    - name: Clean up dependencies
-      apt:
-        autoremove: yes
-        autoclean: yes
-
-    - name: Display removal result
-      debug:
-        msg: "Packages removed successfully from {{ inventory_hostname }}"
-      when: removal_result.changed
-# Alternative: Remove predefined groups of packages
-- name: Remove package groups
-  hosts: all
-  become: yes
-  
-  vars:
-    # Define package groups that can be removed
-    monitoring_packages:
-      - htop
-      - btop
-      - iotop
-      - iftop
-      - nethogs
-      - nload
-      - sysstat
-
-    optional_packages:
-      - neofetch
-      - bat
-      - fd-find
-      - ripgrep
-
-    dev_packages:
-      - git
-      - vim
-      - tmux
-      - screen
-
-  tasks:
-    - name: Remove monitoring packages
-      apt:
-        name: "{{ monitoring_packages }}"
+    - name: Remove btop binary
+      file:
+        path: /usr/local/bin/btop
         state: absent
-        purge: yes
-      when: remove_monitoring | default(false) | bool
-      tags: monitoring
 
-    - name: Remove optional packages
-      apt:
-        name: "{{ optional_packages }}"
-        state: absent
-        purge: yes
-      when: remove_optional | default(false) | bool
-      tags: optional
-
-    - name: Remove k9s
+    - name: Remove k9s binary
       file:
         path: /usr/local/bin/k9s
         state: absent
-      when: remove_k9s | default(false) | bool
-      tags: k9s
 
-    - name: Remove lazydocker
-      file:
-        path: /usr/local/bin/lazydocker
-        state: absent
-      when: remove_lazydocker | default(false) | bool
-      tags: lazydocker
-
-    - name: Clean up after removal
+    - name: Clean up apt
       apt:
         autoremove: yes
         autoclean: yes
-      tags: always
+
+    - name: Verify removals
+      shell: |
+        echo "neofetch: $(which neofetch 2>/dev/null || echo 'removed')"
+        echo "btop:     $(which btop 2>/dev/null || echo 'removed')"
+        echo "k9s:      $(which k9s 2>/dev/null || echo 'removed')"
+      register: summary
+      changed_when: false
+
+    - name: Display summary
+      debug:
+        msg: "{{ summary.stdout_lines }}"
