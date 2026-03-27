@@ -1,4 +1,4 @@
-vm_count       = 0
+vm_count       = 2
 vm_memory      = 2048
 vm_vcpu        = 2
 vm_prefix      = "k3s-worker"
