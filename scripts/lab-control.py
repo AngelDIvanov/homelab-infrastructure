@@ -838,7 +838,7 @@ def do_ram_nuke_test():
     divider("Phase 2 — Pushing to ~90%+  (adding 1.5G more)")
     run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-        '"nohup sudo stress-ng --vm 1 --vm-bytes 1G --timeout 300s '
+        '"nohup sudo stress-ng --vm 1 --vm-bytes 1G --timeout 60s '
         '> /tmp/stress2.log 2>&1 & echo started"',
         capture=True
     )
