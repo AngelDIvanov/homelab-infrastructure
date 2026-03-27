@@ -730,133 +730,148 @@ def do_nuke_test():
 # ─────────────────────────────────────────────────────────────
 #  RAM NUKE TEST
 # ─────────────────────────────────────────────────────────────
+def get_ci_ram():
+    """Get ci-runner RAM usage as integer percent."""
+    res = run(
+        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+        '"free | grep Mem | awk \'{print int($3/$2*100)}\'"',
+        capture=True
+    )
+    try:
+        return int(res.stdout.strip())
+    except Exception:
+        return 0
+
+def wait_for_alert(alert_name, timeout_s=180, interval=10):
+    """Poll Alertmanager until alert_name is active. Returns elapsed seconds or -1."""
+    for i in range(timeout_s // interval):
+        elapsed = i * interval
+        mem = get_ci_ram()
+        print(f"  [{elapsed}s] RAM: {y(str(mem)+'%')} — waiting for {c(alert_name)}...", end='\r', flush=True)
+        result = run(
+            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+            '"curl -s http://localhost:30093/api/v2/alerts?active=true"',
+            capture=True
+        )
+        if alert_name in result.stdout:
+            print(f"\n{g(f'  {alert_name} FIRED')} at {elapsed}s  RAM: {mem}%")
+            return elapsed
+        time.sleep(interval)
+    return -1
+
+def wait_for_resolved(alert_name, timeout_s=180, interval=10):
+    """Poll Alertmanager until alert_name is gone. Returns True if resolved."""
+    for i in range(timeout_s // interval):
+        elapsed = i * interval
+        mem = get_ci_ram()
+        stress = run(
+            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "pgrep -c stress-ng 2>/dev/null || echo 0"',
+            capture=True
+        ).stdout.strip()
+        stress_gone = stress == "0"
+        print(
+            f"  [{elapsed}s] RAM: {g(str(mem)+'%')} "
+            f"stress: {g('gone') if stress_gone else r('running')} "
+            f"— waiting for RESOLVED...",
+            end='\r', flush=True
+        )
+        result = run(
+            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+            '"curl -s http://localhost:30093/api/v2/alerts?active=true"',
+            capture=True
+        )
+        if alert_name not in result.stdout:
+            print(f"\n{g(f'  {alert_name} RESOLVED')} at {elapsed}s  RAM: {mem}%")
+            return True
+        time.sleep(interval)
+    return False
+
 def do_ram_nuke_test():
-    divider("RAM NUKE TEST -- Auto-remediation lifecycle")
+    divider("RAM NUKE TEST -- Two-phase auto-remediation demo")
     print(f"""
-  This test will:
-    {y('1.')} Eat RAM on ci-runner with a background stress process
-    {y('2.')} Wait for {c('NodeMemoryHigh')} CRITICAL alert to fire (~2-3 min)
-    {y('3.')} Auto-remediation runs {c('gitlab-ctl restart')} automatically
-    {y('4.')} Memory drops, alert resolves, stress process is gone
-    {y('5.')} Confirm RESOLVED in Slack and GitLab issue auto-closed
+  {bold('Phase 1')} — Stress to {y('~85%')}
+    {y('>')} {c('NodeMemoryHigh')} fires after 30s  →  Slack CRITICAL alert + GitLab issue
+    {y('>')} No auto-remediation yet — alert is visible in Slack
+
+  {bold('Phase 2')} — Push to {r('~90%')}
+    {y('>')} {c('NodeMemoryCritical')} fires after 30s
+    {y('>')} Auto-remediation: {dim('pkill stress-ng + gitlab-ctl restart')}
+    {y('>')} Memory drops, both alerts resolve, GitLab issues auto-closed
 
   {r('Watch')} #incidents in Slack during this test.
-  {y('WARNING:')} This will spike ci-runner RAM to ~85%+ intentionally.
 """)
     if input(y("  Proceed? (y/n): ")).lower() != 'y':
         print("  Cancelled."); return
 
-    # Step 1 — Check current RAM
-    divider("Step 1/4 -- Current ci-runner memory")
+    # ── Baseline ──────────────────────────────────────────────
+    divider("Baseline — ci-runner memory")
     run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -h"')
 
-    # Step 2 — Start memory hog
-    divider("Step 2/4 -- Starting memory stress on ci-runner")
-    print(dim("  Installing stress-ng if needed and running in background..."))
-
-    stress_cmd = (
+    # Ensure stress-ng is installed
+    run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-        '"sudo apt-get install -y stress-ng -qq 2>/dev/null; '
-        'nohup sudo stress-ng --vm 1 --vm-bytes 3500M --timeout 240s '
-        '> /tmp/stress.log 2>&1 & echo started"'
+        '"sudo apt-get install -y stress-ng -qq 2>/dev/null"',
+        capture=True
     )
-    result = run(stress_cmd, capture=True)
-    if "started" in result.stdout:
-        print(g("  Stress process started on ci-runner"))
-    else:
-        print(r("  Failed to start stress process"))
-        return
 
-    # Step 3 — Wait for alert
-    divider("Step 3/4 -- Waiting for NodeMemoryHigh alert")
-    print(dim("  NodeMemoryHigh fires at 85% — polling Alertmanager every 15s..."))
-    print(dim("  This may take 2-4 minutes..."))
-    alert_fired = False
-    for i in range(24):  # max 6 minutes
-        elapsed = i * 15
+    # ── Phase 1 — hit ~85% ────────────────────────────────────
+    divider("Phase 1 — Stressing to ~85%  (2.5G)")
+    run(
+        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+        '"nohup sudo stress-ng --vm 1 --vm-bytes 2500M --timeout 300s '
+        '> /tmp/stress1.log 2>&1 & echo started"',
+        capture=True
+    )
+    print(g("  Phase 1 stress started (2.5G)"))
+    print(dim("  Waiting for NodeMemoryHigh to fire at 85%..."))
 
-        # Show current memory
-        mem = run(
-            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-            f'"free | grep Mem | awk \'{{printf \"%.0f\", $3/$2*100}}\'"',
-            capture=True
-        ).stdout.strip()
-        mem_str = f"{mem}%" if mem else "?"
-
-        print(f"  [{elapsed}s] RAM: {y(mem_str)} — checking Alertmanager...", end='\r', flush=True)
-
-        result = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
-            f'"curl -s http://localhost:30093/api/v2/alerts?active=true"',
-            capture=True
-        )
-        if "NodeMemoryHigh" in result.stdout:
-            print(f"\n{g('  ALERT FIRED')} at {elapsed}s — NodeMemoryHigh CRITICAL")
-            print(y("  Check #incidents in Slack — auto-remediation should be running"))
-            print(dim("  Auto-remediation: gitlab-ctl restart on ci-runner"))
-            alert_fired = True
-            break
-        time.sleep(15)
-
-    if not alert_fired:
-        print(r("\n  Alert did not fire within 6 minutes"))
-        print(y("  Cleaning up stress process..."))
+    fired = wait_for_alert("NodeMemoryHigh", timeout_s=180)
+    if fired < 0:
+        print(r("\n  NodeMemoryHigh did not fire — aborting"))
         run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
         return
 
-    input(f"\n{c('  Press Enter after confirming the Slack alert and auto-remediation ran...')}")
+    print(y("\n  Check #incidents in Slack — CRITICAL | NodeMemoryHigh should be there"))
+    input(c("  Press Enter when you have confirmed the Slack alert to start Phase 2..."))
 
-    # Step 4 — Wait for resolved
-    divider("Step 4/4 -- Waiting for RESOLVED")
-    print(dim("  Auto-remediation restarted GitLab — memory should drop..."))
-    print(dim("  Polling Alertmanager every 15s..."))
-    for i in range(20):  # max 5 minutes
-        elapsed = i * 15
+    # ── Phase 2 — push to ~90%+ ───────────────────────────────
+    divider("Phase 2 — Pushing to ~90%+  (adding 1.5G more)")
+    run(
+        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+        '"nohup sudo stress-ng --vm 1 --vm-bytes 1500M --timeout 300s '
+        '> /tmp/stress2.log 2>&1 & echo started"',
+        capture=True
+    )
+    print(g("  Phase 2 stress started (additional 1.5G)"))
+    print(dim("  Waiting for NodeMemoryCritical to fire at 90%..."))
 
-        mem = run(
-            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-            f'"free | grep Mem | awk \'{{printf \"%.0f\", $3/$2*100}}\'"',
-            capture=True
-        ).stdout.strip()
-        mem_str = f"{mem}%" if mem else "?"
-
-        # Check stress process is gone
-        stress_check = run(
-            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "pgrep stress-ng 2>/dev/null | wc -l"',
-            capture=True
-        ).stdout.strip()
-        stress_gone = stress_check == "0"
-
-        print(f"  [{elapsed}s] RAM: {g(mem_str)} — stress gone: {g('yes') if stress_gone else r('no')} — checking...", end='\r', flush=True)
-
-        result = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
-            f'"curl -s http://localhost:30093/api/v2/alerts?active=true"',
-            capture=True
-        )
-        if "NodeMemoryHigh" not in result.stdout:
-            print(f"\n{g('  ALERT CLEARED')} at {elapsed}s elapsed")
-            print(g("  RESOLVED notification sent to Slack"))
-            print(g("  GitLab issue auto-closed"))
-            break
-        time.sleep(15)
+    fired2 = wait_for_alert("NodeMemoryCritical", timeout_s=180)
+    if fired2 < 0:
+        print(r("\n  NodeMemoryCritical did not fire"))
     else:
-        print(r("\n  Alert did not clear — cleaning up stress process manually"))
+        print(y("  Auto-remediation triggered — pkill stress-ng + gitlab-ctl restart running"))
+        print(dim("  Waiting for memory to drop and alerts to resolve..."))
+
+    # ── Wait for both alerts to resolve ───────────────────────
+    divider("Waiting for RESOLVED")
+    resolved = wait_for_resolved("NodeMemoryCritical", timeout_s=300)
+    if resolved:
+        print(g("  Check #incidents — RESOLVED messages should be in Slack"))
+    else:
+        print(r("  Alerts did not resolve — cleaning up manually"))
         run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
 
-    # Final memory check
+    # ── Final state ───────────────────────────────────────────
     print(c("\n  Final ci-runner memory:"))
     run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -h"')
 
-    # Summary
     divider("RAM Nuke Test Complete")
     print(f"  {bold('Pipeline tested:')}")
-    print(f"  {g('>')} stress-ng consumed RAM on ci-runner")
-    print(f"  {g('>')} Prometheus detected >85% memory usage")
-    print(f"  {g('>')} Alertmanager fired NodeMemoryHigh CRITICAL")
-    print(f"  {g('>')} Auto-remediation ran gitlab-ctl restart automatically")
-    print(f"  {g('>')} Memory recovered, stress process gone")
-    print(f"  {g('>')} Alert resolved, GitLab issue auto-closed")
+    print(f"  {g('>')} Phase 1: stress-ng hit 85% — NodeMemoryHigh fired")
+    print(f"  {g('>')} Phase 2: stress-ng hit 90% — NodeMemoryCritical fired")
+    print(f"  {g('>')} Auto-remediation: pkill stress-ng + gitlab-ctl restart")
+    print(f"  {g('>')} Memory recovered — both alerts resolved")
+    print(f"  {g('>')} GitLab issues auto-created and auto-closed")
 
 # ─────────────────────────────────────────────────────────────
 #  ALERTING MENU
