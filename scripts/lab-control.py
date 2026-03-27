@@ -823,7 +823,7 @@ def do_ram_nuke_test():
     total_mb  = int(mem_line[1])
     used_mb   = int(mem_line[2])
     current_pct = (used_mb / total_mb) * 100
-    phase1_mb = int(total_mb * 0.87) - used_mb + 200   # aim for 87%
+    phase1_mb = int(total_mb * 0.83) - used_mb         # aim for 83% — lands ~85-87% under load
     phase2_mb = int(total_mb * 0.05) + 300              # push extra ~5% more
 
     print(f"  {bold('Node RAM state:')}  {y(str(total_mb))}MB total  |  {y(str(used_mb))}MB used  |  {y(f'{current_pct:.0f}%')} current")
