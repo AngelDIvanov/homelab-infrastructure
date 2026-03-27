@@ -734,7 +734,7 @@ def get_ci_ram():
     """Get ci-runner RAM usage as integer percent."""
     res = run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-        '"free | grep Mem | awk \'{print int($3/$2*100)}\'"',
+        '"python3 -c \\"import os; f=open(\'/proc/meminfo\'); d=dict(l.split() for l in f if l.split()[0] in [\'MemTotal:\',\'MemAvailable:\']); print(int((1-int(d[\'MemAvailable:\'])/int(d[\'MemTotal:\']))*100))\\"" ',
         capture=True
     )
     try:
@@ -818,7 +818,7 @@ def do_ram_nuke_test():
     divider("Phase 1 — Stressing to ~85%  (2.5G)")
     run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-        '"nohup sudo stress-ng --vm 1 --vm-bytes 2500M --timeout 300s '
+        '"nohup sudo stress-ng --vm 1 --vm-bytes 3G --timeout 300s '
         '> /tmp/stress1.log 2>&1 & echo started"',
         capture=True
     )
@@ -838,7 +838,7 @@ def do_ram_nuke_test():
     divider("Phase 2 — Pushing to ~90%+  (adding 1.5G more)")
     run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-        '"nohup sudo stress-ng --vm 1 --vm-bytes 1500M --timeout 300s '
+        '"nohup sudo stress-ng --vm 1 --vm-bytes 1G --timeout 300s '
         '> /tmp/stress2.log 2>&1 & echo started"',
         capture=True
     )
