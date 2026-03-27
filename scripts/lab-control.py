@@ -734,7 +734,7 @@ def get_ci_ram():
     """Get ci-runner RAM usage as integer percent."""
     res = run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
-        '"python3 -c \\"import os; f=open(\'/proc/meminfo\'); d=dict(l.split() for l in f if l.split()[0] in [\'MemTotal:\',\'MemAvailable:\']); print(int((1-int(d[\'MemAvailable:\'])/int(d[\'MemTotal:\']))*100))\\"" ',
+        '"python3 -c \\"import subprocess; r=subprocess.check_output([\'free\']).decode().split()[7:13]; print(int((int(r[1])-int(r[5]))/int(r[1])*100))\\""',
         capture=True
     )
     try:
