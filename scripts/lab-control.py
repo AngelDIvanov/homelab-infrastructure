@@ -816,7 +816,7 @@ def do_ram_nuke_test():
 
     # ── Dynamic calculation ───────────────────────────────────
     mem_raw = run(
-        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m | awk 'NR==2{print $2, $3}'"',
+        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m | awk \'NR==2{{print $2, $3}}\'"',
         capture=True
     ).stdout.strip().split()
     total_mb  = int(mem_raw[0])
