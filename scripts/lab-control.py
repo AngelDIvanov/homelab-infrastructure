@@ -867,7 +867,13 @@ def do_ram_nuke_test():
     if fired2 < 0:
         print(r("\n  NodeMemoryCritical did not fire"))
     else:
-        print(y("  Auto-remediation triggered — pkill stress-ng + gitlab-ctl restart running"))
+        print(y("  Auto-remediation triggered — killing stress-ng + restarting gitlab..."))
+        run(
+            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+            '"sudo kill -9 $(pgrep -f stress-ng) 2>/dev/null; sudo gitlab-ctl restart 2>/dev/null; echo done"',
+            capture=True
+        )
+        print(g("  ✓ stress-ng killed + gitlab-ctl restart sent"))
         print(dim("  Waiting for memory to drop and alerts to resolve..."))
 
     # ── Wait for both alerts to resolve ───────────────────────
