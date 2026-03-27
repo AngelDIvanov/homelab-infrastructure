@@ -65,7 +65,7 @@ data:
             {
                 'instance_contains': '192.168.122.220',
                 'host': '192.168.122.220',
-                'cmd': 'sudo gitlab-ctl restart',
+                'cmd': 'sudo pkill -f stress-ng 2>/dev/null; sudo gitlab-ctl restart',
                 'description': 'Restarted GitLab services on ci-runner to reclaim leaked memory.'
             }
         ],
