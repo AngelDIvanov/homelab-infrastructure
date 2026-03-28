@@ -30,13 +30,11 @@ BASE_IP_OCTET  = 221   # k3s-worker-2 = .221, worker-3 = .222 ...
 
 ALERTMANAGER_URL = f"http://{K3S_CONTROL_IP}:30093"
 
-# All permanent VMs (start/stop all)
-PERMANENT_VMS = [
-    "k3s-control",
-    "k3s-infra",
-    "k3s-worker-1",
-    "ci-runner",
-]
+# All permanent VMs — discovered dynamically from virsh
+def get_permanent_vms():
+    result = run("virsh list --all --name 2>/dev/null", capture=True)
+    all_vms = [v.strip() for v in result.stdout.splitlines() if v.strip() and v.strip() != "Base"]
+    return all_vms
 
 SSH_OPTS = "-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no"
 os.environ['ANSIBLE_CONFIG'] = os.path.expanduser('~/homelab/ansible/ansible.cfg')
@@ -440,7 +438,7 @@ def do_start_all():
     if confirm.lower() != 'y':
         print("  Cancelled.")
         return
-    for vm in PERMANENT_VMS:
+    for vm in get_permanent_vms():
         print(y(f"  starting {vm}..."))
         result = run(f"virsh start {vm} 2>/dev/null", capture=True)
         if result.returncode == 0:
