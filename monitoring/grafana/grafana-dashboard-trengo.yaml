@@ -1,3 +1,4 @@
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,444 +7,184 @@ metadata:
   labels:
     grafana_dashboard: "1"
   annotations:
-    grafana_folder: Homelab
+    grafana_folder: "Homelab"
 data:
   trengo.json: |
     {
+      "title": "Trengo App",
+      "uid": "homelab-trengo",
+      "schemaVersion": 38,
+      "version": 1,
+      "refresh": "30s",
+      "tags": ["homelab", "trengo", "loki"],
+      "time": { "from": "now-1h", "to": "now" },
+      "timezone": "browser",
+      "editable": true,
+      "graphTooltip": 1,
       "annotations": {
         "list": [
           {
-            "builtIn": 1,
-            "datasource": {
-              "type": "grafana",
-              "uid": "-- Grafana --"
-            },
-            "enable": true,
-            "hide": true,
-            "iconColor": "rgba(0, 211, 255, 1)",
-            "name": "Annotations & Alerts",
-            "type": "dashboard"
-          },
-          {
-            "datasource": {
-              "type": "grafana",
-              "uid": "-- Grafana --"
-            },
-            "enable": true,
-            "hide": false,
-            "iconColor": "#00e5a0",
-            "limit": 100,
-            "matchAny": false,
             "name": "Deployments",
-            "showIn": 0,
-            "tags": [
-              "deployment"
-            ],
-            "type": "tags"
-          },
-          {
-            "datasource": {
-              "type": "grafana",
-              "uid": "-- Grafana --"
-            },
+            "datasource": { "type": "grafana", "uid": "-- Grafana --" },
             "enable": true,
             "hide": false,
-            "iconColor": "#f2495c",
-            "limit": 100,
-            "matchAny": false,
+            "iconColor": "green",
+            "type": "tags",
+            "tags": ["deployment"],
+            "showIn": 0
+          },
+          {
             "name": "Rollbacks",
-            "showIn": 0,
-            "tags": [
-              "rollback"
-            ],
-            "type": "tags"
+            "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+            "enable": true,
+            "hide": false,
+            "iconColor": "red",
+            "type": "tags",
+            "tags": ["rollback"],
+            "showIn": 0
           }
         ]
       },
-      "editable": true,
-      "fiscalYearStartMonth": 0,
-      "graphTooltip": 1,
-      "links": [],
       "panels": [
+
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": 0
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 1
-                  },
-                  {
-                    "color": "green",
-                    "value": 2
-                  }
-                ]
-              },
-              "unit": "short"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 4,
-            "w": 6,
-            "x": 0,
-            "y": 0
-          },
           "id": 1,
-          "options": {
-            "colorMode": "background",
-            "graphMode": "none",
-            "justifyMode": "auto",
-            "orientation": "auto",
-            "percentChangeColorMode": "standard",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "showPercentChange": false,
-            "textMode": "auto",
-            "wideLayout": true
-          },
-          "pluginVersion": "12.4.1",
+          "title": "Available Replicas",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
               "expr": "kube_deployment_status_replicas_available{deployment=\"trengo-search\"}",
-              "instant": true,
               "legendFormat": "Available",
-              "refId": "A"
+              "refId": "A",
+              "instant": true
             }
           ],
-          "title": "Available Replicas",
-          "type": "stat"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "fixedColor": "blue",
-                "mode": "fixed"
-              },
-              "mappings": [],
+              "unit": "short",
+              "color": { "mode": "thresholds" },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
+                  { "color": "red",    "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "green",  "value": 2 }
                 ]
-              },
-              "unit": "short"
-            },
-            "overrides": []
+              }
+            }
           },
-          "gridPos": {
-            "h": 4,
-            "w": 6,
-            "x": 6,
-            "y": 0
-          },
-          "id": 2,
           "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] },
             "orientation": "auto",
-            "percentChangeColorMode": "standard",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "showPercentChange": false,
             "textMode": "auto",
-            "wideLayout": true
-          },
-          "pluginVersion": "12.4.1",
+            "colorMode": "background",
+            "graphMode": "none"
+          }
+        },
+
+        {
+          "id": 2,
+          "title": "Desired Replicas",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
               "expr": "kube_deployment_spec_replicas{deployment=\"trengo-search\"}",
-              "instant": true,
               "legendFormat": "Desired",
-              "refId": "A"
+              "refId": "A",
+              "instant": true
             }
           ],
-          "title": "Desired Replicas",
-          "type": "stat"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 1
-                  },
-                  {
-                    "color": "red",
-                    "value": 5
-                  }
-                ]
-              },
-              "unit": "short"
-            },
-            "overrides": []
+              "unit": "short",
+              "color": { "mode": "fixed", "fixedColor": "blue" }
+            }
           },
-          "gridPos": {
-            "h": 4,
-            "w": 6,
-            "x": 12,
-            "y": 0
-          },
-          "id": 3,
           "options": {
-            "colorMode": "background",
-            "graphMode": "none",
-            "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] },
             "orientation": "auto",
-            "percentChangeColorMode": "standard",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "showPercentChange": false,
             "textMode": "auto",
-            "wideLayout": true
-          },
-          "pluginVersion": "12.4.1",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+
+        {
+          "id": 3,
+          "title": "Pod Restarts (last 1h)",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
               "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"default\", pod=~\"trengo-search.*\"}[1h]))",
-              "instant": true,
               "legendFormat": "Restarts",
-              "refId": "A"
+              "refId": "A",
+              "instant": true
             }
           ],
-          "title": "Pod Restarts (last 1h)",
-          "type": "stat"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "mappings": [],
+              "unit": "short",
+              "color": { "mode": "thresholds" },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
+                  { "color": "green",  "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "red",    "value": 5 }
                 ]
-              },
-              "unit": "short"
-            },
-            "overrides": []
+              }
+            }
           },
-          "gridPos": {
-            "h": 4,
-            "w": 6,
-            "x": 18,
-            "y": 0
-          },
-          "id": 4,
           "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] },
             "orientation": "auto",
-            "percentChangeColorMode": "standard",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "showPercentChange": false,
-            "textMode": "value_and_name",
-            "wideLayout": true
-          },
-          "pluginVersion": "12.4.1",
+            "textMode": "auto",
+            "colorMode": "background",
+            "graphMode": "none"
+          }
+        },
+
+        {
+          "id": 4,
+          "title": "Pod Phase",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
               "expr": "count by (phase) (kube_pod_status_phase{namespace=\"default\", pod=~\"trengo-search.*\"} == 1)",
-              "instant": true,
               "legendFormat": "{{phase}}",
-              "refId": "A"
+              "refId": "A",
+              "instant": true
             }
           ],
-          "title": "Pod Phase",
-          "type": "stat"
-        },
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
           "fieldConfig": {
             "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "linear",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "showValues": false,
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "short"
-            },
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Errors"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "red",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "All logs"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "fixedColor": "blue",
-                      "mode": "fixed"
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 24,
-            "x": 0,
-            "y": 4
-          },
-          "id": 10,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "multi",
-              "sort": "none"
+              "unit": "short",
+              "color": { "mode": "palette-classic" }
             }
           },
-          "pluginVersion": "12.4.1",
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "auto",
+            "textMode": "value_and_name",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+
+        {
+          "id": 10,
+          "title": "Log Volume -- trengo-search",
+          "type": "timeseries",
+          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 4 },
+          "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
               "expr": "sum(count_over_time({namespace=\"default\", pod=~\"trengo-search.*\"}[1m]))",
@@ -456,114 +197,86 @@ data:
               "refId": "B"
             }
           ],
-          "title": "Log Volume \u2014 trengo-search",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
           "fieldConfig": {
-            "defaults": {},
-            "overrides": []
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "palette-classic" }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Errors" },
+                "properties": [
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "All logs" },
+                "properties": [
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }
+                ]
+              }
+            ]
           },
-          "gridPos": {
-            "h": 14,
-            "w": 24,
-            "x": 0,
-            "y": 10
-          },
-          "id": 20,
           "options": {
-            "dedupStrategy": "none",
-            "enableInfiniteScrolling": false,
-            "enableLogDetails": true,
-            "prettifyLogMessage": false,
-            "showCommonLabels": true,
-            "showControls": false,
-            "showLabels": false,
-            "showTime": true,
-            "sortOrder": "Descending",
-            "unwrappedColumns": false,
-            "wrapLogMessage": true
-          },
-          "pluginVersion": "12.4.1",
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          }
+        },
+
+        {
+          "id": 20,
+          "title": "All Logs -- trengo-search",
+          "type": "logs",
+          "gridPos": { "h": 14, "w": 24, "x": 0, "y": 10 },
+          "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
               "expr": "{namespace=\"default\", pod=~\"trengo-search.*\"} != \"kube-probe\"",
-              "maxLines": 500,
-              "refId": "A"
+              "refId": "A",
+              "maxLines": 500
             }
           ],
-          "title": "All Logs \u2014 trengo-search",
-          "type": "logs"
-        },
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 14,
-            "w": 24,
-            "x": 0,
-            "y": 24
-          },
-          "id": 21,
           "options": {
-            "dedupStrategy": "none",
-            "enableInfiniteScrolling": false,
-            "enableLogDetails": true,
-            "prettifyLogMessage": false,
-            "showCommonLabels": false,
-            "showControls": false,
-            "showLabels": true,
             "showTime": true,
-            "sortOrder": "Descending",
-            "unwrappedColumns": false,
-            "wrapLogMessage": true
-          },
-          "pluginVersion": "12.4.1",
+            "showLabels": false,
+            "showCommonLabels": true,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
+          }
+        },
+
+        {
+          "id": 21,
+          "title": "Errors Only -- trengo-search",
+          "type": "logs",
+          "gridPos": { "h": 14, "w": 24, "x": 0, "y": 24 },
+          "datasource": { "type": "loki", "uid": "loki" },
           "targets": [
             {
               "expr": "{namespace=\"default\", pod=~\"trengo-search.*\"} |~ \"(?i)error|fatal|panic|exception|traceback|killed|oom\"",
-              "maxLines": 500,
-              "refId": "A"
+              "refId": "A",
+              "maxLines": 500
             },
             {
               "expr": "{job=\"trengo-health-check\"}",
-              "maxLines": 500,
-              "refId": "B"
+              "refId": "B",
+              "maxLines": 500
             }
           ],
-          "title": "Errors Only \u2014 trengo-search",
-          "type": "logs"
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
+          }
         }
-      ],
-      "preload": false,
-      "refresh": "30s",
-      "schemaVersion": 42,
-      "tags": [
-        "homelab",
-        "trengo",
-        "loki"
-      ],
-      "templating": {
-        "list": []
-      },
-      "time": {
-        "from": "now-1h",
-        "to": "now"
-      },
-      "timepicker": {},
-      "timezone": "browser",
-      "title": "Trengo App",
-      "uid": "homelab-trengo",
-      "version": 2,
-      "weekStart": ""
+
+      ]
     }
