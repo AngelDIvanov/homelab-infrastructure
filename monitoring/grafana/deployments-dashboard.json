@@ -1,0 +1,66 @@
+{
+  "title": "Deployments",
+  "uid": "homelab-deployments",
+  "tags": ["homelab", "deployments"],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "time": {"from": "now-7d", "to": "now"},
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Recent Pipelines",
+      "type": "table",
+      "gridPos": {"h": 20, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "yesoreyeram-infinity-datasource", "uid": "efhetakhtsvlsd"},
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "http://192.168.122.220/api/v4/projects/1/pipelines?per_page=20&order_by=id&sort=desc",
+          "url_options": {"method": "GET"},
+          "columns": [
+            {"selector": "id", "text": "Pipeline ID", "type": "number"},
+            {"selector": "status", "text": "Status", "type": "string"},
+            {"selector": "ref", "text": "Branch", "type": "string"},
+            {"selector": "sha", "text": "Commit", "type": "string"},
+            {"selector": "created_at", "text": "Created", "type": "timestamp"},
+            {"selector": "web_url", "text": "URL", "type": "string"}
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "URL"},
+            "properties": [
+              {"id": "links", "value": [{"title": "Open Pipeline", "url": "${__value.text}", "targetBlank": true}]},
+              {"id": "custom.displayMode", "value": "color-text"}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Status"},
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {"type": "value", "options": {"success": {"text": "✅ success", "color": "green"}}},
+                  {"type": "value", "options": {"failed": {"text": "❌ failed", "color": "red"}}},
+                  {"type": "value", "options": {"running": {"text": "🔄 running", "color": "blue"}}},
+                  {"type": "value", "options": {"manual": {"text": "⏸ manual", "color": "yellow"}}}
+                ]
+              },
+              {"id": "custom.displayMode", "value": "color-text"}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    }
+  ]
+}
