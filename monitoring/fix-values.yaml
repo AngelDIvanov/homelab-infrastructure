@@ -1,4 +1,6 @@
 grafana:
+  plugins:
+    - yesoreyeram-infinity-datasource
   persistence:
     enabled: true
     size: 2Gi
