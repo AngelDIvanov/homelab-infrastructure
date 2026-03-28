@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-infinity-datasource
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+data:
+  infinity-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: yesoreyeram-infinity-datasource
+        type: yesoreyeram-infinity-datasource
+        uid: efhetakhtsvlsd
+        access: proxy
+        isDefault: false
+        jsonData:
+          allowedHosts:
+            - http://192.168.122.220
+        secureJsonData:
+          httpHeaderValue1: "PRIVATE-TOKEN: glpat-ErbmIjiXkcIxQiyjmPAJZW86MQp1OjEH.01.0w05rrjh0"
