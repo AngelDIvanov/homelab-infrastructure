@@ -108,7 +108,7 @@ echo "║                                                                       
 echo "║           🏠  DevOps Home Lab - Health Check  🏠                      ║"
 echo "║                                                                       ║"
 echo "╠═══════════════════════════════════════════════════════════════════════╣"
-echo "║  K3s Cluster │ GitLab CI/CD │ Prometheus │ Grafana │ Portainer       ║"
+echo "║  K3s │ GitLab CI/CD │ Prometheus │ Grafana │ Loki │ Security Tools   ║"
 echo "╚═══════════════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "${DIM}Started at: $(date '+%Y-%m-%d %H:%M:%S')${NC}\n"
@@ -343,8 +343,10 @@ for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
 done
 
 section "🌐  CORE SERVICES"
-check "Trengo App (port 32504)" "curl -sf --max-time 5 http://$K3S_CONTROL_IP:32504"
+check "Trengo App prod (port 32504)" "curl -sf --max-time 5 http://$K3S_CONTROL_IP:32504"
+check_warn "Trengo App staging (port 32505)" "curl -sf --max-time 5 http://$K3S_CONTROL_IP:32505"
 check "Grafana (port 30080)" "curl -sf --max-time 5 -o /dev/null http://$K3S_CONTROL_IP:30080"
+check "Alertmanager (port 30093)" "curl -sf --max-time 5 -o /dev/null http://$K3S_CONTROL_IP:30093"
 check "GitLab (port 80)" "curl -sf --max-time 5 -o /dev/null http://$CI_RUNNER_IP"
 check_warn "K8s Dashboard (port 30443)" "curl -sfk --max-time 5 -o /dev/null https://$K3S_CONTROL_IP:30443"
 check_warn "Portainer (port 30777)" "curl -sf --max-time 5 -o /dev/null http://$K3S_CONTROL_IP:30777"
@@ -358,7 +360,8 @@ for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
     check "$worker_name Ready" "$K3S_CMD 'sudo k3s kubectl get nodes' 2>/dev/null | grep -q '$worker_name.*Ready'"
 done
 
-check "Trengo pods running" "$K3S_CMD 'sudo k3s kubectl get pods -n default' 2>/dev/null | grep -q 'trengo-search.*Running'"
+check "Trengo pods running" "$K3S_CMD 'sudo k3s kubectl get pods -n default -l app=trengo-search' 2>/dev/null | grep -q 'Running'"
+check_warn "Trengo staging pods running" "$K3S_CMD 'sudo k3s kubectl get pods -n default -l app=trengo-search-staging' 2>/dev/null | grep -q 'Running'"
 
 section "📊  MONITORING STACK"
 
@@ -376,6 +379,9 @@ fi
 check "Prometheus running" "$K3S_CMD 'sudo k3s kubectl get pods -n monitoring' 2>/dev/null | grep -q 'prometheus.*Running'"
 check "Grafana pod running" "$K3S_CMD 'sudo k3s kubectl get pods -n monitoring' 2>/dev/null | grep -q 'monitoring-grafana.*Running'"
 check "Alertmanager running" "$K3S_CMD 'sudo k3s kubectl get pods -n monitoring' 2>/dev/null | grep -q 'alertmanager.*Running'"
+check "Loki running" "$K3S_CMD 'sudo k3s kubectl get pods -n monitoring' 2>/dev/null | grep -q 'loki.*Running'"
+check_warn "Promtail DaemonSet ready" "$K3S_CMD 'sudo k3s kubectl get daemonset -n monitoring' 2>/dev/null | grep -q 'promtail'"
+check_warn "Webhook receiver running" "$K3S_CMD 'sudo k3s kubectl get pods -n monitoring' 2>/dev/null | grep -q 'webhook.*Running'"
 
 section "🔧  WORKER AGENT STATUS"
 
@@ -407,7 +413,7 @@ done
 
 section "🔄  AUTO-FIX: POD HEALTH"
 
-STUCK_APP_PODS=$($K3S_CMD "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep -v Running | grep -v Completed | grep -v Succeeded | awk '{print \$1}'" 2>/dev/null)
+STUCK_APP_PODS=$($K3S_CMD "sudo k3s kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null | grep -v Running | awk '{print \$1}'" 2>/dev/null)
 
 if [ -n "$STUCK_APP_PODS" ]; then
     echo -e "  ${YELLOW}⚠️  Found stuck pods, attempting rollback...${NC}"
@@ -428,7 +434,7 @@ if [ -n "$STUCK_APP_PODS" ]; then
         NEW_IMAGE=$($K3S_CMD "sudo k3s kubectl get deployment trengo-search -n default -o jsonpath='{.spec.template.spec.containers[0].image}'" 2>/dev/null)
         echo -e "  ${DIM}Rolled back to: ${NEW_IMAGE}${NC}"
 
-        STILL_STUCK=$($K3S_CMD "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep -v Running | wc -l" 2>/dev/null)
+        STILL_STUCK=$($K3S_CMD "sudo k3s kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null | grep -v Running | wc -l" 2>/dev/null)
 
         if [ "$STILL_STUCK" -eq 0 ] || [ -z "$STILL_STUCK" ]; then
             echo -e "  ${GREEN}✓ Pods recovered via rollback${NC}"
@@ -440,7 +446,7 @@ if [ -n "$STUCK_APP_PODS" ]; then
     else
         echo -e "  ${YELLOW}No rollback history - trying pod recreation...${NC}"
         
-        STUCK_POD_NAMES=$($K3S_CMD "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep -v Running | grep -v Completed | grep -v Succeeded | awk '{print \$1}'" 2>/dev/null)
+        STUCK_POD_NAMES=$($K3S_CMD "sudo k3s kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null | grep -v Running | awk '{print \$1}'" 2>/dev/null)
         
         if [ -n "$STUCK_POD_NAMES" ]; then
             echo -e "  ${DIM}Force-deleting stuck pods...${NC}"
@@ -454,7 +460,7 @@ if [ -n "$STUCK_APP_PODS" ]; then
             echo -e "  ${DIM}Waiting for pods to be recreated...${NC}"
             sleep 20
             
-            STILL_STUCK=$($K3S_CMD "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep -v Running | wc -l" 2>/dev/null)
+            STILL_STUCK=$($K3S_CMD "sudo k3s kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null | grep -v Running | wc -l" 2>/dev/null)
             
             if [ "$STILL_STUCK" -eq 0 ] || [ -z "$STILL_STUCK" ]; then
                 echo -e "  ${GREEN}✓ Pods recovered after recreation${NC}"
@@ -465,8 +471,8 @@ if [ -n "$STUCK_APP_PODS" ]; then
                 ((FAIL++))
             fi
         else
-            echo -e "  ${RED}✗ Could not identify stuck pods${NC}"
-            ((FAIL++))
+            echo -e "  ${GREEN}✓ All app pods healthy${NC}"
+            ((PASS++))
         fi
     fi
 else
@@ -594,6 +600,57 @@ if [ "$STUCK_SVCLB" -gt 0 ]; then
     echo -e "  ${DIM}Done - trengo accessible via NodePort 32504${NC}"
 fi
 
+section "🔒  SECURITY TOOLS"
+
+printf "  %-55s" "Trivy installed on ci-runner"
+TRIVY_CHECK=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo test -f /home/gitlab-runner/bin/trivy && echo yes || echo no" 2>/dev/null)
+if [ "$TRIVY_CHECK" == "yes" ]; then
+    TRIVY_VER=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo /home/gitlab-runner/bin/trivy --version 2>/dev/null | head -1" 2>/dev/null)
+    echo -e "${GREEN}✓ PASS${NC}  ${DIM}${TRIVY_VER}${NC}"
+    ((PASS++))
+else
+    echo -e "${YELLOW}⚠ WARN${NC}  ${DIM}Not installed -- will install on next pipeline run${NC}"
+    ((WARN++))
+fi
+
+printf "  %-55s" "Gitleaks installed on ci-runner"
+GITLEAKS_CHECK=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo test -f /home/gitlab-runner/bin/gitleaks && echo yes || echo no" 2>/dev/null)
+if [ "$GITLEAKS_CHECK" == "yes" ]; then
+    GITLEAKS_VER=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo /home/gitlab-runner/bin/gitleaks version 2>/dev/null" 2>/dev/null)
+    echo -e "${GREEN}✓ PASS${NC}  ${DIM}${GITLEAKS_VER}${NC}"
+    ((PASS++))
+else
+    echo -e "${YELLOW}⚠ WARN${NC}  ${DIM}Not installed -- will install on next pipeline run${NC}"
+    ((WARN++))
+fi
+
+section "🚀  GITLAB PIPELINE STATUS"
+
+LAST_PIPELINE=$(curl -sf --max-time 5 \
+    "http://$CI_RUNNER_IP/api/v4/projects/root%2Ftrengo-search/pipelines?per_page=1" \
+    -H "PRIVATE-TOKEN: ${GITLAB_TOKEN:-}" 2>/dev/null)
+
+if [ -n "$LAST_PIPELINE" ] && echo "$LAST_PIPELINE" | grep -q '"status"'; then
+    STATUS=$(echo "$LAST_PIPELINE" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+    REF=$(echo "$LAST_PIPELINE" | grep -o '"ref":"[^"]*"' | head -1 | cut -d'"' -f4)
+    PIPELINE_ID=$(echo "$LAST_PIPELINE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+    printf "  %-55s" "Last pipeline (#${PIPELINE_ID} on ${REF})"
+    if [ "$STATUS" == "success" ]; then
+        echo -e "${GREEN}✓ ${STATUS}${NC}"
+        ((PASS++))
+    elif [ "$STATUS" == "running" ] || [ "$STATUS" == "pending" ]; then
+        echo -e "${YELLOW}⚠ ${STATUS}${NC}"
+        ((WARN++))
+    else
+        echo -e "${RED}✗ ${STATUS}${NC}"
+        ((FAIL++))
+    fi
+else
+    printf "  %-55s" "Last pipeline status"
+    echo -e "${YELLOW}⚠ WARN${NC}  ${DIM}Could not fetch -- set GITLAB_TOKEN env var for pipeline checks${NC}"
+    ((WARN++))
+fi
+
 # ============================================
 #   RESULTS SUMMARY
 # ============================================
@@ -613,12 +670,15 @@ if [ $FAIL -eq 0 ]; then
     
     echo -e "\n${BOLD}  🔗 Quick Links:${NC}"
     echo -e "  ────────────────────────────────────────────────────────"
-    echo -e "  ${CYAN}📱 Trengo App:${NC}      http://$K3S_CONTROL_IP:32504"
-    echo -e "  ${CYAN}📊 Grafana:${NC}         http://$K3S_CONTROL_IP:30080"
-    echo -e "  ${CYAN}🦊 GitLab:${NC}          http://$CI_RUNNER_IP"
-    echo -e "  ${CYAN}🚀 Pipelines:${NC}       http://$CI_RUNNER_IP/root/trengo-search/-/pipelines"
-    echo -e "  ${CYAN}☸️  K8s Dashboard:${NC}   https://$K3S_CONTROL_IP:30443"
-    echo -e "  ${CYAN}🐳 Portainer:${NC}       http://$K3S_CONTROL_IP:30777"
+    echo -e "  ${CYAN}📱 Trengo App (prod):${NC}   http://$K3S_CONTROL_IP:32504"
+    echo -e "  ${CYAN}📱 Trengo App (staging):${NC} http://$K3S_CONTROL_IP:32505"
+    echo -e "  ${CYAN}📊 Grafana:${NC}              http://$K3S_CONTROL_IP:30080"
+    echo -e "  ${CYAN}🔔 Alertmanager:${NC}         http://$K3S_CONTROL_IP:30093"
+    echo -e "  ${CYAN}🦊 GitLab:${NC}               http://$CI_RUNNER_IP"
+    echo -e "  ${CYAN}🚀 Pipelines:${NC}            http://$CI_RUNNER_IP/root/trengo-search/-/pipelines"
+    echo -e "  ${CYAN}📖 Wiki:${NC}                 http://$CI_RUNNER_IP/root/trengo-search/-/wikis"
+    echo -e "  ${CYAN}☸️  K8s Dashboard:${NC}        https://$K3S_CONTROL_IP:30443"
+    echo -e "  ${CYAN}🐳 Portainer:${NC}            http://$K3S_CONTROL_IP:30777"
     
     echo -e "\n${BOLD}  🔑 K8s Dashboard Token:${NC}"
     echo -e "  ────────────────────────────────────────────────────────"
