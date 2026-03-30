@@ -25,6 +25,7 @@ K3S_INFRA_IP   = "192.168.122.230"
 CI_RUNNER_IP   = "192.168.122.220"
 K3S_WORKER1_IP = "192.168.122.219"
 K3S_TOKEN      = "K10f56614b297cb7bf1aefdf9729e609f96a532f1a166949beecadda41ad9f834ad::server:86629278cae454833dba29ea33c9b15e"
+GITLAB_TOKEN   = "glpat-xBRPlkMBWrGcwgrOTARgJ286MQp1OjEH.01.0w19upc9q"
 K3S_URL        = f"https://{K3S_CONTROL_IP}:6443"
 BASE_IP_OCTET  = 221   # k3s-worker-2 = .221, worker-3 = .222 ...
 
@@ -279,36 +280,6 @@ def main_menu():
 {c('+----------------------------------------------------------+')}""")
     return input(f"\n{y('Select option: ')}")
 
-# ── K3s sub-menu ──────────────────────────────────────────────
-def k3s_menu():
-    while True:
-        banner()
-        print(f"""\
-{c('+-------------------------------------------+')}
-{c('|')}  {bold('K3S CLUSTER')}                             {c('|')}
-{c('+-------------------------------------------+')}
-{c('|')}  {bold('1.')}  Start K3s                          {c('|')}
-{c('|')}  {bold('2.')}  Stop K3s                           {c('|')}
-{c('|')}  {bold('3.')}  Status                             {c('|')}
-{c('|')}  {bold('0.')}  Back                               {c('|')}
-{c('+-------------------------------------------+')}""")
-        choice = input(f"\n{y('Select option: ')}")
-        if choice == '1':
-            divider("STARTING K3S CLUSTER")
-            run_script("k3s-start.sh")
-            pause()
-        elif choice == '2':
-            divider("STOPPING K3S CLUSTER")
-            run_script("k3s-stop.sh")
-            pause()
-        elif choice == '3':
-            divider("K3S STATUS")
-            run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
-            run("virsh list --all")
-            pause()
-        elif choice == '0':
-            break
-
 # ── Scale sub-menu ────────────────────────────────────────────
 def scale_menu():
     while True:
@@ -390,7 +361,6 @@ def do_stop_all():
         print("  Cancelled.")
         return
 
-    # Get all currently running VMs (skip Base — it's a disk template)
     result = run("virsh list --state-running 2>/dev/null", capture=True)
     running = []
     for line in result.stdout.splitlines():
@@ -411,7 +381,6 @@ def do_stop_all():
 
     time.sleep(5)
 
-    # Check what's still running and force-destroy
     result = run("virsh list --state-running 2>/dev/null", capture=True)
     still_running = []
     for line in result.stdout.splitlines():
@@ -464,11 +433,11 @@ def do_health_check():
     mode = input(y("  Select: "))
     script = os.path.join(SCRIPTS_DIR, "check-lab.sh")
     if mode == '1':
-        run(f"bash {script}")
+        run(f"GITLAB_TOKEN={GITLAB_TOKEN} bash {script}")
     elif mode == '2':
-        run(f"bash {script} --restart")
+        run(f"GITLAB_TOKEN={GITLAB_TOKEN} bash {script} --restart")
     elif mode == '3':
-        run(f"bash {script} --reboot")
+        run(f"GITLAB_TOKEN={GITLAB_TOKEN} bash {script} --reboot")
 
 def do_upscale():
     divider("UPSCALE -- Adding new worker")
@@ -624,7 +593,6 @@ def do_nuke_test():
     if input(y("  Proceed? (y/n): ")).lower() != 'y':
         print("  Cancelled."); return
 
-    # Step 1 — Kill the app
     divider("Step 1/4 -- Scaling trengo-search to 0")
     result = run(
         f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas=0 -n default"',
@@ -634,7 +602,6 @@ def do_nuke_test():
         print(r(f"  Failed to scale down: {result.stderr.strip()}")); return
     print(g("  Deployment scaled to 0"))
 
-    # Verify pods gone
     time.sleep(3)
     pods = run(
         f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep trengo"',
@@ -645,12 +612,11 @@ def do_nuke_test():
     else:
         print(g("  All trengo pods terminated"))
 
-    # Step 2 — Wait for alert
     divider("Step 2/4 -- Waiting for alert to fire")
     print(dim("  TrengoAppDown has for: 1m -- alert fires after 1 minute of 0 replicas"))
     print(dim("  Polling Alertmanager every 10s..."))
     alert_fired = False
-    for i in range(18):  # max 3 minutes
+    for i in range(18):
         elapsed = i * 10
         print(f"  [{elapsed}s] checking Alertmanager...", end='\r', flush=True)
         result = run(
@@ -672,7 +638,6 @@ def do_nuke_test():
 
     input(f"\n{c('  Press Enter when you have confirmed the Slack alert, then we restore the app...')}")
 
-    # Step 3 — Restore
     divider("Step 3/4 -- Restoring trengo-search")
     result = run(
         f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas=1 -n default"',
@@ -694,11 +659,10 @@ def do_nuke_test():
         print(f"  [{i*5}s] waiting for pod...", end='\r', flush=True)
         time.sleep(5)
 
-    # Step 4 — Wait for resolved
     divider("Step 4/4 -- Waiting for RESOLVED notification")
     print(dim(f"  resolve_timeout: 1m -- Alertmanager will send resolved within ~60s"))
     print(dim("  Polling Alertmanager every 10s..."))
-    for i in range(18):  # max 3 minutes
+    for i in range(18):
         elapsed = i * 10
         print(f"  [{elapsed}s] checking Alertmanager...", end='\r', flush=True)
         result = run(
@@ -713,9 +677,7 @@ def do_nuke_test():
         time.sleep(10)
     else:
         print(r("\n  Alert did not clear within 3 minutes"))
-        print(dim("  Run: curl -s http://192.168.122.218:30093/api/v2/alerts?active=true | python3 -m json.tool"))
 
-    # Summary
     divider("Nuke Test Complete")
     print(f"  {bold('Pipeline tested:')}")
     print(f"  {g('>')} Prometheus detected 0 replicas")
@@ -729,7 +691,6 @@ def do_nuke_test():
 #  RAM NUKE TEST
 # ─────────────────────────────────────────────────────────────
 def get_ci_ram():
-    """Get ci-runner RAM usage as integer percent."""
     res = run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
         '"python3 -c \\"import subprocess; r=subprocess.check_output([\'free\']).decode().split()[7:13]; print(int((int(r[1])-int(r[5]))/int(r[1])*100))\\""',
@@ -741,11 +702,10 @@ def get_ci_ram():
         return 0
 
 def wait_for_alert(alert_name, timeout_s=180, interval=10):
-    """Poll Alertmanager until alert_name is active. Returns elapsed seconds or -1."""
     for i in range(timeout_s // interval):
         elapsed = i * interval
         mem = get_ci_ram()
-        print(f"  [{elapsed}s] RAM: {y(str(mem)+'%')} — waiting for {c(alert_name)}...", end='\r', flush=True)
+        print(f"  [{elapsed}s] RAM: {y(str(mem)+'%')} -- waiting for {c(alert_name)}...", end='\r', flush=True)
         result = run(
             f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
             '"curl -s http://localhost:30093/api/v2/alerts?active=true"',
@@ -758,7 +718,6 @@ def wait_for_alert(alert_name, timeout_s=180, interval=10):
     return -1
 
 def wait_for_resolved(alert_name, timeout_s=180, interval=10):
-    """Poll Alertmanager until alert_name is gone. Returns True if resolved."""
     for i in range(timeout_s // interval):
         elapsed = i * interval
         mem = get_ci_ram()
@@ -770,7 +729,7 @@ def wait_for_resolved(alert_name, timeout_s=180, interval=10):
         print(
             f"  [{elapsed}s] RAM: {g(str(mem)+'%')} "
             f"stress: {g('gone') if stress_gone else r('running')} "
-            f"— waiting for RESOLVED...",
+            f"-- waiting for RESOLVED...",
             end='\r', flush=True
         )
         result = run(
@@ -787,11 +746,11 @@ def wait_for_resolved(alert_name, timeout_s=180, interval=10):
 def do_ram_nuke_test():
     divider("RAM NUKE TEST -- Two-phase auto-remediation demo")
     print(f"""
-  {bold('Phase 1')} — Stress to {y('~85%')}
-    {y('>')} {c('NodeMemoryHigh')} fires after 30s  →  Slack CRITICAL alert + GitLab issue
-    {y('>')} No auto-remediation yet — alert is visible in Slack
+  {bold('Phase 1')} -- Stress to {y('~85%')}
+    {y('>')} {c('NodeMemoryHigh')} fires after 30s  ->  Slack CRITICAL alert + GitLab issue
+    {y('>')} No auto-remediation yet -- alert is visible in Slack
 
-  {bold('Phase 2')} — Push to {r('~90%')}
+  {bold('Phase 2')} -- Push to {r('~90%')}
     {y('>')} {c('NodeMemoryCritical')} fires after 30s
     {y('>')} Auto-remediation: {dim('pkill stress-ng + gitlab-ctl restart')}
     {y('>')} Memory drops, both alerts resolve, GitLab issues auto-closed
@@ -801,39 +760,32 @@ def do_ram_nuke_test():
     if input(y("  Proceed? (y/n): ")).lower() != 'y':
         print("  Cancelled."); return
 
-    # ── Baseline ──────────────────────────────────────────────
-    divider("Baseline — ci-runner memory")
+    divider("Baseline -- ci-runner memory")
     run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -h"')
 
-    # Ensure stress-ng is installed
     run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
         '"sudo apt-get install -y stress-ng -qq 2>/dev/null"',
         capture=True
     )
 
-    # ── Dynamic calculation ───────────────────────────────────
-    mem_raw = run(
-        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m"',
-        capture=True
-    ).stdout.strip().splitlines()
+    mem_raw = run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m"', capture=True).stdout.strip().splitlines()
     mem_line = [x for x in mem_raw if x.startswith('Mem:')][0].split()
     total_mb  = int(mem_line[1])
     used_mb   = int(mem_line[2])
     current_pct = (used_mb / total_mb) * 100
-    phase1_mb = int(total_mb * 0.83) - used_mb         # aim for 83% — lands ~85-87% under load
-    phase2_mb = int(total_mb * 0.12) + 500              # push extra ~5% more
+    phase1_mb = int(total_mb * 0.83) - used_mb
+    phase2_mb = int(total_mb * 0.12) + 500
 
     print(f"  {bold('Node RAM state:')}  {y(str(total_mb))}MB total  |  {y(str(used_mb))}MB used  |  {y(f'{current_pct:.0f}%')} current")
-    print(f"  {bold('Phase 1 stress:')} {g(str(phase1_mb))}MB  →  target ~87%")
-    print(f"  {bold('Phase 2 stress:')} {g(str(phase2_mb))}MB  →  target ~92%")
+    print(f"  {bold('Phase 1 stress:')} {g(str(phase1_mb))}MB  ->  target ~87%")
+    print(f"  {bold('Phase 2 stress:')} {g(str(phase2_mb))}MB  ->  target ~92%")
 
     if phase1_mb <= 0:
-        print(r("  Node already above 85% — no stress needed, alerts should already be firing"))
+        print(r("  Node already above 85% -- no stress needed, alerts should already be firing"))
         return
 
-    # ── Phase 1 — hit ~85% ────────────────────────────────────
-    divider(f"Phase 1 — Stressing to ~87%  ({phase1_mb}MB)")
+    divider(f"Phase 1 -- Stressing to ~87%  ({phase1_mb}MB)")
     run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} ' +
         f'"nohup sudo stress-ng --vm 1 --vm-bytes {phase1_mb}M --timeout 300s > /tmp/stress1.log 2>&1 & echo started"',
@@ -844,14 +796,13 @@ def do_ram_nuke_test():
 
     fired = wait_for_alert("NodeMemoryHigh", timeout_s=180)
     if fired < 0:
-        print(r("\n  NodeMemoryHigh did not fire — aborting"))
+        print(r("\n  NodeMemoryHigh did not fire -- aborting"))
         run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
         return
 
-    print(y("\n  Check #incidents in Slack — CRITICAL | NodeMemoryHigh should be there"))
+    print(y("\n  Check #incidents in Slack -- CRITICAL | NodeMemoryHigh should be there"))
     input(c("  Press Enter when you have confirmed the Slack alert to start Phase 2..."))
 
-    # ── Phase 2 — kill Phase 1, fresh stress to ~93% ─────────
     print(dim("  Killing Phase 1 stress to free headroom..."))
     run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo kill -9 \$(pgrep -f stress-ng) 2>/dev/null || true"', capture=True)
     time.sleep(3)
@@ -861,8 +812,8 @@ def do_ram_nuke_test():
     used_mb2  = int(mem_line2[2])
     phase2_mb = int(total_mb2 * 0.93) - used_mb2
     current2  = round(used_mb2 / total_mb2 * 100)
-    print(f"  {bold('Phase 2 state:')} {y(str(used_mb2))}MB used ({y(str(current2)+'%')}) — stressing {g(str(phase2_mb))}MB → 93%")
-    divider(f"Phase 2 — Fresh stress to ~93%  ({phase2_mb}MB)")
+    print(f"  {bold('Phase 2 state:')} {y(str(used_mb2))}MB used ({y(str(current2)+'%')}) -- stressing {g(str(phase2_mb))}MB -> 93%")
+    divider(f"Phase 2 -- Fresh stress to ~93%  ({phase2_mb}MB)")
     run(
         f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} ' +
         f'"nohup sudo stress-ng --vm 1 --vm-bytes {phase2_mb}M --timeout 60s > /tmp/stress2.log 2>&1 & echo started"',
@@ -875,34 +826,32 @@ def do_ram_nuke_test():
     if fired2 < 0:
         print(r("\n  NodeMemoryCritical did not fire"))
     else:
-        print(y("  Auto-remediation triggered — killing stress-ng + restarting gitlab..."))
+        print(y("  Auto-remediation triggered -- killing stress-ng + restarting gitlab..."))
         run(
             f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
             '"sudo kill -9 $(pgrep -f stress-ng) 2>/dev/null; sudo gitlab-ctl restart 2>/dev/null; echo done"',
             capture=True
         )
-        print(g("  ✓ stress-ng killed + gitlab-ctl restart sent"))
+        print(g("  stress-ng killed + gitlab-ctl restart sent"))
         print(dim("  Waiting for memory to drop and alerts to resolve..."))
 
-    # ── Wait for both alerts to resolve ───────────────────────
     divider("Waiting for RESOLVED")
     resolved = wait_for_resolved("NodeMemoryCritical", timeout_s=300)
     if resolved:
-        print(g("  Check #incidents — RESOLVED messages should be in Slack"))
+        print(g("  Check #incidents -- RESOLVED messages should be in Slack"))
     else:
-        print(r("  Alerts did not resolve — cleaning up manually"))
+        print(r("  Alerts did not resolve -- cleaning up manually"))
         run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
 
-    # ── Final state ───────────────────────────────────────────
     print(c("\n  Final ci-runner memory:"))
     run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -h"')
 
     divider("RAM Nuke Test Complete")
     print(f"  {bold('Pipeline tested:')}")
-    print(f"  {g('>')} Phase 1: stress-ng hit 85% — NodeMemoryHigh fired")
-    print(f"  {g('>')} Phase 2: stress-ng hit 90% — NodeMemoryCritical fired")
+    print(f"  {g('>')} Phase 1: stress-ng hit 85% -- NodeMemoryHigh fired")
+    print(f"  {g('>')} Phase 2: stress-ng hit 90% -- NodeMemoryCritical fired")
     print(f"  {g('>')} Auto-remediation: pkill stress-ng + gitlab-ctl restart")
-    print(f"  {g('>')} Memory recovered — both alerts resolved")
+    print(f"  {g('>')} Memory recovered -- both alerts resolved")
     print(f"  {g('>')} GitLab issues auto-created and auto-closed")
 
 # ─────────────────────────────────────────────────────────────
@@ -937,13 +886,11 @@ def alerting_menu():
 # ─────────────────────────────────────────────────────────────
 def do_service_links():
     divider("SERVICE LINKS")
-    B = f"{C.BLUE}{C.BOLD}"
-    E = C.END
     print(f"""
   {bold(c('OBSERVABILITY'))}
   {b('-'*56)}
   {bold('Grafana')}          {g('http://192.168.122.218:30080')}
-                    {dim('admin / see: kubectl get secret -n monitoring monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d')}
+                    {dim('admin / kubectl get secret -n monitoring monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d')}
 
   {bold('Prometheus')}       {g('http://192.168.122.218:30090')}
                     {dim('Alerts: /alerts  Targets: /targets  Rules: /rules')}
@@ -951,12 +898,25 @@ def do_service_links():
   {bold('Alertmanager')}     {g('http://192.168.122.218:30093')}
                     {dim('Active alerts, silences, inhibitions')}
 
-  {bold('Loki')}             {dim('http://loki:3100  (ClusterIP only -- use Grafana Explore)')}
+  {bold('Loki')}             {dim('ClusterIP only -- use Grafana Explore')}
+
+  {bold(c('APPLICATION'))}
+  {b('-'*56)}
+  {bold('Trengo (prod)')}    {g('http://192.168.122.218:32504')}
+                    {dim('Production -- manual deploy gate')}
+
+  {bold('Trengo (staging)')} {g('http://192.168.122.218:32505')}
+                    {dim('Staging -- auto-deployed on every pipeline run')}
 
   {bold(c('CI/CD & CODE'))}
   {b('-'*56)}
   {bold('GitLab')}           {g('http://192.168.122.220')}
                     {dim('Source control, CI/CD pipelines, incident issues')}
+
+  {bold('Pipelines')}        {g('http://192.168.122.220/root/trengo-search/-/pipelines')}
+
+  {bold('Wiki')}             {g('http://192.168.122.220/root/trengo-search/-/wikis')}
+                    {dim('Runbooks, post-mortems, architecture docs')}
 
   {bold('GitLab Runner')}    {dim('Registered on ci-runner (192.168.122.220)')}
 
@@ -967,11 +927,6 @@ def do_service_links():
 
   {bold('K8s Dashboard')}    {g('https://192.168.122.218:30443')}
                     {dim('Token: kubectl -n kubernetes-dashboard create token admin-user')}
-
-  {bold(c('APPLICATION'))}
-  {b('-'*56)}
-  {bold('Trengo Search')}    {g('http://192.168.122.218:32504')}
-                    {dim('The app being deployed via CI/CD')}
 
   {bold(c('NODE SSH ACCESS'))}
   {b('-'*56)}
