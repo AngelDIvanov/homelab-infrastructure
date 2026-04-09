@@ -250,9 +250,9 @@ def banner():
     B = f"{C.BLUE}{C.BOLD}"
     E = C.END
     print(f"\n{B}+==============================================================+{E}")
-    print(f"{B}|{E}           DevOps Home Lab  --  Control Panel                {B}|{E}")
+    print(f"{B}|{E}           DevOps Home Lab  --  Control Panel                 {B}|{E}")
     print(f"{B}+==============================================================+{E}")
-    print(f"{B}|{E}  {C.BOLD}VM STATUS{E}                                                    {B}|{E}")
+    print(f"{B}|{E}  {C.BOLD}VM STATUS{E}                                                   {B}|{E}")
     print(f"{B}+==============================================================+{E}")
     states = vm_states()
     vms    = list(states.items())
@@ -282,20 +282,20 @@ def main_menu():
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('K3S CLUSTER')}                                             {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('1.')}  Start k3s          boot k3s cluster VMs            {c('|')}
+{c('|')}  {bold('1.')}  Start k3s          boot k3s cluster VMs             {c('|')}
 {c('|')}  {bold('2.')}  Stop k3s           shutdown k3s cluster             {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('KUBEADM CLUSTER')}                                         {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('3.')}  Start K8s          boot kubeadm cluster VMs        {c('|')}
+{c('|')}  {bold('3.')}  Start K8s          boot kubeadm cluster VMs         {c('|')}
 {c('|')}  {bold('4.')}  Stop K8s           shutdown kubeadm cluster         {c('|')}
-{c('|')}  {bold('5.')}  K8s Status         kubeadm nodes + pods            {c('|')}
+{c('|')}  {bold('5.')}  K8s Status         kubeadm nodes + pods             {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('K3S TOOLS')}                                               {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('6.')}  Health Check       run check-lab                   {c('|')}
+{c('|')}  {bold('6.')}  Health Check       run check-lab                    {c('|')}
 {c('|')}  {bold('7.')}  Scale              add / remove k3s workers         {c('|')}
-{c('|')}  {bold('8.')}  Ansible            run playbooks                   {c('|')}
+{c('|')}  {bold('8.')}  Ansible            run playbooks                    {c('|')}
 {c('|')}  {bold('9.')}  Sync Images        push to all k3s nodes            {c('|')}
 {c('|')}  {bold('10.')} Rejoin Workers     re-attach nodes to k3s           {c('|')}
 {c('|')}  {bold('11.')} k3s Status         nodes + virsh overview           {c('|')}
@@ -303,13 +303,13 @@ def main_menu():
 {c('|')}  {bold('ALERTING')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('12.')} Alerting Tests     app nuke, RAM nuke,              {c('|')}
-{c('|')}       {dim('               auto-remediation demos')}                {c('|')}
+{c('|')}       {dim('               auto-remediation demos')}              {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('SERVICES')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('13.')} Service Links      all URLs and access info         {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('0.')}  Exit                                               {c('|')}
+{c('|')}  {bold('0.')}  Exit                                                {c('|')}
 {c('+----------------------------------------------------------+')}""")
     return input(f"\n{y('Select option: ')}")
 

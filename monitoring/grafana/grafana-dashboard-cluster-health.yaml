@@ -690,6 +690,119 @@ data:
             "cellHeight": "sm",
             "sortBy": [{"desc": false, "displayName": "Started (ago)"}]
           }
+        },
+        {
+          "id": 9,
+          "type": "row",
+          "title": "check-lab Health Check (every 15 min)",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 36}
+        },
+        {
+          "id": 10,
+          "title": "check-lab Last Run",
+          "description": "Shows whether the most recent check-lab execution succeeded (1) or failed (0). Red = cluster issues detected.",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 37},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "clamp_max(kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\", owner_name=\"check-lab\"}, 1)",
+              "legendFormat": "last result",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "FAIL", "color": "red"}}},
+                {"type": "value", "options": {"1": {"text": "PASS", "color": "green"}}}
+              ],
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "value"}
+        },
+        {
+          "id": 11,
+          "title": "check-lab Failures (last 24 h)",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 37},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "sum(kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\", owner_name=\"check-lab\"}) or vector(0)",
+              "legendFormat": "failed runs",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 3}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 12,
+          "title": "check-lab Run History",
+          "description": "Pass/fail trend for check-lab over the selected time range. Each 15-minute run shows succeeded=1 or failed=1.",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 37},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\", owner_name=\"check-lab\"}",
+              "legendFormat": "succeeded",
+              "refId": "A"
+            },
+            {
+              "expr": "kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\", owner_name=\"check-lab\"}",
+              "legendFormat": "failed",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"fillOpacity": 20, "lineWidth": 2, "drawStyle": "bars", "barAlignment": 0}
+            },
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "succeeded"},
+                "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "failed"},
+                "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]
+              }
+            ]
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 13,
+          "title": "check-lab Log Stream",
+          "description": "Structured JSON logs from the most recent check-lab pod. level=ERROR lines indicate failed checks.",
+          "type": "logs",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 45},
+          "datasource": {"type": "loki", "uid": "loki"},
+          "targets": [
+            {
+              "expr": "{namespace=\"default\", app=\"check-lab\"}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          }
         }
       ]
     }
