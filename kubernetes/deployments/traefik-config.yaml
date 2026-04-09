@@ -1,0 +1,27 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    # Keep Traefik off the control plane so ingress survives a control plane failure.
+    # Uses preferredDuring (soft) so it still schedules if no workers are available.
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role
+                  operator: NotIn
+                  values:
+                    - infra
+    # Ensure Traefik has 2 replicas so one worker failure doesn't kill ingress
+    deployment:
+      replicas: 2

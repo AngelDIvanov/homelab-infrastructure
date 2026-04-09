@@ -20,6 +20,14 @@ grafana:
 prometheus:
   verticalPodAutoscaler:
     enabled: false
+  prometheusSpec:
+    nodeSelector:
+      kubernetes.io/hostname: k3s-infra
+    tolerations:
+      - key: node-role
+        operator: Equal
+        value: infra
+        effect: NoSchedule
   service:
     type: NodePort
     nodePort: 30090
@@ -29,6 +37,13 @@ alertmanager:
     enabled: false
   alertmanagerSpec:
     logLevel: info
+    nodeSelector:
+      kubernetes.io/hostname: k3s-infra
+    tolerations:
+      - key: node-role
+        operator: Equal
+        value: infra
+        effect: NoSchedule
   service:
     type: NodePort
     nodePort: 30093
@@ -73,3 +88,10 @@ defaultRules:
     KubeSchedulerDown: true
     KubeControllerManagerDown: true
     KubeProxyDown: true
+
+# k3s uses SQLite as its datastore, not etcd.
+# Disabling kubeEtcd removes the etcd Grafana dashboard (which shows empty/misleading
+# panels on k3s) and the etcd ServiceMonitor (which scrapes nothing on k3s).
+# Control plane health is covered by the K3sControlPlaneUnhealthy alert on up{job="apiserver"}.
+kubeEtcd:
+  enabled: false

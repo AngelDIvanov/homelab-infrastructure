@@ -38,7 +38,7 @@ Human error — `kubectl scale deployment trengo-search --replicas=0` run on pro
 
 ## Resolution
 1. Confirmed `replicas=0` in deployment spec
-2. Scaled back: `kubectl rollout restart deployment trengo-search -n default`
+2. Scaled back: `kubectl scale deployment trengo-search --replicas=1 -n default`
 3. Verified pod healthy
 
 ---

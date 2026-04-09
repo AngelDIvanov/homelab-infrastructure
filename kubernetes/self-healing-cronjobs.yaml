@@ -1,0 +1,249 @@
+---
+# ============================================================
+#  RBAC — ServiceAccount for kubectl-based self-healing jobs
+# ============================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: self-healing
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: self-healing
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: self-healing
+subjects:
+  - kind: ServiceAccount
+    name: self-healing
+    namespace: default
+roleRef:
+  kind: ClusterRole
+  name: self-healing
+  apiGroup: rbac.authorization.k8s.io
+---
+# ============================================================
+#  node-image-prune
+#  Runs on EVERY node (parallelism=3, antiAffinity enforces
+#  one pod per node). Mounts the k3s binary (statically
+#  compiled) and containerd socket to prune unused images.
+#  Tolerates all node taints so it reaches control-plane
+#  and infra nodes too.
+# ============================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: node-image-prune
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: self-healing
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      parallelism: 3
+      completions: 3
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: node-image-prune
+        spec:
+          restartPolicy: OnFailure
+          hostPID: true
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+            - key: node-role
+              operator: Equal
+              value: infra
+              effect: NoSchedule
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: node-image-prune
+                  topologyKey: kubernetes.io/hostname
+          volumes:
+            - name: k3s-bin
+              hostPath:
+                path: /usr/local/bin/k3s
+                type: File
+            - name: containerd-sock
+              hostPath:
+                path: /run/k3s/containerd/containerd.sock
+                type: Socket
+          containers:
+            - name: image-prune
+              image: alpine:3.19
+              securityContext:
+                privileged: true
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  NODE=$(cat /etc/hostname)
+                  echo "[node-image-prune] Starting on node: $NODE"
+                  BEFORE=$(/k3s crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images 2>/dev/null | wc -l)
+                  /k3s crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock rmi --prune
+                  AFTER=$(/k3s crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images 2>/dev/null | wc -l)
+                  echo "[node-image-prune] Done on $NODE. Images before=$BEFORE after=$AFTER"
+              volumeMounts:
+                - name: k3s-bin
+                  mountPath: /k3s
+                  readOnly: true
+                - name: containerd-sock
+                  mountPath: /run/k3s/containerd/containerd.sock
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  cpu: 200m
+                  memory: 64Mi
+---
+# ============================================================
+#  failed-job-cleanup
+#  Deletes completed and failed Job objects cluster-wide.
+#  Runs every 6 hours. Preserves jobs younger than 1 hour
+#  so fresh history is visible in Grafana.
+# ============================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: failed-job-cleanup
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: self-healing
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: self-healing
+          containers:
+            - name: job-cleanup
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  echo "[failed-job-cleanup] Scanning jobs across all namespaces..."
+                  DELETED=0
+
+                  # Get jobs with completion time or failed status, skip those started <1h ago
+                  while IFS=$'\t' read -r NS NAME COMP_TIME FAILED_COUNT START_TIME; do
+                    # Skip jobs with no completion time and no failures (still running or pending)
+                    if [ -z "$COMP_TIME" ] && [ "${FAILED_COUNT:-0}" -eq 0 ]; then
+                      continue
+                    fi
+
+                    # Skip jobs started less than 1 hour ago (keep fresh history)
+                    if [ -n "$START_TIME" ]; then
+                      START_EPOCH=$(date -d "$START_TIME" +%s 2>/dev/null || echo 0)
+                      NOW_EPOCH=$(date +%s)
+                      AGE_SECS=$(( NOW_EPOCH - START_EPOCH ))
+                      if [ "$AGE_SECS" -lt 3600 ]; then
+                        continue
+                      fi
+                    fi
+
+                    echo "  Deleting job $NS/$NAME (completionTime=$COMP_TIME, failed=$FAILED_COUNT)"
+                    kubectl delete job -n "$NS" "$NAME" --ignore-not-found=true
+                    DELETED=$((DELETED + 1))
+                  done < <(kubectl get jobs -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.status.completionTime}{"\t"}{.status.failed}{"\t"}{.status.startTime}{"\n"}{end}' 2>/dev/null)
+
+                  echo "[failed-job-cleanup] Done. Deleted $DELETED job(s)."
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+---
+# ============================================================
+#  crashloop-recovery
+#  Deletes pods stuck in CrashLoopBackOff with >5 restarts
+#  in non-system namespaces. Forces a fresh pod restart
+#  rather than letting the exponential backoff grow large.
+#  kube-system and monitoring are always excluded.
+# ============================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: crashloop-recovery
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: self-healing
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: self-healing
+          containers:
+            - name: recovery
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  # Never touch these namespaces — system and monitoring are off-limits
+                  PROTECTED="kube-system monitoring"
+                  DELETED=0
+
+                  echo "[crashloop-recovery] Scanning for CrashLoopBackOff pods..."
+
+                  while IFS=$'\t' read -r NS NAME RESTART_COUNT REASON; do
+                    # Skip protected namespaces
+                    SKIP=0
+                    for pns in $PROTECTED; do
+                      [ "$NS" = "$pns" ] && SKIP=1 && break
+                    done
+                    [ "$SKIP" -eq 1 ] && continue
+
+                    # Only act on CrashLoopBackOff with more than 5 restarts
+                    if [ "$REASON" = "CrashLoopBackOff" ] && [ "${RESTART_COUNT:-0}" -gt 5 ] 2>/dev/null; then
+                      echo "  Recovering $NS/$NAME (reason=$REASON, restarts=$RESTART_COUNT)"
+                      kubectl delete pod -n "$NS" "$NAME" --grace-period=30 --ignore-not-found=true
+                      DELETED=$((DELETED + 1))
+                    fi
+                  done < <(kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.status.containerStatuses[0].restartCount}{"\t"}{.status.containerStatuses[0].state.waiting.reason}{"\n"}{end}' 2>/dev/null)
+
+                  echo "[crashloop-recovery] Done. Recovered $DELETED pod(s)."
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi

@@ -1,0 +1,880 @@
+---
+# ============================================================
+#  Node Health — KubeNodeNotReady + NodeDiskCritical
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-node-health
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  node-health.json: |
+    {
+      "title": "Node Health",
+      "uid": "homelab-nodehealth",
+      "tags": ["homelab"],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "time": {"from": "now-1h", "to": "now"},
+      "timezone": "browser",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Nodes Not Ready",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 0) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 2,
+          "title": "Nodes Ready",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 3,
+          "title": "Nodes Disk > 90% (Critical)",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count(100 - ((node_filesystem_avail_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"}) * 100) > 90) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 4,
+          "title": "Nodes Disk > 75% (Warning)",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count(100 - ((node_filesystem_avail_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"}) * 100) > 75) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 5,
+          "title": "Disk Usage % per Node",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "100 - ((node_filesystem_avail_bytes{job=\"node-exporter\",mountpoint=\"/\",fstype!=\"tmpfs\"} / node_filesystem_size_bytes{job=\"node-exporter\",mountpoint=\"/\",fstype!=\"tmpfs\"}) * 100) * on(instance) group_left(nodename) node_uname_info",
+              "legendFormat": "{{nodename}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "color": {"mode": "palette-classic"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 75}, {"color": "red", "value": 90}]}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 6,
+          "title": "Not Ready Node Count",
+          "description": "Number of nodes NOT in Ready state. Anything above 0 should trigger the KubeNodeNotReady alert.",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "count(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 0) or vector(0)",
+              "legendFormat": "Not Ready",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "color": {"mode": "fixed", "fixedColor": "red"},
+              "custom": {"fillOpacity": 20}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        }
+      ]
+    }
+---
+# ============================================================
+#  Container OOM Kills — ContainerOOMKilled
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-oom-kills
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  oom-kills.json: |
+    {
+      "title": "Container OOM Kills",
+      "uid": "homelab-oomkills",
+      "tags": ["homelab"],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "time": {"from": "now-6h", "to": "now"},
+      "timezone": "browser",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Containers Currently OOM-Killed",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count(kube_pod_container_status_last_terminated_reason{reason=\"OOMKilled\"} == 1 and increase(kube_pod_container_status_restarts_total[1h]) > 0) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 2,
+          "title": "Total Container Restarts (last 1h)",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "sum(increase(kube_pod_container_status_restarts_total[1h])) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "red", "value": 20}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 3,
+          "title": "Namespaces with OOM Kills",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count(count by(namespace) (kube_pod_container_status_last_terminated_reason{reason=\"OOMKilled\"} == 1 and increase(kube_pod_container_status_restarts_total[1h]) > 0)) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 4,
+          "title": "Restart Rate — OOM-Killed Containers",
+          "description": "Restart rate for containers whose last termination reason was OOMKilled. A node at 60% memory can still OOM-kill a container with a tight limit.",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "rate(kube_pod_container_status_restarts_total[5m]) and on(namespace, pod, container) kube_pod_container_status_last_terminated_reason{reason=\"OOMKilled\"} == 1",
+              "legendFormat": "{{namespace}}/{{pod}}/{{container}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {"mode": "palette-classic"},
+              "custom": {"fillOpacity": 10}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 5,
+          "title": "Container Memory Usage — All Namespaces",
+          "description": "Correlate with OOM events above. Container limit is what triggers OOM, not node pressure.",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "sum by(namespace, pod, container) (container_memory_working_set_bytes{container!=\"\",container!=\"POD\"})",
+              "legendFormat": "{{namespace}}/{{pod}}/{{container}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        }
+      ]
+    }
+---
+# ============================================================
+#  PVC Status — PVCPending
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-pvc-status
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  pvc-status.json: |
+    {
+      "title": "PVC Status",
+      "uid": "homelab-pvcstatus",
+      "tags": ["homelab"],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "time": {"from": "now-1h", "to": "now"},
+      "timezone": "browser",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Pending PVCs",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count(kube_persistentvolumeclaim_status_phase{phase=\"Pending\"} == 1) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 2,
+          "title": "Bound PVCs",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count(kube_persistentvolumeclaim_status_phase{phase=\"Bound\"} == 1) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 3,
+          "title": "Lost PVCs",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count(kube_persistentvolumeclaim_status_phase{phase=\"Lost\"} == 1) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 4,
+          "title": "PVC Phase Counts Over Time",
+          "description": "A PVC stuck in Pending means any pod mounting it cannot start — silent app failure.",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "count(kube_persistentvolumeclaim_status_phase{phase=\"Bound\"} == 1)",
+              "legendFormat": "Bound",
+              "refId": "A"
+            },
+            {
+              "expr": "count(kube_persistentvolumeclaim_status_phase{phase=\"Pending\"} == 1)",
+              "legendFormat": "Pending",
+              "refId": "B"
+            },
+            {
+              "expr": "count(kube_persistentvolumeclaim_status_phase{phase=\"Lost\"} == 1)",
+              "legendFormat": "Lost",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "custom": {"fillOpacity": 10}},
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "Bound"}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "Pending"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "Lost"}, "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}]}
+            ]
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 5,
+          "title": "PVC Capacity vs Used (Bound PVCs)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "kubelet_volume_stats_used_bytes",
+              "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} used",
+              "refId": "A"
+            },
+            {
+              "expr": "kubelet_volume_stats_capacity_bytes",
+              "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} capacity",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "bytes", "color": {"mode": "palette-classic"}}
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        }
+      ]
+    }
+---
+# ============================================================
+#  CronJob Status — CronJobFailed
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-cronjob-status
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  cronjob-status.json: |
+    {
+      "title": "CronJob Status",
+      "uid": "homelab-cronjobs",
+      "tags": ["homelab"],
+      "refresh": "60s",
+      "schemaVersion": 38,
+      "time": {"from": "now-24h", "to": "now"},
+      "timezone": "browser",
+      "panels": [
+        {
+          "id": 1,
+          "title": "CronJobs with Failed Executions",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count((kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}) > 0) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 2,
+          "title": "Currently Active Jobs",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "sum(kube_cronjob_status_active) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 3,
+          "title": "CronJobs with Succeeded Executions",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "count((kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}) >= 1) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 4,
+          "title": "CronJob-Owned Job Failures Over Time",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}",
+              "legendFormat": "{{owner_name}} ({{namespace}})",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]},
+              "custom": {"fillOpacity": 10}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 5,
+          "title": "CronJob-Owned Job Successes Over Time",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}",
+              "legendFormat": "{{owner_name}} ({{namespace}})",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"fillOpacity": 10}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 6,
+          "title": "Time Since Last CronJob Run",
+          "description": "Seconds elapsed since each CronJob last scheduled a job. Spikes between runs are normal; a value that grows indefinitely means a CronJob has stopped scheduling.",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "time() - kube_cronjob_status_last_schedule_time",
+              "legendFormat": "{{cronjob}} ({{namespace}})",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0,
+              "color": {"mode": "palette-classic"}
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 7,
+          "title": "CronJob Summary",
+          "description": "One row per CronJob. 'Since Last Run' shows seconds since last scheduled execution.",
+          "type": "table",
+          "gridPos": {"h": 6, "w": 24, "x": 0, "y": 20},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "kube_cronjob_info",
+              "refId": "Info",
+              "instant": true
+            },
+            {
+              "expr": "time() - kube_cronjob_status_last_schedule_time",
+              "refId": "SinceLastRun",
+              "instant": true
+            },
+            {
+              "expr": "kube_cronjob_status_active",
+              "refId": "Active",
+              "instant": true
+            }
+          ],
+          "transformations": [
+            {"id": "joinByField", "options": {"byField": "cronjob", "mode": "outer"}},
+            {
+              "id": "filterFieldsByName",
+              "options": {
+                "include": {
+                  "names": ["cronjob", "namespace", "schedule", "concurrency_policy", "timezone", "Value #SinceLastRun", "Value #Active"]
+                }
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "renameByName": {
+                  "cronjob": "CronJob",
+                  "namespace": "Namespace",
+                  "schedule": "Schedule",
+                  "concurrency_policy": "Concurrency",
+                  "timezone": "Timezone",
+                  "Value #SinceLastRun": "Since Last Run",
+                  "Value #Active": "Active Jobs"
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "Since Last Run"},
+                "properties": [
+                  {"id": "unit", "value": "s"},
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {"color": "green", "value": null},
+                        {"color": "yellow", "value": 3600},
+                        {"color": "red", "value": 86400}
+                      ]
+                    }
+                  },
+                  {"id": "custom.displayMode", "value": "color-text"}
+                ]
+              },
+              {
+                "matcher": {"id": "byName", "options": "Active Jobs"},
+                "properties": [
+                  {
+                    "id": "thresholds",
+                    "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "blue", "value": 1}]}
+                  },
+                  {"id": "custom.displayMode", "value": "color-text"}
+                ]
+              }
+            ]
+          },
+          "options": {"showHeader": true, "cellHeight": "sm"}
+        },
+        {
+          "id": 8,
+          "title": "Recent Job Executions",
+          "description": "One row per Job object currently tracked by kube-state-metrics. Sorted by most recently started. Duration is blank for still-running jobs.",
+          "type": "table",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 26},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "(time() - kube_job_status_start_time) * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}",
+              "refId": "StartedAgo",
+              "instant": true
+            },
+            {
+              "expr": "(kube_job_status_completion_time - kube_job_status_start_time) * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}",
+              "refId": "Duration",
+              "instant": true
+            },
+            {
+              "expr": "kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}",
+              "refId": "Succeeded",
+              "instant": true
+            },
+            {
+              "expr": "kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}",
+              "refId": "Failed",
+              "instant": true
+            }
+          ],
+          "transformations": [
+            {"id": "joinByField", "options": {"byField": "job_name", "mode": "outer"}},
+            {
+              "id": "filterFieldsByName",
+              "options": {
+                "include": {
+                  "names": ["job_name", "owner_name", "namespace", "Value #StartedAgo", "Value #Duration", "Value #Succeeded", "Value #Failed"]
+                }
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "renameByName": {
+                  "job_name": "Job",
+                  "owner_name": "CronJob",
+                  "namespace": "Namespace",
+                  "Value #StartedAgo": "Started (ago)",
+                  "Value #Duration": "Duration",
+                  "Value #Succeeded": "Succeeded",
+                  "Value #Failed": "Failed"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {"fields": [{"desc": false, "displayName": "Started (ago)"}]}
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "Started (ago)"},
+                "properties": [{"id": "unit", "value": "s"}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "Duration"},
+                "properties": [{"id": "unit", "value": "s"}]
+              },
+              {
+                "matcher": {"id": "byName", "options": "Failed"},
+                "properties": [
+                  {
+                    "id": "thresholds",
+                    "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+                  },
+                  {"id": "custom.displayMode", "value": "color-text"}
+                ]
+              },
+              {
+                "matcher": {"id": "byName", "options": "Succeeded"},
+                "properties": [
+                  {
+                    "id": "thresholds",
+                    "value": {"mode": "absolute", "steps": [{"color": "green", "value": 1}]}
+                  },
+                  {"id": "custom.displayMode", "value": "color-text"}
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "sortBy": [{"desc": false, "displayName": "Started (ago)"}]
+          }
+        }
+      ]
+    }
+---
+# ============================================================
+#  k3s Control Plane Health
+#  Replaces etcd dashboard (k3s uses SQLite/kine, not etcd).
+#  KubeSchedulerDown and KubeControllerManagerDown are silenced
+#  because k3s embeds them in the k3s binary. The API server
+#  up{job="apiserver"} is the canonical control plane health signal.
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-k3s-controlplane
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  k3s-controlplane.json: |
+    {
+      "title": "k3s Control Plane",
+      "uid": "homelab-k3s",
+      "tags": ["homelab"],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "time": {"from": "now-1h", "to": "now"},
+      "timezone": "browser",
+      "panels": [
+        {
+          "id": 1,
+          "title": "API Server",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "up{job=\"apiserver\"}", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}
+              ],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "value"}
+        },
+        {
+          "id": 2,
+          "title": "API Request Rate (req/s)",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "sum(rate(apiserver_request_total{job=\"apiserver\"}[5m]))", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"}
+        },
+        {
+          "id": 3,
+          "title": "API Error Rate (5xx/s)",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "sum(rate(apiserver_request_total{job=\"apiserver\",code=~\"5..\"}[5m])) or vector(0)", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.01}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 4,
+          "title": "API P99 Latency",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{job=\"apiserver\",verb!~\"WATCH|CONNECT\"}[5m])) by (le))", "refId": "A"}],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}
+            }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 5,
+          "title": "API Request Rate by Verb",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "sum by(verb) (rate(apiserver_request_total{job=\"apiserver\"}[5m]))",
+              "legendFormat": "{{verb}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "reqps", "color": {"mode": "palette-classic"}, "custom": {"fillOpacity": 10}}
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 6,
+          "title": "API Request Latency P50 / P99",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(apiserver_request_duration_seconds_bucket{job=\"apiserver\",verb!~\"WATCH|CONNECT\"}[5m])) by (le))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{job=\"apiserver\",verb!~\"WATCH|CONNECT\"}[5m])) by (le))",
+              "legendFormat": "p99",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "s", "color": {"mode": "palette-classic"}, "custom": {"fillOpacity": 5}},
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "p99"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "p50"}, "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]}
+            ]
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 7,
+          "title": "API Requests by Response Code",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "sum by(code) (rate(apiserver_request_total{job=\"apiserver\"}[5m]))",
+              "legendFormat": "HTTP {{code}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "reqps", "color": {"mode": "palette-classic"}, "custom": {"fillOpacity": 10}}
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        },
+        {
+          "id": 8,
+          "title": "API Server Uptime",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {
+              "expr": "up{job=\"apiserver\"}",
+              "legendFormat": "API Server",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 1,
+              "color": {"mode": "fixed", "fixedColor": "green"},
+              "custom": {"fillOpacity": 20},
+              "mappings": [
+                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}
+              ]
+            }
+          },
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+        }
+      ]
+    }

@@ -82,3 +82,70 @@ spec:
           annotations:
             summary: "Node memory critical — auto-remediation triggered"
             description: "Node {{ $labels.instance }} memory above 90% (current: {{ $value | printf \"%.1f\" }}%). Auto-restart initiated."
+
+        - alert: NodeDiskCritical
+          expr: 100 - ((node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100) > 90
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node disk usage is critical"
+            description: "Node {{ $labels.instance }} disk usage is above 90% (current: {{ $value | printf \"%.1f\" }}%). Immediate action required."
+
+        # K3sWorkerNodeDown — informational alert for worker nodes going down.
+        # Excludes k3s-infra (monitoring node) — if that goes down, Prometheus
+        # can't send alerts anyway. ci-runner is not in k3s so never appears here.
+        - alert: K3sWorkerNodeDown
+          expr: kube_node_status_condition{condition="Ready",status="true",node!="k3s-infra"} == 0
+          for: 1m
+          labels:
+            severity: info
+          annotations:
+            summary: "K3s worker node is down — cluster is handling it"
+            description: "Node *{{ $labels.node }}* is NotReady. Kubernetes has automatically rescheduled all workloads to healthy nodes. No immediate action required — please power the node back on when you get a chance."
+
+        # KubeNodeNotReady — scoped to infra only. Workers are handled by K3sWorkerNodeDown above.
+        - alert: KubeNodeNotReady
+          expr: kube_node_status_condition{condition="Ready",status="true",node="k3s-infra"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "k3s-infra node is not ready — monitoring stack may be affected"
+            description: "Node {{ $labels.node }} has been in a NotReady state for more than 2 minutes. Prometheus, Grafana and Alertmanager run on this node."
+
+        - alert: ContainerOOMKilled
+          expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1 and increase(kube_pod_container_status_restarts_total[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Container was OOM killed"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} (namespace {{ $labels.namespace }}) was OOM killed. Node memory pressure is a separate signal — a node at 60% can still OOM-kill containers with tight limits."
+
+        - alert: PVCPending
+          expr: kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PVC is stuck in Pending"
+            description: "PVC {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} has been Pending for more than 5 minutes. Any pod depending on it cannot start."
+
+        - alert: CronJobFailed
+          expr: (kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind="CronJob"}) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CronJob has failed executions"
+            description: "CronJob {{ $labels.owner_name }} in namespace {{ $labels.namespace }} has {{ $value }} failed job pod(s). Check logs for job {{ $labels.job_name }}."
+
+        - alert: K3sControlPlaneUnhealthy
+          expr: up{job="apiserver"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "k3s control plane is unreachable"
+            description: "The Kubernetes API server scrape target has been down for 2+ minutes. In k3s, the scheduler and controller-manager are embedded in the same binary — this is the canonical control plane health signal replacing the silenced KubeSchedulerDown and KubeControllerManagerDown upstreams."
