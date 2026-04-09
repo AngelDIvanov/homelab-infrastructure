@@ -21,16 +21,16 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 ## Cluster layout
 
 ```
-Host machine (KVM/libvirt)
-├── k3s-control    .218   control plane
-├── k3s-worker-1   .219   workloads
-├── k3s-infra      .230   GitLab + monitoring stack (NFS server)
-└── ci-runner      .220   GitLab Runner
+Host machine (KVM/libvirt, 32GB RAM)
+├── k3s-control    .218   2 vCPU / 2GB   control plane
+├── k3s-worker-1   .219   2 vCPU / 2GB   workloads
+├── k3s-worker-2   .221   2 vCPU / 2GB   workloads (dynamic, Terraform-managed)
+└── k3s-infra      .230   2 vCPU / 8GB   GitLab CE + monitoring stack + NFS
 ```
 
 All IPs are in the default libvirt NAT range (`192.168.122.0/24`). Set `base_ip_octet` in `terraform.tfvars` if yours is different.
 
-Dynamic workers (k3s-worker-2, 3, ...) are spun up on demand via Terraform.
+Additional workers (k3s-worker-3, ...) are spun up on demand via Terraform. The GitLab runner is embedded in k3s-infra rather than a dedicated VM.
 
 ---
 
