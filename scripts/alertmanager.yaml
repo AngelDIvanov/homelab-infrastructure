@@ -29,7 +29,7 @@ receivers:
         api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
         send_resolved: true
         color: 'danger'
-        title: '🚨 CRITICAL | {{ .GroupLabels.alertname }}'
+        title: '[CRITICAL] {{ .GroupLabels.alertname }}'
         title_link: 'http://192.168.122.218:30090/alerts'
         text: |
           {{ range .Alerts -}}
@@ -37,7 +37,7 @@ receivers:
           *Description:* {{ .Annotations.description }}
           *Namespace:* `{{ .Labels.namespace }}`
           *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
-          *On-call:* <!here> <!here> — please investigate 🔥
+          *On-call:* <!here> <!here> — please investigate
           {{ end }}
         footer: 'Homelab Alertmanager | http://192.168.122.218:30093'
 
@@ -46,7 +46,7 @@ receivers:
       - channel: '#all-homelab-alerts'
         send_resolved: true
         color: 'warning'
-        title: '⚠️ WARNING | {{ .GroupLabels.alertname }}'
+        title: '[WARNING] {{ .GroupLabels.alertname }}'
         title_link: 'http://192.168.122.218:30090/alerts'
         text: |
           {{ range .Alerts -}}
@@ -63,7 +63,7 @@ receivers:
       - channel: '#all-homelab-alerts'
         send_resolved: true
         color: 'good'
-        title: 'ℹ️ INFO | {{ .GroupLabels.alertname }}'
+        title: '[INFO] {{ .GroupLabels.alertname }}'
         title_link: 'http://192.168.122.218:30090/alerts'
         text: |
           {{ range .Alerts -}}

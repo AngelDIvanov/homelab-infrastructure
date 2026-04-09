@@ -1,0 +1,229 @@
+---
+# ─── Namespace ────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pylab
+
+---
+# ─── ConfigMap ────────────────────────────────────────────────────────────────
+# Real-life issue: wrong value here → app misbehaves but doesn't crash.
+# Try changing APP_ENV to "production" or toggling FEATURE_FLAGS and re-deploying.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pylab-config
+  namespace: pylab
+data:
+  APP_ENV: "development"
+  LOG_LEVEL: "INFO"
+  FEATURE_FLAGS: "dark-mode,beta-api"
+  MAX_WORKERS: "4"
+
+---
+# ─── Secret ───────────────────────────────────────────────────────────────────
+# Real-life issue: delete or rename this secret → /ready returns 503,
+# pod goes NotReady, traffic stops. Good for testing readiness gate behavior.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pylab-secrets
+  namespace: pylab
+type: Opaque
+stringData:
+  DB_URL: "postgresql://pylab:changeme@postgres.pylab.svc:5432/pylab"
+  API_KEY: "super-secret-api-key-change-in-prod"
+
+---
+# ─── Deployment ───────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pylab
+  namespace: pylab
+  labels:
+    app: pylab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pylab
+  template:
+    metadata:
+      labels:
+        app: pylab
+      annotations:
+        # Prometheus will scrape this pod directly (via ServiceMonitor below)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: pylab
+          image: 192.168.122.218:30500/pylab:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+
+          # ── Config from ConfigMap ──────────────────────────────────────────
+          envFrom:
+            - configMapRef:
+                name: pylab-config
+
+          # ── Secrets injected individually ─────────────────────────────────
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pylab-secrets
+                  key: DB_URL
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pylab-secrets
+                  key: API_KEY
+
+          # ── Resource limits (intentionally tight for OOM experiments) ─────
+          # Real-life issue: lower memory.limits to "32Mi" → OOMKilled on /oom
+          # Real-life issue: lower cpu.limits to "50m" → throttling visible in Grafana
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "128Mi"
+
+          # ── Liveness probe ────────────────────────────────────────────────
+          # Real-life issue: POST /toggle/liveness → probe fails after
+          # failureThreshold (3 × periodSeconds = 15s) → pod restarts
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 2
+
+          # ── Readiness probe ───────────────────────────────────────────────
+          # Real-life issue: delete pylab-secrets → pod stays Running but
+          # goes NotReady → removed from Service endpoints → no traffic
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 2
+
+          # ── Startup probe ─────────────────────────────────────────────────
+          # Gives the container 60s to start before liveness kicks in.
+          # Real-life issue: remove this → slow-starting app gets killed on deploy
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            failureThreshold: 12
+            periodSeconds: 5
+
+---
+# ─── Service ──────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: pylab
+  namespace: pylab
+  labels:
+    app: pylab
+spec:
+  selector:
+    app: pylab
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+
+---
+# ─── Ingress (Traefik) ────────────────────────────────────────────────────────
+# Real-life issue: change the host → 404 from Traefik, app is fine
+# Access via: http://pylab.local (add to /etc/hosts → 192.168.122.218)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pylab
+  namespace: pylab
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: pylab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pylab
+                port:
+                  number: 80
+
+---
+# ─── HorizontalPodAutoscaler ─────────────────────────────────────────────────
+# Real-life issue: hit GET /load?seconds=30 multiple times → watch scale-out
+# kubectl get hpa -n pylab -w
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pylab
+  namespace: pylab
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pylab
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+---
+# ─── PodDisruptionBudget ─────────────────────────────────────────────────────
+# Real-life issue: remove this → rolling update can take all pods down at once
+# Try: kubectl drain k3s-worker-1 --ignore-daemonsets --delete-emptydir-data
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pylab
+  namespace: pylab
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: pylab
+
+---
+# ─── ServiceMonitor (Prometheus scraping) ────────────────────────────────────
+# Real-life issue: change matchLabels to wrong value → metrics disappear in Grafana
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pylab
+  namespace: pylab
+  labels:
+    release: monitoring   # must match kube-prometheus-stack's serviceMonitorSelector
+spec:
+  selector:
+    matchLabels:
+      app: pylab
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

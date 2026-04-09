@@ -75,18 +75,24 @@ spec:
           labels:
             severity: none
           annotations:
-            summary: "Silenced — k3s embeds the scheduler in the k3s binary"
+            summary: "Silenced — k3s embeds the scheduler in the k3s binary. Replaced by K3sControlPlaneUnhealthy on up{job=\"apiserver\"}."
 
         - alert: KubeControllerManagerDown
           expr: "false"
           labels:
             severity: none
           annotations:
-            summary: "Silenced — k3s embeds the controller manager in the k3s binary"
+            summary: "Silenced — k3s embeds the controller manager in the k3s binary. Replaced by K3sControlPlaneUnhealthy on up{job=\"apiserver\"}."
 
         - alert: KubeProxyDown
           expr: "false"
           labels:
             severity: none
           annotations:
-            summary: "Silenced — k3s embeds kube-proxy in the k3s binary"
+            summary: "Silenced — k3s embeds kube-proxy in the k3s binary."
+
+# NOTE: The upstream etcd Grafana dashboard and etcd PrometheusRules are disabled
+# via kubeEtcd.enabled: false in fix-values.yaml.
+# k3s uses SQLite (via kine) as its datastore, not etcd. The etcd dashboard produces
+# empty panels on k3s and there is no equivalent SQLite metric surface.
+# This is intentional — not an oversight.

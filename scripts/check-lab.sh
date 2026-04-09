@@ -46,6 +46,8 @@ WARN=0
 # Static infrastructure (these don't scale)
 K3S_CONTROL_IP="192.168.122.218"
 CI_RUNNER_IP="192.168.122.220"
+GITLAB_IP="192.168.122.230"
+GITLAB_PORT="8929"
 
 # SSH options
 SSH_OPTS="-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no"
@@ -105,7 +107,7 @@ clear
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════════════════╗"
 echo "║                                                                       ║"
-echo "║           🏠  DevOps Home Lab - Health Check  🏠                      ║"
+echo "║             DevOps Home Lab - Health Check                        ║"
 echo "║                                                                       ║"
 echo "╠═══════════════════════════════════════════════════════════════════════╣"
 echo "║  K3s │ GitLab CI/CD │ Prometheus │ Grafana │ Loki │ Security Tools   ║"
@@ -149,11 +151,11 @@ check() {
     local result=$?
     printf "\r  %-55s" "$desc"
     if [ $result -eq 0 ]; then
-        echo -e "${GREEN}✓ PASS${NC}"
+        echo -e "${GREEN}OK PASS${NC}"
         ((PASS++))
         return 0
     else
-        echo -e "${RED}✗ FAIL${NC}"
+        echo -e "${RED}FAIL FAIL${NC}"
         ((FAIL++))
         return 1
     fi
@@ -171,11 +173,11 @@ check_warn() {
     local result=$?
     printf "\r  %-55s" "$desc"
     if [ $result -eq 0 ]; then
-        echo -e "${GREEN}✓ PASS${NC}"
+        echo -e "${GREEN}OK PASS${NC}"
         ((PASS++))
         return 0
     else
-        echo -e "${YELLOW}⚠ WARN${NC}"
+        echo -e "${YELLOW}[WARN] WARN${NC}"
         ((WARN++))
         return 1
     fi
@@ -191,10 +193,10 @@ start_vm() {
     local vm_name=$1
     printf "  %-55s" "Starting $vm_name..."
     if virsh start "$vm_name" &>/dev/null; then
-        echo -e "${GREEN}✓ Started${NC}"
+        echo -e "${GREEN}OK Started${NC}"
         return 0
     else
-        echo -e "${RED}✗ Failed to start${NC}"
+        echo -e "${RED}FAIL Failed to start${NC}"
         return 1
     fi
 }
@@ -211,7 +213,7 @@ shutdown_vm() {
     if check_vm_running "$vm_name"; then
         virsh destroy "$vm_name" &>/dev/null
     fi
-    echo -e "${GREEN}✓ Stopped${NC}"
+    echo -e "${GREEN}OK Stopped${NC}"
 }
 
 destroy_vm() {
@@ -220,7 +222,7 @@ destroy_vm() {
     if check_vm_running "$vm_name"; then
         virsh destroy "$vm_name" &>/dev/null
     fi
-    echo -e "${GREEN}✓ Destroyed${NC}"
+    echo -e "${GREEN}OK Destroyed${NC}"
 }
 
 # Wait for VM to be network-responsive
@@ -234,7 +236,7 @@ wait_for_vm() {
     while [ $attempts -lt $max_attempts ]; do
         if ping -c 1 -W 1 "$ip" &>/dev/null; then
             printf "\r  %-55s" "Waiting for $vm_name ($ip)"
-            echo -e "${GREEN}✓ Responsive${NC}"
+            echo -e "${GREEN}OK Responsive${NC}"
             ((PASS++))
             return 0
         fi
@@ -243,7 +245,7 @@ wait_for_vm() {
     done
     
     printf "\r  %-55s" "Waiting for $vm_name ($ip)"
-    echo -e "${RED}✗ Timeout (60s)${NC}"
+    echo -e "${RED}FAIL Timeout (60s)${NC}"
     ((FAIL++))
     return 1
 }
@@ -256,17 +258,17 @@ wait_for_vm() {
 #   VM POWER MANAGEMENT
 # ============================================
 
-section "⚡ VIRTUAL MACHINE POWER STATE"
+section " VIRTUAL MACHINE POWER STATE"
 
 # Handle forced reboot (hard reset)
 if [ "$FORCE_REBOOT" = true ]; then
-    echo -e "${RED}⚠  Force REBOOT requested (--reboot flag) - Destroying all VMs${NC}\n"
+    echo -e "${RED}[WARN]  Force REBOOT requested (--reboot flag) - Destroying all VMs${NC}\n"
     for vm_name in "${!VMS[@]}"; do
         if check_vm_running "$vm_name"; then
             destroy_vm "$vm_name"
         fi
     done
-    echo -e "\n${CYAN}⏳ Waiting 5 seconds before restart...${NC}"
+    echo -e "\n${CYAN} Waiting 5 seconds before restart...${NC}"
     sleep 5
     FORCE_RESTART=true
 fi
@@ -274,7 +276,7 @@ fi
 # Handle forced restart (graceful)
 if [ "$FORCE_RESTART" = true ]; then
     if [ "$FORCE_REBOOT" = false ]; then
-        echo -e "${YELLOW}⚠  Force restart requested (--restart flag)${NC}\n"
+        echo -e "${YELLOW}[WARN]  Force restart requested (--restart flag)${NC}\n"
     fi
     for vm_name in "${!VMS[@]}"; do
         if check_vm_running "$vm_name"; then
@@ -284,7 +286,7 @@ if [ "$FORCE_RESTART" = true ]; then
         fi
     done
     if [ "$FORCE_REBOOT" = false ]; then
-        echo -e "\n${CYAN}⏳ Waiting 5 seconds before restart...${NC}"
+        echo -e "\n${CYAN} Waiting 5 seconds before restart...${NC}"
         sleep 5
     fi
 fi
@@ -293,46 +295,46 @@ fi
 STARTUP_NEEDED=false
 for vm_name in "${!VMS[@]}"; do
     if ! check_vm_running "$vm_name"; then
-        echo -e "  ${YELLOW}⚠  $vm_name is not running${NC}"
+        echo -e "  ${YELLOW}[WARN]  $vm_name is not running${NC}"
         if start_vm "$vm_name"; then
             STARTUP_NEEDED=true
         else
-            echo -e "  ${RED}✗ Critical: Unable to start $vm_name${NC}"
+            echo -e "  ${RED}FAIL Critical: Unable to start $vm_name${NC}"
             ((FAIL++))
         fi
     else
-        echo -e "  ${GREEN}✓${NC} $vm_name already running"
+        echo -e "  ${GREEN}OK${NC} $vm_name already running"
     fi
 done
 
 # Wait for VMs to boot and services to initialize
 if [ "$STARTUP_NEEDED" = true ] || [ "$FORCE_RESTART" = true ]; then
-    echo -e "\n${YELLOW}⏳ Waiting for VMs to boot and services to initialize...${NC}"
+    echo -e "\n${YELLOW} Waiting for VMs to boot and services to initialize...${NC}"
     
     for i in {1..6}; do
-        printf "  ${CYAN}[⏳]${NC} Boot sequence in progress... %d0/60 seconds\r" $i
+        printf "  ${CYAN}[]${NC} Boot sequence in progress... %d0/60 seconds\r" $i
         sleep 10
     done
-    echo -e "  ${GREEN}✓${NC} 60 second boot delay complete                           "
+    echo -e "  ${GREEN}OK${NC} 60 second boot delay complete                           "
     
-    echo -e "\n${CYAN}🔍 Verifying network connectivity...${NC}"
+    echo -e "\n${CYAN} Verifying network connectivity...${NC}"
     for vm_name in "${!VMS[@]}"; do
         vm_ip="${VMS[$vm_name]}"
         wait_for_vm "$vm_name" "$vm_ip"
     done
     
-    echo -e "\n${CYAN}⏳ Waiting for k3s cluster to initialize...${NC}"
+    echo -e "\n${CYAN} Waiting for k3s cluster to initialize...${NC}"
     for i in {1..3}; do
-        printf "  ${CYAN}[⏳]${NC} Cluster initialization... %d0/30 seconds\r" $i
+        printf "  ${CYAN}[]${NC} Cluster initialization... %d0/30 seconds\r" $i
         sleep 10
     done
-    echo -e "  ${GREEN}✓${NC} Cluster initialization time complete           "
+    echo -e "  ${GREEN}OK${NC} Cluster initialization time complete           "
     
     # Re-discover workers after restart
     discover_workers
 fi
 
-section "🖥️  VIRTUAL MACHINE CONNECTIVITY"
+section "  VIRTUAL MACHINE CONNECTIVITY"
 check "ci-runner ($CI_RUNNER_IP)" "ping -c 1 -W 2 $CI_RUNNER_IP"
 check "k3s-control ($K3S_CONTROL_IP)" "ping -c 1 -W 2 $K3S_CONTROL_IP"
 
@@ -342,16 +344,16 @@ for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
     check "$worker_name ($worker_ip)" "ping -c 1 -W 2 $worker_ip"
 done
 
-section "🌐  CORE SERVICES"
+section "  CORE SERVICES"
 check "Trengo App prod (port 32504)" "curl -sf --max-time 5 http://$K3S_CONTROL_IP:32504"
 check_warn "Trengo App staging (port 32505)" "curl -sf --max-time 5 http://$K3S_CONTROL_IP:32505"
 check "Grafana (port 30080)" "curl -sf --max-time 5 -o /dev/null http://$K3S_CONTROL_IP:30080"
 check "Alertmanager (port 30093)" "curl -sf --max-time 5 -o /dev/null http://$K3S_CONTROL_IP:30093"
-check "GitLab (port 80)" "curl -sf --max-time 5 -o /dev/null http://$CI_RUNNER_IP"
+check "GitLab (port 8929)" "curl -sf --max-time 5 -o /dev/null http://$GITLAB_IP:$GITLAB_PORT"
 check_warn "K8s Dashboard (port 30443)" "curl -sfk --max-time 5 -o /dev/null https://$K3S_CONTROL_IP:30443"
 check_warn "Portainer (port 30777)" "curl -sf --max-time 5 -o /dev/null http://$K3S_CONTROL_IP:30777"
 
-section "☸️   KUBERNETES CLUSTER"
+section "K8s   KUBERNETES CLUSTER"
 check "K3s API responding" "$K3S_CMD 'sudo k3s kubectl cluster-info' 2>/dev/null | grep -q running"
 check "Control plane Ready" "$K3S_CMD 'sudo k3s kubectl get nodes' 2>/dev/null | grep -q 'k3s-control.*Ready'"
 
@@ -363,13 +365,13 @@ done
 check "Trengo pods running" "$K3S_CMD 'sudo k3s kubectl get pods -n default -l app=trengo-search' 2>/dev/null | grep -q 'Running'"
 check_warn "Trengo staging pods running" "$K3S_CMD 'sudo k3s kubectl get pods -n default -l app=trengo-search-staging' 2>/dev/null | grep -q 'Running'"
 
-section "📊  MONITORING STACK"
+section "  MONITORING STACK"
 
 # Check for stuck monitoring pods
 STUCK_PODS=$($K3S_CMD "sudo k3s kubectl get pods -n monitoring --field-selector=status.phase=Terminating -o custom-columns=NAME:.metadata.name --no-headers" 2>/dev/null)
 
 if [ -n "$STUCK_PODS" ]; then
-    echo -e "  ${YELLOW}⚠️  Stuck pods detected, cleaning up...${NC}"
+    echo -e "  ${YELLOW}[WARN]  Stuck pods detected, cleaning up...${NC}"
     while read -r pod; do
         $K3S_CMD "sudo k3s kubectl delete pod $pod -n monitoring --grace-period=30 --force" 2>/dev/null
     done <<< "$STUCK_PODS"
@@ -383,7 +385,7 @@ check "Loki running" "$K3S_CMD 'sudo k3s kubectl get pods -n monitoring' 2>/dev/
 check_warn "Promtail DaemonSet ready" "$K3S_CMD 'sudo k3s kubectl get daemonset -n monitoring' 2>/dev/null | grep -q 'promtail'"
 check_warn "Webhook receiver running" "$K3S_CMD 'sudo k3s kubectl get pods -n monitoring' 2>/dev/null | grep -q 'webhook.*Running'"
 
-section "🔧  WORKER AGENT STATUS"
+section "  WORKER AGENT STATUS"
 
 # Dynamic worker agent checks
 for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
@@ -394,29 +396,29 @@ for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
     ACTIVE=$($WORKER_CMD "systemctl is-active k3s-agent" 2>/dev/null)
     
     if [ "$ACTIVE" == "active" ] || [ "$ACTIVE" == "activating" ]; then
-        echo -e "${GREEN}✓ PASS${NC}"
+        echo -e "${GREEN}OK PASS${NC}"
         ((PASS++))
     else
-        echo -e "${YELLOW}⚠ INACTIVE - restarting...${NC}"
+        echo -e "${YELLOW}[WARN] INACTIVE - restarting...${NC}"
         $WORKER_CMD "sudo systemctl start k3s-agent" 2>/dev/null
         sleep 5
         ACTIVE=$($WORKER_CMD "systemctl is-active k3s-agent" 2>/dev/null)
         if [ "$ACTIVE" == "active" ] || [ "$ACTIVE" == "activating" ]; then
-            echo -e "  ${GREEN}✓ Agent restarted successfully${NC}"
+            echo -e "  ${GREEN}OK Agent restarted successfully${NC}"
             ((PASS++))
         else
-            echo -e "  ${RED}✗ Agent failed to start${NC}"
+            echo -e "  ${RED}FAIL Agent failed to start${NC}"
             ((FAIL++))
         fi
     fi
 done
 
-section "🔄  AUTO-FIX: POD HEALTH"
+section "  AUTO-FIX: POD HEALTH"
 
 STUCK_APP_PODS=$($K3S_CMD "sudo k3s kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null | grep -v Running | awk '{print \$1}'" 2>/dev/null)
 
 if [ -n "$STUCK_APP_PODS" ]; then
-    echo -e "  ${YELLOW}⚠️  Found stuck pods, attempting rollback...${NC}"
+    echo -e "  ${YELLOW}[WARN]  Found stuck pods, attempting rollback...${NC}"
 
     CURRENT_IMAGE=$($K3S_CMD "sudo k3s kubectl get deployment trengo-search -n default -o jsonpath='{.spec.template.spec.containers[0].image}'" 2>/dev/null)
     echo -e "  ${DIM}Current image: ${CURRENT_IMAGE}${NC}"
@@ -437,10 +439,10 @@ if [ -n "$STUCK_APP_PODS" ]; then
         STILL_STUCK=$($K3S_CMD "sudo k3s kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null | grep -v Running | wc -l" 2>/dev/null)
 
         if [ "$STILL_STUCK" -eq 0 ] || [ -z "$STILL_STUCK" ]; then
-            echo -e "  ${GREEN}✓ Pods recovered via rollback${NC}"
+            echo -e "  ${GREEN}OK Pods recovered via rollback${NC}"
             ((PASS++))
         else
-            echo -e "  ${RED}✗ Rollback failed - manual intervention needed${NC}"
+            echo -e "  ${RED}FAIL Rollback failed - manual intervention needed${NC}"
             ((FAIL++))
         fi
     else
@@ -463,24 +465,24 @@ if [ -n "$STUCK_APP_PODS" ]; then
             STILL_STUCK=$($K3S_CMD "sudo k3s kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null | grep -v Running | wc -l" 2>/dev/null)
             
             if [ "$STILL_STUCK" -eq 0 ] || [ -z "$STILL_STUCK" ]; then
-                echo -e "  ${GREEN}✓ Pods recovered after recreation${NC}"
+                echo -e "  ${GREEN}OK Pods recovered after recreation${NC}"
                 ((PASS++))
             else
-                echo -e "  ${RED}✗ Pods still failing after recreation${NC}"
+                echo -e "  ${RED}FAIL Pods still failing after recreation${NC}"
                 echo -e "  ${YELLOW}  Hint: Check pod events with: kubectl describe pod <n>${NC}"
                 ((FAIL++))
             fi
         else
-            echo -e "  ${GREEN}✓ All app pods healthy${NC}"
+            echo -e "  ${GREEN}OK All app pods healthy${NC}"
             ((PASS++))
         fi
     fi
 else
-    echo -e "  ${GREEN}✓ All pods healthy${NC}"
+    echo -e "  ${GREEN}OK All pods healthy${NC}"
     ((PASS++))
 fi
 
-section "🔄  AUTO-FIX: IMAGE SYNC"
+section "  AUTO-FIX: IMAGE SYNC"
 
 LATEST_IMAGE=$($K3S_CMD "sudo k3s ctr images list 2>/dev/null | grep trengo-search | head -1 | awk '{print \$1}'" 2>/dev/null)
 
@@ -492,7 +494,7 @@ if [ -n "$LATEST_IMAGE" ]; then
         WORKER_HAS=$($WORKER_CMD "sudo k3s ctr images list 2>/dev/null | grep -q '$LATEST_IMAGE' && echo yes || echo no" 2>/dev/null)
         
         if [ "$WORKER_HAS" == "no" ]; then
-            echo -e "  ${YELLOW}⚠️  Syncing image to workers...${NC}"
+            echo -e "  ${YELLOW}[WARN]  Syncing image to workers...${NC}"
             $K3S_CMD "sudo k3s ctr images export /tmp/trengo-sync.tar $LATEST_IMAGE" 2>/dev/null
             scp -q $SSH_OPTS andy@$K3S_CONTROL_IP:/tmp/trengo-sync.tar /tmp/ 2>/dev/null
             
@@ -500,11 +502,11 @@ if [ -n "$LATEST_IMAGE" ]; then
                 worker_ip="${WORKERS[$worker_name]}"
                 scp -q $SSH_OPTS /tmp/trengo-sync.tar andy@$worker_ip:/tmp/ 2>/dev/null
                 ssh $SSH_OPTS andy@$worker_ip "sudo k3s ctr images import /tmp/trengo-sync.tar" 2>/dev/null
-                echo -e "  ${GREEN}✓ Image synced to $worker_name${NC}"
+                echo -e "  ${GREEN}OK Image synced to $worker_name${NC}"
             done
             ((PASS++))
         else
-            echo -e "  ${GREEN}✓ Images in sync${NC}"
+            echo -e "  ${GREEN}OK Images in sync${NC}"
             ((PASS++))
         fi
     else
@@ -514,7 +516,7 @@ else
     echo -e "  ${DIM}No trengo-search image found${NC}"
 fi
 
-section "💾  DISK HEALTH"
+section "  DISK HEALTH"
 
 DISK_THRESHOLD=75
 PRUNE_SCRIPT="${SCRIPT_DIR}/disk_check.sh"
@@ -527,29 +529,29 @@ DISK_AVAIL=$($CMD "df -h / | awk 'NR==2{print \$4}'" 2>/dev/null)
 
 if [ -z "$DISK_PCT" ]; then
     printf "  %-45s" "$NODE"
-    echo -e "${RED}✗ FAIL${NC} (unreachable)"
+    echo -e "${RED}FAIL FAIL${NC} (unreachable)"
     ((FAIL++))
 elif [ "$DISK_PCT" -lt "$DISK_THRESHOLD" ]; then
     printf "  %-45s" "$NODE"
-    echo -e "${GREEN}✓ PASS${NC}  ${DISK_PCT}% used (${DISK_AVAIL} free)"
+    echo -e "${GREEN}OK PASS${NC}  ${DISK_PCT}% used (${DISK_AVAIL} free)"
     ((PASS++))
 else
     printf "  %-45s" "$NODE"
-    echo -e "${YELLOW}⚠ ${DISK_PCT}% used - pruning...${NC}"
+    echo -e "${YELLOW}[WARN] ${DISK_PCT}% used - pruning...${NC}"
     if [ -f "$PRUNE_SCRIPT" ]; then
         PRUNE_OUT=$(cat "$PRUNE_SCRIPT" | $CMD "sudo DISK_THRESHOLD=$DISK_THRESHOLD bash -s" 2>&1)
         echo "$PRUNE_OUT" | sed 's/^/    /'
         AFTER_PCT=$($CMD "df / | awk 'NR==2{gsub(/%/,\"\");print \$5}'" 2>/dev/null)
         AFTER_AVAIL=$($CMD "df -h / | awk 'NR==2{print \$4}'" 2>/dev/null)
         if [ "$AFTER_PCT" -lt "$DISK_THRESHOLD" ]; then
-            echo -e "    ${GREEN}✓ Recovered: ${DISK_PCT}% → ${AFTER_PCT}% (${AFTER_AVAIL} free)${NC}"
+            echo -e "    ${GREEN}OK Recovered: ${DISK_PCT}% → ${AFTER_PCT}% (${AFTER_AVAIL} free)${NC}"
             ((PASS++))
         else
-            echo -e "    ${RED}✗ Still at ${AFTER_PCT}% after pruning${NC}"
+            echo -e "    ${RED}FAIL Still at ${AFTER_PCT}% after pruning${NC}"
             ((FAIL++))
         fi
     else
-        echo -e "    ${RED}✗ disk_check.sh not found${NC}"
+        echo -e "    ${RED}FAIL disk_check.sh not found${NC}"
         ((FAIL++))
     fi
 fi
@@ -564,29 +566,29 @@ for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
     
     if [ -z "$DISK_PCT" ]; then
         printf "  %-45s" "$worker_name"
-        echo -e "${RED}✗ FAIL${NC} (unreachable)"
+        echo -e "${RED}FAIL FAIL${NC} (unreachable)"
         ((FAIL++))
     elif [ "$DISK_PCT" -lt "$DISK_THRESHOLD" ]; then
         printf "  %-45s" "$worker_name"
-        echo -e "${GREEN}✓ PASS${NC}  ${DISK_PCT}% used (${DISK_AVAIL} free)"
+        echo -e "${GREEN}OK PASS${NC}  ${DISK_PCT}% used (${DISK_AVAIL} free)"
         ((PASS++))
     else
         printf "  %-45s" "$worker_name"
-        echo -e "${YELLOW}⚠ ${DISK_PCT}% used - pruning...${NC}"
+        echo -e "${YELLOW}[WARN] ${DISK_PCT}% used - pruning...${NC}"
         if [ -f "$PRUNE_SCRIPT" ]; then
             PRUNE_OUT=$(cat "$PRUNE_SCRIPT" | $WORKER_CMD "sudo DISK_THRESHOLD=$DISK_THRESHOLD bash -s" 2>&1)
             echo "$PRUNE_OUT" | sed 's/^/    /'
             AFTER_PCT=$($WORKER_CMD "df / | awk 'NR==2{gsub(/%/,\"\");print \$5}'" 2>/dev/null)
             AFTER_AVAIL=$($WORKER_CMD "df -h / | awk 'NR==2{print \$4}'" 2>/dev/null)
             if [ "$AFTER_PCT" -lt "$DISK_THRESHOLD" ]; then
-                echo -e "    ${GREEN}✓ Recovered: ${DISK_PCT}% → ${AFTER_PCT}% (${AFTER_AVAIL} free)${NC}"
+                echo -e "    ${GREEN}OK Recovered: ${DISK_PCT}% → ${AFTER_PCT}% (${AFTER_AVAIL} free)${NC}"
                 ((PASS++))
             else
-                echo -e "    ${RED}✗ Still at ${AFTER_PCT}% after pruning${NC}"
+                echo -e "    ${RED}FAIL Still at ${AFTER_PCT}% after pruning${NC}"
                 ((FAIL++))
             fi
         else
-            echo -e "    ${RED}✗ disk_check.sh not found${NC}"
+            echo -e "    ${RED}FAIL disk_check.sh not found${NC}"
             ((FAIL++))
         fi
     fi
@@ -600,16 +602,16 @@ if [ "$STUCK_SVCLB" -gt 0 ]; then
     echo -e "  ${DIM}Done - trengo accessible via NodePort 32504${NC}"
 fi
 
-section "🔒  SECURITY TOOLS"
+section "  SECURITY TOOLS"
 
 printf "  %-55s" "Trivy installed on ci-runner"
 TRIVY_CHECK=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo test -f /home/gitlab-runner/bin/trivy && echo yes || echo no" 2>/dev/null)
 if [ "$TRIVY_CHECK" == "yes" ]; then
     TRIVY_VER=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo /home/gitlab-runner/bin/trivy --version 2>/dev/null | head -1" 2>/dev/null)
-    echo -e "${GREEN}✓ PASS${NC}  ${DIM}${TRIVY_VER}${NC}"
+    echo -e "${GREEN}OK PASS${NC}  ${DIM}${TRIVY_VER}${NC}"
     ((PASS++))
 else
-    echo -e "${YELLOW}⚠ WARN${NC}  ${DIM}Not installed -- will install on next pipeline run${NC}"
+    echo -e "${YELLOW}[WARN] WARN${NC}  ${DIM}Not installed -- will install on next pipeline run${NC}"
     ((WARN++))
 fi
 
@@ -617,17 +619,17 @@ printf "  %-55s" "Gitleaks installed on ci-runner"
 GITLEAKS_CHECK=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo test -f /home/gitlab-runner/bin/gitleaks && echo yes || echo no" 2>/dev/null)
 if [ "$GITLEAKS_CHECK" == "yes" ]; then
     GITLEAKS_VER=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo /home/gitlab-runner/bin/gitleaks version 2>/dev/null" 2>/dev/null)
-    echo -e "${GREEN}✓ PASS${NC}  ${DIM}${GITLEAKS_VER}${NC}"
+    echo -e "${GREEN}OK PASS${NC}  ${DIM}${GITLEAKS_VER}${NC}"
     ((PASS++))
 else
-    echo -e "${YELLOW}⚠ WARN${NC}  ${DIM}Not installed -- will install on next pipeline run${NC}"
+    echo -e "${YELLOW}[WARN] WARN${NC}  ${DIM}Not installed -- will install on next pipeline run${NC}"
     ((WARN++))
 fi
 
-section "🚀  GITLAB PIPELINE STATUS"
+section "  GITLAB PIPELINE STATUS"
 
 LAST_PIPELINE=$(curl -sf --max-time 5 \
-    "http://$CI_RUNNER_IP/api/v4/projects/root%2Ftrengo-search/pipelines?per_page=1" \
+    "http://$GITLAB_IP:$GITLAB_PORT/api/v4/projects/root%2Ftrengo-search/pipelines?per_page=1" \
     -H "PRIVATE-TOKEN: ${GITLAB_TOKEN:-}" 2>/dev/null)
 
 if [ -n "$LAST_PIPELINE" ] && echo "$LAST_PIPELINE" | grep -q '"status"'; then
@@ -636,18 +638,18 @@ if [ -n "$LAST_PIPELINE" ] && echo "$LAST_PIPELINE" | grep -q '"status"'; then
     PIPELINE_ID=$(echo "$LAST_PIPELINE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
     printf "  %-55s" "Last pipeline (#${PIPELINE_ID} on ${REF})"
     if [ "$STATUS" == "success" ]; then
-        echo -e "${GREEN}✓ ${STATUS}${NC}"
+        echo -e "${GREEN}OK ${STATUS}${NC}"
         ((PASS++))
     elif [ "$STATUS" == "running" ] || [ "$STATUS" == "pending" ]; then
-        echo -e "${YELLOW}⚠ ${STATUS}${NC}"
+        echo -e "${YELLOW}[WARN] ${STATUS}${NC}"
         ((WARN++))
     else
-        echo -e "${RED}✗ ${STATUS}${NC}"
+        echo -e "${RED}FAIL ${STATUS}${NC}"
         ((FAIL++))
     fi
 else
     printf "  %-55s" "Last pipeline status"
-    echo -e "${YELLOW}⚠ WARN${NC}  ${DIM}Could not fetch -- set GITLAB_TOKEN env var for pipeline checks${NC}"
+    echo -e "${YELLOW}[WARN] WARN${NC}  ${DIM}Could not fetch -- set GITLAB_TOKEN env var for pipeline checks${NC}"
     ((WARN++))
 fi
 
@@ -656,31 +658,31 @@ fi
 # ============================================
 
 echo -e "\n${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BOLD}                           📋 SUMMARY${NC}"
+echo -e "${BOLD}                            SUMMARY${NC}"
 echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 
-echo -e "  ${GREEN}✓ Passed:${NC}   $PASS"
-echo -e "  ${YELLOW}⚠ Warnings:${NC} $WARN"
-echo -e "  ${RED}✗ Failed:${NC}   $FAIL"
+echo -e "  ${GREEN}OK Passed:${NC}   $PASS"
+echo -e "  ${YELLOW}[WARN] Warnings:${NC} $WARN"
+echo -e "  ${RED}FAIL Failed:${NC}   $FAIL"
 
 if [ $FAIL -eq 0 ]; then
     echo -e "\n${GREEN}${BOLD}  ╔═════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}${BOLD}  ║       🎉 ALL SYSTEMS OPERATIONAL 🎉                 ║${NC}"
+    echo -e "${GREEN}${BOLD}  ║        ALL SYSTEMS OPERATIONAL                  ║${NC}"
     echo -e "${GREEN}${BOLD}  ╚═════════════════════════════════════════════════════╝${NC}"
     
-    echo -e "\n${BOLD}  🔗 Quick Links:${NC}"
+    echo -e "\n${BOLD}   Quick Links:${NC}"
     echo -e "  ────────────────────────────────────────────────────────"
-    echo -e "  ${CYAN}📱 Trengo App (prod):${NC}   http://$K3S_CONTROL_IP:32504"
-    echo -e "  ${CYAN}📱 Trengo App (staging):${NC} http://$K3S_CONTROL_IP:32505"
-    echo -e "  ${CYAN}📊 Grafana:${NC}              http://$K3S_CONTROL_IP:30080"
-    echo -e "  ${CYAN}🔔 Alertmanager:${NC}         http://$K3S_CONTROL_IP:30093"
-    echo -e "  ${CYAN}🦊 GitLab:${NC}               http://$CI_RUNNER_IP"
-    echo -e "  ${CYAN}🚀 Pipelines:${NC}            http://$CI_RUNNER_IP/root/trengo-search/-/pipelines"
-    echo -e "  ${CYAN}📖 Wiki:${NC}                 http://$CI_RUNNER_IP/root/trengo-search/-/wikis"
-    echo -e "  ${CYAN}☸️  K8s Dashboard:${NC}        https://$K3S_CONTROL_IP:30443"
-    echo -e "  ${CYAN}🐳 Portainer:${NC}            http://$K3S_CONTROL_IP:30777"
+    echo -e "  ${CYAN} Trengo App (prod):${NC}   http://$K3S_CONTROL_IP:32504"
+    echo -e "  ${CYAN} Trengo App (staging):${NC} http://$K3S_CONTROL_IP:32505"
+    echo -e "  ${CYAN} Grafana:${NC}              http://$K3S_CONTROL_IP:30080"
+    echo -e "  ${CYAN} Alertmanager:${NC}         http://$K3S_CONTROL_IP:30093"
+    echo -e "  ${CYAN} GitLab:${NC}               http://$CI_RUNNER_IP"
+    echo -e "  ${CYAN} Pipelines:${NC}            http://$CI_RUNNER_IP/root/trengo-search/-/pipelines"
+    echo -e "  ${CYAN} Wiki:${NC}                 http://$CI_RUNNER_IP/root/trengo-search/-/wikis"
+    echo -e "  ${CYAN}K8s  K8s Dashboard:${NC}        https://$K3S_CONTROL_IP:30443"
+    echo -e "  ${CYAN} Portainer:${NC}            http://$K3S_CONTROL_IP:30777"
     
-    echo -e "\n${BOLD}  🔑 K8s Dashboard Token:${NC}"
+    echo -e "\n${BOLD}   K8s Dashboard Token:${NC}"
     echo -e "  ────────────────────────────────────────────────────────"
     DASH_TOKEN=$($K3S_CMD "sudo k3s kubectl create token dashboard-admin -n kubernetes-dashboard --duration=24h 2>/dev/null")
     if [ -n "$DASH_TOKEN" ]; then
@@ -690,7 +692,7 @@ if [ $FAIL -eq 0 ]; then
         echo -e "  ${YELLOW}Token not available - dashboard may not be installed${NC}"
     fi
     
-    echo -e "\n${BOLD}  📊 Grafana Credentials:${NC}"
+    echo -e "\n${BOLD}   Grafana Credentials:${NC}"
     echo -e "  ────────────────────────────────────────────────────────"
     echo -e "  ${DIM}Username: admin${NC}"
     GRAFANA_PASS=$($K3S_CMD "sudo k3s kubectl get secret -n monitoring monitoring-grafana -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d")
@@ -701,7 +703,7 @@ if [ $FAIL -eq 0 ]; then
     fi
 else
     echo -e "\n${RED}${BOLD}  ╔═════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}${BOLD}  ║       ⚠️  SOME CHECKS FAILED - REVIEW               ║${NC}"
+    echo -e "${RED}${BOLD}  ║       [WARN]  SOME CHECKS FAILED - REVIEW               ║${NC}"
     echo -e "${RED}${BOLD}  ╚═════════════════════════════════════════════════════╝${NC}"
     echo -e "\n  ${YELLOW}Run the script again after fixing issues.${NC}"
     echo -e "  ${YELLOW}Or use './check-lab.sh --restart' for graceful restart.${NC}"

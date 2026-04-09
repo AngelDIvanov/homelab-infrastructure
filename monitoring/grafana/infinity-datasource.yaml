@@ -16,6 +16,6 @@ data:
         isDefault: false
         jsonData:
           allowedHosts:
-            - http://192.168.122.220
+            - http://192.168.122.230:8929
         secureJsonData:
-          httpHeaderValue1: "PRIVATE-TOKEN: glpat-ErbmIjiXkcIxQiyjmPAJZW86MQp1OjEH.01.0w05rrjh0"
+          httpHeaderValue1: "PRIVATE-TOKEN: $__env{GITLAB_TOKEN}"

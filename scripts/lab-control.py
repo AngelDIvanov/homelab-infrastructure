@@ -20,13 +20,40 @@ TERRAFORM_DIR     = os.path.expanduser("~/homelab/terraform")
 ANSIBLE_DIR       = os.path.expanduser("~/homelab/ansible")
 ANSIBLE_INVENTORY = os.path.join(ANSIBLE_DIR, "inventory/homelab.ini")
 
-K3S_CONTROL_IP = "192.168.122.218"
-K3S_INFRA_IP   = "192.168.122.230"
-CI_RUNNER_IP   = "192.168.122.220"
-K3S_WORKER1_IP = "192.168.122.219"
-K3S_TOKEN      = "K10f56614b297cb7bf1aefdf9729e609f96a532f1a166949beecadda41ad9f834ad::server:86629278cae454833dba29ea33c9b15e"
-GITLAB_TOKEN   = "glpat-xBRPlkMBWrGcwgrOTARgJ286MQp1OjEH.01.0w19upc9q"
-K3S_URL        = f"https://{K3S_CONTROL_IP}:6443"
+# VM IPs — default libvirt NAT range, adjust for your network
+K3S_CONTROL_IP  = "192.168.122.218"
+K3S_INFRA_IP    = "192.168.122.230"   # NFS storage — never auto-stopped
+CI_RUNNER_IP    = "192.168.122.220"
+K3S_WORKER1_IP  = "192.168.122.219"
+K3S_URL         = f"https://{K3S_CONTROL_IP}:6443"
+
+K8S_CONTROL_IP  = "192.168.122.240"
+K8S_WORKER1_IP  = "192.168.122.241"
+
+# VMs that belong to each cluster (k3s-infra excluded — stays always on)
+K3S_VMS  = ["k3s-control", "k3s-worker-1", "ci-runner"]
+K8S_VMS  = ["kubeadm-control", "kubeadm-worker-1"]
+
+def _get_secret(env_var, vault_item):
+    value = os.environ.get(env_var, "")
+    if value:
+        return value
+    try:
+        result = subprocess.run(["bw", "get", "password", vault_item],
+                                capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except FileNotFoundError:
+        pass
+    print(f"Error: {env_var} not set. Vault not available yet.")
+    print("Until Vaultwarden is set up, export it manually:")
+    print(f"  export {env_var}=<your-token>")
+    print("Or run setup: bash ~/homelab/scripts/setup-vault.sh")
+    sys.exit(1)
+
+# Secrets are fetched on demand — script starts without requiring them.
+K3S_TOKEN    = lambda: _get_secret("K3S_TOKEN",    "homelab-k3s-token")
+GITLAB_TOKEN = lambda: _get_secret("GITLAB_TOKEN", "homelab-gitlab-token")
 BASE_IP_OCTET  = 221   # k3s-worker-2 = .221, worker-3 = .222 ...
 
 ALERTMANAGER_URL = f"http://{K3S_CONTROL_IP}:30093"
@@ -127,7 +154,7 @@ def wait_for_ssh(ip, timeout=120):
 
 def join_k3s(ip, name):
     print(y(f"  joining {name} to k3s..."))
-    cmd = f'ssh {SSH_OPTS} andy@{ip} "curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN} sh -"'
+    cmd = f'ssh {SSH_OPTS} andy@{ip} "curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN()} sh -"'
     if run(cmd).returncode != 0:
         print(r(f"  failed to install k3s on {name}"))
         return False
@@ -253,28 +280,34 @@ def main_menu():
     banner()
     print(f"""\
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('ENVIRONMENTS')}                                             {c('|')}
+{c('|')}  {bold('K3S CLUSTER')}                                             {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('1.')}  Stop ALL           shutdown everything              {c('|')}
-{c('|')}  {bold('2.')}  Start ALL          boot all permanent VMs           {c('|')}
+{c('|')}  {bold('1.')}  Start k3s          boot k3s cluster VMs            {c('|')}
+{c('|')}  {bold('2.')}  Stop k3s           shutdown k3s cluster             {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('LAB TOOLS')}                                               {c('|')}
+{c('|')}  {bold('KUBEADM CLUSTER')}                                         {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('3.')}  Health Check       run check-lab                   {c('|')}
-{c('|')}  {bold('4.')}  Scale              add / remove workers             {c('|')}
-{c('|')}  {bold('5.')}  Ansible            run playbooks                   {c('|')}
-{c('|')}  {bold('6.')}  Sync Images        push to all nodes                {c('|')}
-{c('|')}  {bold('7.')}  Rejoin Workers     re-attach nodes to k3s           {c('|')}
-{c('|')}  {bold('8.')}  Cluster Status     nodes + virsh overview           {c('|')}
+{c('|')}  {bold('3.')}  Start K8s          boot kubeadm cluster VMs        {c('|')}
+{c('|')}  {bold('4.')}  Stop K8s           shutdown kubeadm cluster         {c('|')}
+{c('|')}  {bold('5.')}  K8s Status         kubeadm nodes + pods            {c('|')}
+{c('+----------------------------------------------------------+')}
+{c('|')}  {bold('K3S TOOLS')}                                               {c('|')}
+{c('+----------------------------------------------------------+')}
+{c('|')}  {bold('6.')}  Health Check       run check-lab                   {c('|')}
+{c('|')}  {bold('7.')}  Scale              add / remove k3s workers         {c('|')}
+{c('|')}  {bold('8.')}  Ansible            run playbooks                   {c('|')}
+{c('|')}  {bold('9.')}  Sync Images        push to all k3s nodes            {c('|')}
+{c('|')}  {bold('10.')} Rejoin Workers     re-attach nodes to k3s           {c('|')}
+{c('|')}  {bold('11.')} k3s Status         nodes + virsh overview           {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('ALERTING')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('9.')}  Alerting Tests     app nuke, RAM nuke,              {c('|')}
+{c('|')}  {bold('12.')} Alerting Tests     app nuke, RAM nuke,              {c('|')}
 {c('|')}       {dim('               auto-remediation demos')}                {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('SERVICES')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('10.')} Service Links      all URLs and access info         {c('|')}
+{c('|')}  {bold('13.')} Service Links      all URLs and access info         {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('0.')}  Exit                                               {c('|')}
 {c('+----------------------------------------------------------+')}""")
@@ -354,29 +387,26 @@ def ansible_menu():
 # ─────────────────────────────────────────────────────────────
 #  OPERATIONS
 # ─────────────────────────────────────────────────────────────
-def do_stop_all():
-    divider("STOPPING ALL ENVIRONMENTS")
-    confirm = input(y("  This will FORCE KILL all running VMs. Proceed? (y/n): "))
+def _stop_vms(vms, label):
+    divider(f"STOPPING {label}")
+    print(dim(f"  Note: k3s-infra ({K3S_INFRA_IP}) is excluded — NFS storage stays up."))
+    confirm = input(y(f"  Stop {label}? (y/n): "))
     if confirm.lower() != 'y':
-        print("  Cancelled.")
-        return
+        print("  Cancelled."); return
 
     result = run("virsh list --state-running 2>/dev/null", capture=True)
     running = []
     for line in result.stdout.splitlines():
         parts = line.split()
-        if len(parts) >= 2 and parts[1] not in ["Name", "---", "Base"]:
+        if len(parts) >= 2 and parts[1] not in ["Name", "---", "Base"] and parts[1] in vms:
             running.append(parts[1])
 
     if not running:
-        print(dim("  No VMs currently running."))
-        return
+        print(dim(f"  No {label} VMs currently running.")); return
 
-    print(c(f"\n  Running VMs to stop: {', '.join(running)}"))
-    print(y("  Attempting graceful shutdown first (5s), then force destroy..."))
-
+    print(c(f"\n  Stopping: {', '.join(running)}"))
     for vm in running:
-        print(y(f"  stopping {vm}..."))
+        print(y(f"  shutting down {vm}..."))
         run(f"virsh shutdown {vm} 2>/dev/null || true", capture=True)
 
     time.sleep(5)
@@ -385,29 +415,23 @@ def do_stop_all():
     still_running = []
     for line in result.stdout.splitlines():
         parts = line.split()
-        if len(parts) >= 2 and parts[1] not in ["Name", "---", "Base"]:
+        if len(parts) >= 2 and parts[1] in vms:
             still_running.append(parts[1])
 
-    if still_running:
-        print(r(f"\n  Still running after graceful shutdown: {', '.join(still_running)}"))
-        print(r("  Force destroying..."))
-        for vm in still_running:
-            res = run(f"virsh destroy {vm} 2>/dev/null", capture=True)
-            if res.returncode == 0:
-                print(r(f"  {vm} force killed"))
-            else:
-                print(r(f"  {vm} failed: {res.stderr.strip()}"))
+    for vm in still_running:
+        print(r(f"  {vm} still running — force destroying..."))
+        res = run(f"virsh destroy {vm} 2>/dev/null", capture=True)
+        print(g(f"  {vm} force killed") if res.returncode == 0 else r(f"  {vm} failed: {res.stderr.strip()}"))
 
-    print(g("\n  All VMs stopped."))
+    print(g(f"\n  {label} stopped."))
     run("virsh list --all")
 
-def do_start_all():
-    divider("STARTING ALL PERMANENT VMs")
-    confirm = input(y("  This will start all permanent VMs. Proceed? (y/n): "))
+def _start_vms(vms, label, note=""):
+    divider(f"STARTING {label}")
+    confirm = input(y(f"  Start {label}? (y/n): "))
     if confirm.lower() != 'y':
-        print("  Cancelled.")
-        return
-    for vm in get_permanent_vms():
+        print("  Cancelled."); return
+    for vm in vms:
         print(y(f"  starting {vm}..."))
         result = run(f"virsh start {vm} 2>/dev/null", capture=True)
         if result.returncode == 0:
@@ -418,8 +442,21 @@ def do_start_all():
                 print(dim(f"  {vm} already running"))
             else:
                 print(r(f"  {vm} failed: {out}"))
-    print(g("\n  All permanent VMs started."))
-    print(dim("  Allow 30-60s for k3s to come up, then run health check."))
+    print(g(f"\n  {label} started."))
+    if note:
+        print(dim(f"  {note}"))
+
+def do_stop_k3s():
+    _stop_vms(K3S_VMS, "K3S CLUSTER")
+
+def do_start_k3s():
+    _start_vms(K3S_VMS, "K3S CLUSTER", "Allow 30-60s for k3s to come up, then run health check.")
+
+def do_stop_k8s():
+    _stop_vms(K8S_VMS, "KUBEADM CLUSTER")
+
+def do_start_k8s():
+    _start_vms(K8S_VMS, "KUBEADM CLUSTER", "Allow 60s for kubeadm API server to come up.")
 
 def do_health_check():
     divider("HEALTH CHECK")
@@ -433,11 +470,11 @@ def do_health_check():
     mode = input(y("  Select: "))
     script = os.path.join(SCRIPTS_DIR, "check-lab.sh")
     if mode == '1':
-        run(f"GITLAB_TOKEN={GITLAB_TOKEN} bash {script}")
+        run(f"GITLAB_TOKEN={GITLAB_TOKEN()} bash {script}")
     elif mode == '2':
-        run(f"GITLAB_TOKEN={GITLAB_TOKEN} bash {script} --restart")
+        run(f"GITLAB_TOKEN={GITLAB_TOKEN()} bash {script} --restart")
     elif mode == '3':
-        run(f"GITLAB_TOKEN={GITLAB_TOKEN} bash {script} --reboot")
+        run(f"GITLAB_TOKEN={GITLAB_TOKEN()} bash {script} --reboot")
 
 def do_upscale():
     divider("UPSCALE -- Adding new worker")
@@ -575,6 +612,19 @@ def do_status():
     print(c("\n  All VMs (virsh)"))
     run("virsh list --all")
 
+def do_k8s_status():
+    divider("KUBEADM CLUSTER STATUS")
+    print(c("\n  K8s Nodes"))
+    run(f'ssh {SSH_OPTS} andy@{K8S_CONTROL_IP} "kubectl get nodes -o wide 2>/dev/null || echo  kubeadm-control not reachable"')
+    print(c("\n  K8s Pods (all namespaces)"))
+    run(f'ssh {SSH_OPTS} andy@{K8S_CONTROL_IP} "kubectl get pods -A 2>/dev/null || true"')
+    print(c("\n  VM States (virsh)"))
+    for vm in K8S_VMS:
+        res = run(f"virsh domstate {vm} 2>/dev/null", capture=True)
+        state = res.stdout.strip() or "not found"
+        icon = g("running") if state == "running" else r(state)
+        print(f"  {vm:<24} {icon}")
+
 # ─────────────────────────────────────────────────────────────
 #  NUKE TEST
 # ─────────────────────────────────────────────────────────────
@@ -690,9 +740,9 @@ def do_nuke_test():
 # ─────────────────────────────────────────────────────────────
 #  RAM NUKE TEST
 # ─────────────────────────────────────────────────────────────
-def get_ci_ram():
+def get_infra_ram():
     res = run(
-        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+        f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} '
         '"python3 -c \\"import subprocess; r=subprocess.check_output([\'free\']).decode().split()[7:13]; print(int((int(r[1])-int(r[5]))/int(r[1])*100))\\""',
         capture=True
     )
@@ -704,7 +754,7 @@ def get_ci_ram():
 def wait_for_alert(alert_name, timeout_s=180, interval=10):
     for i in range(timeout_s // interval):
         elapsed = i * interval
-        mem = get_ci_ram()
+        mem = get_infra_ram()
         print(f"  [{elapsed}s] RAM: {y(str(mem)+'%')} -- waiting for {c(alert_name)}...", end='\r', flush=True)
         result = run(
             f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
@@ -720,9 +770,9 @@ def wait_for_alert(alert_name, timeout_s=180, interval=10):
 def wait_for_resolved(alert_name, timeout_s=180, interval=10):
     for i in range(timeout_s // interval):
         elapsed = i * interval
-        mem = get_ci_ram()
+        mem = get_infra_ram()
         stress = run(
-            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "pgrep -c stress-ng 2>/dev/null || echo 0"',
+            f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "pgrep -c stress-ng 2>/dev/null || echo 0"',
             capture=True
         ).stdout.strip()
         stress_gone = stress == "0"
@@ -746,13 +796,15 @@ def wait_for_resolved(alert_name, timeout_s=180, interval=10):
 def do_ram_nuke_test():
     divider("RAM NUKE TEST -- Two-phase auto-remediation demo")
     print(f"""
+  Target node: {c('k3s-infra')} ({K3S_INFRA_IP}) -- runs GitLab, most likely to OOM
+
   {bold('Phase 1')} -- Stress to {y('~85%')}
     {y('>')} {c('NodeMemoryHigh')} fires after 30s  ->  Slack CRITICAL alert + GitLab issue
     {y('>')} No auto-remediation yet -- alert is visible in Slack
 
   {bold('Phase 2')} -- Push to {r('~90%')}
     {y('>')} {c('NodeMemoryCritical')} fires after 30s
-    {y('>')} Auto-remediation: {dim('pkill stress-ng + gitlab-ctl restart')}
+    {y('>')} Auto-remediation: {dim('pkill stress-ng + gitlab-ctl restart (on k3s-infra)')}
     {y('>')} Memory drops, both alerts resolve, GitLab issues auto-closed
 
   {r('Watch')} #incidents in Slack during this test.
@@ -760,16 +812,16 @@ def do_ram_nuke_test():
     if input(y("  Proceed? (y/n): ")).lower() != 'y':
         print("  Cancelled."); return
 
-    divider("Baseline -- ci-runner memory")
-    run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -h"')
+    divider("Baseline -- k3s-infra memory")
+    run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "free -h"')
 
     run(
-        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+        f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} '
         '"sudo apt-get install -y stress-ng -qq 2>/dev/null"',
         capture=True
     )
 
-    mem_raw = run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m"', capture=True).stdout.strip().splitlines()
+    mem_raw = run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "free -m"', capture=True).stdout.strip().splitlines()
     mem_line = [x for x in mem_raw if x.startswith('Mem:')][0].split()
     total_mb  = int(mem_line[1])
     used_mb   = int(mem_line[2])
@@ -787,7 +839,7 @@ def do_ram_nuke_test():
 
     divider(f"Phase 1 -- Stressing to ~87%  ({phase1_mb}MB)")
     run(
-        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} ' +
+        f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} ' +
         f'"nohup sudo stress-ng --vm 1 --vm-bytes {phase1_mb}M --timeout 300s > /tmp/stress1.log 2>&1 & echo started"',
         capture=True
     )
@@ -797,16 +849,16 @@ def do_ram_nuke_test():
     fired = wait_for_alert("NodeMemoryHigh", timeout_s=180)
     if fired < 0:
         print(r("\n  NodeMemoryHigh did not fire -- aborting"))
-        run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
+        run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
         return
 
     print(y("\n  Check #incidents in Slack -- CRITICAL | NodeMemoryHigh should be there"))
     input(c("  Press Enter when you have confirmed the Slack alert to start Phase 2..."))
 
     print(dim("  Killing Phase 1 stress to free headroom..."))
-    run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo kill -9 \$(pgrep -f stress-ng) 2>/dev/null || true"', capture=True)
+    run(f"ssh {SSH_OPTS} andy@{K3S_INFRA_IP} 'sudo kill -9 $(pgrep -f stress-ng) 2>/dev/null || true'", capture=True)
     time.sleep(3)
-    mem_raw2  = run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -m"', capture=True).stdout.strip().splitlines()
+    mem_raw2  = run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "free -m"', capture=True).stdout.strip().splitlines()
     mem_line2 = [x for x in mem_raw2 if x.startswith('Mem:')][0].split()
     total_mb2 = int(mem_line2[1])
     used_mb2  = int(mem_line2[2])
@@ -815,7 +867,7 @@ def do_ram_nuke_test():
     print(f"  {bold('Phase 2 state:')} {y(str(used_mb2))}MB used ({y(str(current2)+'%')}) -- stressing {g(str(phase2_mb))}MB -> 93%")
     divider(f"Phase 2 -- Fresh stress to ~93%  ({phase2_mb}MB)")
     run(
-        f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} ' +
+        f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} ' +
         f'"nohup sudo stress-ng --vm 1 --vm-bytes {phase2_mb}M --timeout 60s > /tmp/stress2.log 2>&1 & echo started"',
         capture=True
     )
@@ -828,7 +880,7 @@ def do_ram_nuke_test():
     else:
         print(y("  Auto-remediation triggered -- killing stress-ng + restarting gitlab..."))
         run(
-            f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} '
+            f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} '
             '"sudo kill -9 $(pgrep -f stress-ng) 2>/dev/null; sudo gitlab-ctl restart 2>/dev/null; echo done"',
             capture=True
         )
@@ -841,10 +893,10 @@ def do_ram_nuke_test():
         print(g("  Check #incidents -- RESOLVED messages should be in Slack"))
     else:
         print(r("  Alerts did not resolve -- cleaning up manually"))
-        run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
+        run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
 
-    print(c("\n  Final ci-runner memory:"))
-    run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "free -h"')
+    print(c("\n  Final k3s-infra memory:"))
+    run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "free -h"')
 
     divider("RAM Nuke Test Complete")
     print(f"  {bold('Pipeline tested:')}")
@@ -910,15 +962,15 @@ def do_service_links():
 
   {bold(c('CI/CD & CODE'))}
   {b('-'*56)}
-  {bold('GitLab')}           {g('http://192.168.122.220')}
+  {bold('GitLab')}           {g('http://192.168.122.230:8929')}
                     {dim('Source control, CI/CD pipelines, incident issues')}
 
-  {bold('Pipelines')}        {g('http://192.168.122.220/root/trengo-search/-/pipelines')}
+  {bold('Pipelines')}        {g('http://192.168.122.230:8929/root/trengo-search/-/pipelines')}
 
-  {bold('Wiki')}             {g('http://192.168.122.220/root/trengo-search/-/wikis')}
+  {bold('Wiki')}             {g('http://192.168.122.230:8929/root/trengo-search/-/wikis')}
                     {dim('Runbooks, post-mortems, architecture docs')}
 
-  {bold('GitLab Runner')}    {dim('Registered on ci-runner (192.168.122.220)')}
+  {bold('GitLab Runner')}    {dim('Registered on ci-runner (192.168.122.220) → GitLab on k3s-infra')}
 
   {bold(c('CLUSTER MANAGEMENT'))}
   {b('-'*56)}
@@ -928,12 +980,20 @@ def do_service_links():
   {bold('K8s Dashboard')}    {g('https://192.168.122.218:30443')}
                     {dim('Token: kubectl -n kubernetes-dashboard create token admin-user')}
 
+  {bold('Vaultwarden')}      {g('https://192.168.122.218:30900')}
+                    {dim('Password vault — MFA enabled')}
+
+  {bold(c('KUBEADM CLUSTER'))}
+  {b('-'*56)}
+  {bold('kubeadm-control')}  {c('ssh andy@192.168.122.240')}
+  {bold('kubeadm-worker-1')} {c('ssh andy@192.168.122.241')}
+
   {bold(c('NODE SSH ACCESS'))}
   {b('-'*56)}
   {bold('k3s-control')}      {c('ssh andy@192.168.122.218')}
   {bold('k3s-infra')}        {c('ssh andy@192.168.122.230')}   {dim('(monitoring stack)')}
   {bold('k3s-worker-1')}     {c('ssh andy@192.168.122.219')}
-  {bold('ci-runner')}        {c('ssh andy@192.168.122.220')}   {dim('(GitLab + Runner)')}
+  {bold('ci-runner')}        {c('ssh andy@192.168.122.220')}   {dim('(Runner only — GitLab moved to k3s-infra)')}
 """)
 
 # ─────────────────────────────────────────────────────────────
@@ -941,16 +1001,19 @@ def do_service_links():
 # ─────────────────────────────────────────────────────────────
 def main():
     dispatch = {
-        '1':  lambda: (do_stop_all(),       pause()),
-        '2':  lambda: (do_start_all(),      pause()),
-        '3':  lambda: (do_health_check(),   pause()),
-        '4':  scale_menu,
-        '5':  ansible_menu,
-        '6':  lambda: (do_sync_all(),       pause()),
-        '7':  lambda: (do_rejoin(),         pause()),
-        '8':  lambda: (do_status(),         pause()),
-        '9':  alerting_menu,
-        '10': lambda: (do_service_links(),  pause()),
+        '1':  lambda: (do_start_k3s(),      pause()),
+        '2':  lambda: (do_stop_k3s(),       pause()),
+        '3':  lambda: (do_start_k8s(),      pause()),
+        '4':  lambda: (do_stop_k8s(),       pause()),
+        '5':  lambda: (do_k8s_status(),     pause()),
+        '6':  lambda: (do_health_check(),   pause()),
+        '7':  scale_menu,
+        '8':  ansible_menu,
+        '9':  lambda: (do_sync_all(),       pause()),
+        '10': lambda: (do_rejoin(),         pause()),
+        '11': lambda: (do_status(),         pause()),
+        '12': alerting_menu,
+        '13': lambda: (do_service_links(),  pause()),
     }
 
     while True:

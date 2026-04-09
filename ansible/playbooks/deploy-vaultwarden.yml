@@ -1,0 +1,48 @@
+---
+- name: Deploy Vaultwarden to k3s cluster
+  hosts: control_plane
+  become: yes
+
+  tasks:
+    - name: Copy Vaultwarden manifest to control node
+      copy:
+        src: "{{ playbook_dir }}/../../kubernetes/deployments/vaultwarden.yaml"
+        dest: /tmp/vaultwarden.yaml
+
+    - name: Apply Vaultwarden manifest
+      command: k3s kubectl apply -f /tmp/vaultwarden.yaml
+      register: apply_result
+
+    - name: Show apply result
+      debug:
+        msg: "{{ apply_result.stdout_lines }}"
+
+    - name: Wait for Vaultwarden pod to be ready
+      command: >
+        k3s kubectl wait --for=condition=ready pod
+        -l app=vaultwarden
+        -n vaultwarden
+        --timeout=120s
+      register: wait_result
+      changed_when: false
+
+    - name: Show Vaultwarden pod status
+      command: k3s kubectl get pods -n vaultwarden -o wide
+      register: pod_status
+      changed_when: false
+
+    - name: Display status
+      debug:
+        msg: "{{ pod_status.stdout_lines }}"
+
+    - name: Get control node IP
+      command: hostname -I
+      register: node_ip
+      changed_when: false
+
+    - name: Show access URL
+      debug:
+        msg:
+          - "Vaultwarden deployed!"
+          - "Web UI: http://{{ node_ip.stdout.split()[0] }}:30900"
+          - "After first login, set SIGNUPS_ALLOWED to false in vaultwarden.yaml"

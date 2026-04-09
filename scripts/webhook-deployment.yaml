@@ -20,7 +20,7 @@ data:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     log = logging.getLogger(__name__)
     
-    GITLAB_URL        = os.environ.get('GITLAB_URL',        'http://192.168.122.220')
+    GITLAB_URL        = os.environ.get('GITLAB_URL',        'http://192.168.122.230:8929')
     GITLAB_TOKEN      = os.environ.get('GITLAB_TOKEN',      '')
     GITLAB_PROJECT_ID = os.environ.get('GITLAB_PROJECT_ID', '1')
     SSH_KEY           = os.environ.get('SSH_KEY',           '/root/.ssh/id_rsa')
@@ -42,7 +42,7 @@ data:
         'info':     ['incident', 'info'],
     }
     
-    WIKI_BASE = 'http://192.168.122.220/root/homelab-infrastructure/-/wikis'
+    WIKI_BASE = 'http://192.168.122.230:8929/root/homelab-infrastructure/-/wikis'
     
     RUNBOOK_URLS = {
         'TrengoAppDown':     f'{WIKI_BASE}/runbooks/TrengoAppDown',
@@ -65,10 +65,16 @@ data:
     RUNBOOKS = {
         'NodeMemoryCritical': [
             {
-                'instance_contains': 'ci-runner',
-                'host': '192.168.122.220',
+                'instance_contains': '192.168.122.230',
+                'host': '192.168.122.230',
                 'cmd': 'sudo pkill -f stress-ng 2>/dev/null; sudo gitlab-ctl restart',
-                'description': 'Restarted GitLab services on ci-runner to reclaim leaked memory.'
+                'description': 'Killed stress-ng and restarted GitLab services on k3s-infra to reclaim memory.'
+            },
+            {
+                'instance_contains': '192.168.122.220',
+                'host': '192.168.122.220',
+                'cmd': 'sudo pkill -f stress-ng 2>/dev/null; sudo gitlab-runner restart',
+                'description': 'Killed stress-ng and restarted GitLab runner on ci-runner to reclaim memory.'
             }
         ],
         'NodeDiskHigh': [
@@ -375,7 +381,7 @@ spec:
             - containerPort: 8080
           env:
             - name: GITLAB_URL
-              value: "http://192.168.122.220"
+              value: "http://192.168.122.230:8929"
             - name: GITLAB_PROJECT_ID
               value: "1"
             - name: GITLAB_TOKEN

@@ -21,10 +21,10 @@ docker stop trengo-test > /dev/null 2>&1
 docker rm trengo-test > /dev/null 2>&1
 
 if [ "$HTTP_CODE" != "200" ]; then
-    echo "✗ Local test failed (HTTP $HTTP_CODE)"
+    echo "FAIL: Local test failed (HTTP $HTTP_CODE)"
     exit 1
 fi
-echo "✓ Local test passed"
+echo "OK: Local test passed"
 
 echo ""
 echo "Step 3: Exporting image..."
@@ -54,7 +54,7 @@ kubectl get services
 
 echo ""
 echo "================================================"
-echo "✓ Deployment complete!"
+echo "Deployment complete!"
 echo "================================================"
 echo ""
 echo "Access the application:"

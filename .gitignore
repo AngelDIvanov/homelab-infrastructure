@@ -1,18 +1,34 @@
 # Terraform state — contains sensitive data, never commit
-terraform/terraform.tfstate
-terraform/terraform.tfstate.backup
 *.tfstate
 *.tfstate.backup
 
 # Terraform working files
-terraform/.terraform/
-terraform/.terraform.lock.hcl
+**/.terraform/
+**/.terraform.lock.hcl
+
+# terraform.tfvars contains your SSH key and IPs — use terraform.tfvars.example as a template
+terraform/terraform.tfvars
+terraform-kubeadm/terraform.tfvars
 
 # Python
 __pycache__/
 *.pyc
 
+# Secrets / session caches
+.secrets_cache
+.bw_session
+*.env
+.env*
+
 # Editor
 .vscode/
 .idea/
 *.swp
+
+# Claude Code local settings
+**/.claude/
+
+# Generated / binary / internal files
+homelab-summary.html
+monitoring/grafana/files.zip
+scripts/options}

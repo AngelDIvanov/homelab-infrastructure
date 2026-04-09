@@ -35,8 +35,22 @@ ANSIBLE_INV    = os.path.join(ANSIBLE_DIR, "inventory/homelab.ini")
 
 K3S_CONTROL_IP = "192.168.122.218"
 CI_RUNNER_IP   = "192.168.122.220"
-K3S_TOKEN      = "K10f56614b297cb7bf1aefdf9729e609f96a532f1a166949beecadda41ad9f834ad::server:86629278cae454833dba29ea33c9b15e"
 K3S_URL        = f"https://{K3S_CONTROL_IP}:6443"
+
+def _get_secret(env_var, vault_item):
+    """Read secret from env, falling back to Bitwarden CLI."""
+    value = os.environ.get(env_var, "")
+    if value:
+        return value
+    result = subprocess.run(["bw", "get", "password", vault_item],
+                            capture_output=True, text=True)
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    print(f"Error: {env_var} not set and vault fetch failed.")
+    print("Run: source ~/homelab/scripts/load-secrets.sh")
+    raise SystemExit(1)
+
+K3S_TOKEN = _get_secret("K3S_TOKEN", "homelab-k3s-token")
 BASE_IP_OCTET  = 221
 SSH_OPTS       = "-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no"
 
@@ -56,12 +70,10 @@ SERVICES = [
 #  HELPERS
 # ─────────────────────────────────────────────────────────────
 def run_cmd(cmd):
-    """Run shell command, return (returncode, stdout, stderr)."""
     r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 
 def vm_states():
-    """Return dict of {vm_name: bool} — True = running."""
     _, out, _ = run_cmd("virsh list --all 2>/dev/null")
     running = set()
     for line in out.splitlines():
@@ -107,7 +119,7 @@ def run_script(name, log_widget):
     """Run a bash script and stream output to log widget."""
     path = os.path.join(SCRIPTS_DIR, name)
     if not os.path.isfile(path):
-        log_widget.write_line(f"[red]✗ Script not found: {path}[/red]")
+        log_widget.write_line(f"[red]FAIL Script not found: {path}[/red]")
         return
     log_widget.write_line(f"[cyan]$ bash {path}[/cyan]")
     proc = subprocess.Popen(
@@ -119,9 +131,9 @@ def run_script(name, log_widget):
     proc.wait()
     rc = proc.returncode
     if rc == 0:
-        log_widget.write_line("[green]✓ Done[/green]")
+        log_widget.write_line("[green]OK Done[/green]")
     else:
-        log_widget.write_line(f"[red]✗ Exited with code {rc}[/red]")
+        log_widget.write_line(f"[red]FAIL Exited with code {rc}[/red]")
 
 # ─────────────────────────────────────────────────────────────
 #  CONFIRM DIALOG
@@ -170,7 +182,7 @@ class StatusPanel(Static):
             row = []
             for vm in ALL_VMS:
                 on = self.vm_data.get(vm, False)
-                icon = "🟢" if on else "🔴"
+                icon = "[UP]" if on else "[DOWN]"
                 row.append(f"{icon} [bold]{vm}[/bold]")
                 if len(row) == 2:
                     lines.append(f"  {row[0]:<40} {row[1]}")
@@ -185,7 +197,7 @@ class StatusPanel(Static):
             lines.append("  [dim]Loading...[/dim]")
         else:
             for name, up in self.service_data.items():
-                icon = "🟢" if up else "🔴"
+                icon = "[UP]" if up else "[DOWN]"
                 lines.append(f"  {icon} {name}")
 
         # ── K3s Nodes ──
@@ -195,7 +207,7 @@ class StatusPanel(Static):
             lines.append("  [dim]Not reachable or loading...[/dim]")
         else:
             for name, status in self.node_data:
-                icon = "🟢" if status == "Ready" else "🔴"
+                icon = "[UP]" if status == "Ready" else "[DOWN]"
                 lines.append(f"  {icon} {name:<22} {status}")
 
         return "\n".join(lines)
@@ -316,7 +328,7 @@ class LabTUI(App):
         Binding("r", "refresh", "Refresh"),
     ]
 
-    TITLE = "🏠 DevOps Home Lab"
+    TITLE = " DevOps Home Lab"
     SUB_TITLE = "Control Panel"
 
     def compose(self) -> ComposeResult:
@@ -326,25 +338,25 @@ class LabTUI(App):
             with Vertical(id="left-panel"):
                 yield Label("  K3S CLUSTER")
                 yield Button("▶  Start K3s",    id="k3s-start",   classes="section-btn")
-                yield Button("⏹  Stop K3s",     id="k3s-stop",    classes="section-btn")
+                yield Button("  Stop K3s",     id="k3s-stop",    classes="section-btn")
                 yield Label("  CRC")
                 yield Button("▶  Start CRC",    id="crc-start",   classes="section-btn")
-                yield Button("⏹  Stop CRC",     id="crc-stop",    classes="section-btn")
+                yield Button("  Stop CRC",     id="crc-stop",    classes="section-btn")
                 yield Label("  LAB")
-                yield Button("🛑 Stop ALL",      id="stop-all",    classes="danger-btn")
-                yield Button("🩺 Health Check",  id="health",      classes="section-btn")
-                yield Button("🔄 Refresh Status",id="refresh-btn", classes="section-btn")
+                yield Button(" Stop ALL",      id="stop-all",    classes="danger-btn")
+                yield Button(" Health Check",  id="health",      classes="section-btn")
+                yield Button(" Refresh Status",id="refresh-btn", classes="section-btn")
                 yield Label("  SCALE")
-                yield Button("📈 Upscale",       id="upscale",     classes="section-btn")
-                yield Button("📉 Downscale",     id="downscale",   classes="section-btn")
+                yield Button("Upscale Upscale",       id="upscale",     classes="section-btn")
+                yield Button("Downscale Downscale",     id="downscale",   classes="section-btn")
                 yield Label("  TOOLS")
-                yield Button("🔧 Rejoin Workers",id="rejoin",      classes="section-btn")
-                yield Button("🔄 Sync Images",   id="sync",        classes="section-btn")
+                yield Button(" Rejoin Workers",id="rejoin",      classes="section-btn")
+                yield Button(" Sync Images",   id="sync",        classes="section-btn")
 
             # ── Right: status + log ──
             with Vertical(id="right-panel"):
                 yield StatusPanel(id="status-panel")
-                yield Static("  📋 Output Log", id="log-title")
+                yield Static("   Output Log", id="log-title")
                 yield Log(id="log-panel", auto_scroll=True)
 
         yield Footer()
@@ -394,7 +406,7 @@ class LabTUI(App):
         elif btn == "k3s-stop":
             self.push_screen(
                 ConfirmScreen("Stop K3s cluster?"),
-                lambda ok: self._run_script_async("k3s-stop.sh", "⏹ Stopping K3s...") if ok else None
+                lambda ok: self._run_script_async("k3s-stop.sh", " Stopping K3s...") if ok else None
             )
 
         elif btn == "crc-start":
@@ -403,17 +415,17 @@ class LabTUI(App):
         elif btn == "crc-stop":
             self.push_screen(
                 ConfirmScreen("Stop CRC?"),
-                lambda ok: self._run_script_async("crc-stop.sh", "⏹ Stopping CRC...") if ok else None
+                lambda ok: self._run_script_async("crc-stop.sh", " Stopping CRC...") if ok else None
             )
 
         elif btn == "stop-all":
             self.push_screen(
-                ConfirmScreen("⚠ Stop ALL environments?\n(K3s + CRC + CI Runner)"),
-                lambda ok: self._run_script_async("lab-stop-all.sh", "🛑 Stopping all environments...") if ok else None
+                ConfirmScreen("[WARN] Stop ALL environments?\n(K3s + CRC + CI Runner)"),
+                lambda ok: self._run_script_async("lab-stop-all.sh", " Stopping all environments...") if ok else None
             )
 
         elif btn == "health":
-            self._run_script_async("check-lab.sh", "🩺 Running health check...")
+            self._run_script_async("check-lab.sh", " Running health check...")
 
         elif btn == "upscale":
             self._run_upscale()
@@ -444,7 +456,7 @@ class LabTUI(App):
     @work(thread=True)
     def _run_upscale(self):
         log = self.query_one("#log-panel", Log)
-        self.call_from_thread(log.write_line, "\n[bold yellow]📈 Starting upscale...[/bold yellow]")
+        self.call_from_thread(log.write_line, "\n[bold yellow]Upscale Starting upscale...[/bold yellow]")
 
         current   = get_vm_count()
         new_count = current + 1
@@ -462,13 +474,13 @@ class LabTUI(App):
             content = re.sub(r'vm_count\s*=\s*\d+', f'vm_count       = {new_count}', content)
             open(tfvars, 'w').write(content)
         except Exception as e:
-            self.call_from_thread(log.write_line, f"[red]✗ Could not update tfvars: {e}[/red]")
+            self.call_from_thread(log.write_line, f"[red]FAIL Could not update tfvars: {e}[/red]")
             return
 
         rc, out, err = run_cmd(f"cd {TERRAFORM_DIR} && terraform apply -auto-approve")
         for line in out.splitlines(): self.call_from_thread(log.write_line, line)
         if rc != 0:
-            self.call_from_thread(log.write_line, "[red]✗ Terraform failed[/red]")
+            self.call_from_thread(log.write_line, "[red]FAIL Terraform failed[/red]")
             return
 
         # Boot delay
@@ -486,7 +498,7 @@ class LabTUI(App):
                 ready = True; break
             time.sleep(10)
         if not ready:
-            self.call_from_thread(log.write_line, "[red]✗ SSH timeout[/red]"); return
+            self.call_from_thread(log.write_line, "[red]FAIL SSH timeout[/red]"); return
 
         # Join k3s
         self.call_from_thread(log.write_line, "[cyan]→ Joining k3s cluster...[/cyan]")
@@ -496,7 +508,7 @@ class LabTUI(App):
         )
         run_cmd(f'ssh {SSH_OPTS} andy@{new_ip} "sudo systemctl restart k3s-agent"')
 
-        self.call_from_thread(log.write_line, f"[green]✓ {new_name} added![/green]")
+        self.call_from_thread(log.write_line, f"[green]OK {new_name} added![/green]")
         self.call_from_thread(self.refresh_status)
 
     @work(thread=True)
@@ -509,7 +521,7 @@ class LabTUI(App):
 
         wnum  = current + 1
         wname = f"k3s-worker-{wnum}"
-        self.call_from_thread(log.write_line, f"\n[bold yellow]📉 Removing {wname}...[/bold yellow]")
+        self.call_from_thread(log.write_line, f"\n[bold yellow]Downscale Removing {wname}...[/bold yellow]")
 
         # Drain
         run_cmd(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl drain {wname} --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true"')
@@ -522,16 +534,16 @@ class LabTUI(App):
             content = re.sub(r'vm_count\s*=\s*\d+', f'vm_count       = {current - 1}', content)
             open(tfvars, 'w').write(content)
         except Exception as e:
-            self.call_from_thread(log.write_line, f"[red]✗ {e}[/red]"); return
+            self.call_from_thread(log.write_line, f"[red]FAIL {e}[/red]"); return
 
         run_cmd(f"cd {TERRAFORM_DIR} && terraform apply -auto-approve")
-        self.call_from_thread(log.write_line, f"[green]✓ {wname} removed![/green]")
+        self.call_from_thread(log.write_line, f"[green]OK {wname} removed![/green]")
         self.call_from_thread(self.refresh_status)
 
     @work(thread=True)
     def _run_rejoin(self):
         log = self.query_one("#log-panel", Log)
-        self.call_from_thread(log.write_line, "\n[bold yellow]🔧 Rejoining workers...[/bold yellow]")
+        self.call_from_thread(log.write_line, "\n[bold yellow] Rejoining workers...[/bold yellow]")
         vm_count = get_vm_count()
         for i in range(vm_count):
             wnum = i + 2
@@ -545,16 +557,16 @@ class LabTUI(App):
                 f'"curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN} sh -"'
             )
             run_cmd(f'ssh {SSH_OPTS} andy@{wip} "sudo systemctl restart k3s-agent"')
-            icon = "✓" if rc == 0 else "✗"
+            icon = "OK" if rc == 0 else "FAIL"
             color = "green" if rc == 0 else "red"
             self.call_from_thread(log.write_line, f"  [{color}]{icon} {wname}[/{color}]")
-        self.call_from_thread(log.write_line, "[green]✓ Rejoin complete![/green]")
+        self.call_from_thread(log.write_line, "[green]OK Rejoin complete![/green]")
         self.call_from_thread(self.refresh_status)
 
     @work(thread=True)
     def _run_sync(self):
         log = self.query_one("#log-panel", Log)
-        self.call_from_thread(log.write_line, "\n[bold yellow]🔄 Syncing images to all workers...[/bold yellow]")
+        self.call_from_thread(log.write_line, "\n[bold yellow] Syncing images to all workers...[/bold yellow]")
         workers = {"k3s-worker-1": "192.168.122.219"}
         for i in range(get_vm_count()):
             wnum = i + 2
@@ -570,10 +582,10 @@ class LabTUI(App):
                 run_cmd(f'scp {SSH_OPTS} andy@{K3S_CONTROL_IP}:/tmp/sync.tar /tmp/')
                 run_cmd(f'scp {SSH_OPTS} /tmp/sync.tar andy@{ip}:/tmp/')
                 run_cmd(f'ssh {SSH_OPTS} andy@{ip} "sudo k3s ctr images import /tmp/sync.tar"')
-                self.call_from_thread(log.write_line, f"  [green]✓ {name} synced[/green]")
+                self.call_from_thread(log.write_line, f"  [green]OK {name} synced[/green]")
             else:
-                self.call_from_thread(log.write_line, f"  [yellow]⚠ No image found for {name}[/yellow]")
-        self.call_from_thread(log.write_line, "[green]✓ Sync complete![/green]")
+                self.call_from_thread(log.write_line, f"  [yellow][WARN] No image found for {name}[/yellow]")
+        self.call_from_thread(log.write_line, "[green]OK Sync complete![/green]")
 
 if __name__ == "__main__":
     app = LabTUI()
