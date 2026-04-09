@@ -1,33 +1,6 @@
 #!/bin/bash
-# ============================================
-#   DevOps Home Lab - Health Check & Auto-Fix
-# ============================================
-#
-# Author: Angel
-# Purpose: Validates and auto-repairs home lab infrastructure
-#
-# Checks performed:
-#   - VM power state and connectivity
-#   - Service availability (curl)
-#   - Kubernetes cluster health
-#   - Monitoring stack status
-#   - Worker node agents
-#   - Disk health + auto image pruning
-#   - K8s Dashboard & Portainer
-#
-# Auto-fixes:
-#   - Starts powered-off VMs
-#   - Restarts inactive k3s-agent
-#   - Deletes stuck pods
-#   - Syncs container images across nodes
-#   - Prunes unused images when disk is low
-#   - Restarts k3s if NodePort unreachable
-#
-# Usage: 
-#   ./check-lab.sh          - Normal checks with auto-start if needed
-#   ./check-lab.sh --restart - Force restart all VMs before checks
-#   ./check-lab.sh --reboot  - Force hard reboot (destroy + start) all VMs
-# ============================================
+# Health check + auto-fix for the homelab.
+# Usage: ./check-lab.sh [--restart|--reboot]
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -250,13 +223,7 @@ wait_for_vm() {
     return 1
 }
 
-# ============================================
-#   CHECKS START
-# ============================================
-
-# ============================================
-#   VM POWER MANAGEMENT
-# ============================================
+# ── VM POWER ─────────────────────────────────
 
 section " VIRTUAL MACHINE POWER STATE"
 
@@ -653,9 +620,7 @@ else
     ((WARN++))
 fi
 
-# ============================================
-#   RESULTS SUMMARY
-# ============================================
+# ── SUMMARY ──────────────────────────────────
 
 echo -e "\n${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BOLD}                            SUMMARY${NC}"
