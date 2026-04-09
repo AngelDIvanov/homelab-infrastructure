@@ -152,7 +152,16 @@ spec:
             severity: warning
           annotations:
             summary: "check-lab health check detected cluster issues"
-            description: "The check-lab CronJob (job {{ $labels.job_name }}, namespace {{ $labels.namespace }}) reported {{ $value }} failure(s). Check pod logs for details: kubectl logs -n default -l app=check-lab --previous"
+            description: "The check-lab CronJob (job {{ $labels.job_name }}, namespace {{ $labels.namespace }}) reported {{ $value }} failure(s). Check pod logs: kubectl logs -n default -l app=check-lab --previous"
+
+        - alert: CheckLabNotScheduled
+          expr: time() - kube_cronjob_status_last_schedule_time{cronjob="check-lab"} > 1200
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "check-lab CronJob has not run in 20 minutes"
+            description: "check-lab last ran {{ $value | humanizeDuration }} ago (expected every 15 min). CronJob may be suspended or the cluster scheduler is unhealthy. Check: kubectl get cronjob check-lab -n default"
 
         - alert: K3sControlPlaneUnhealthy
           expr: up{job="apiserver"} == 0
