@@ -37,7 +37,7 @@ receivers:
           *Description:* {{ .Annotations.description }}
           *Namespace:* `{{ .Labels.namespace }}`
           *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
-          *On-call:* <!here> <!here> — please investigate
+          *On-call:* <!here> — please investigate
           {{ end }}
         footer: 'Homelab Alertmanager | http://192.168.122.218:30093'
 
@@ -54,7 +54,7 @@ receivers:
           *Description:* {{ .Annotations.description }}
           *Namespace:* `{{ .Labels.namespace }}`
           *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
-          *FYI:* <!here> <!here>
+          *FYI:* <!here>
           {{ end }}
         footer: 'Homelab Alertmanager | http://192.168.122.218:30093'
 
