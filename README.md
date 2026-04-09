@@ -4,6 +4,17 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 
 ---
 
+## What this demonstrates
+
+- **Full infrastructure-as-code lifecycle** — VM provisioning through Terraform, configuration via Ansible, container orchestration on k3s
+- **Production-grade observability** — Prometheus, Grafana, Loki, Alertmanager with custom dashboards per service
+- **Complete incident management pipeline** — alert fires → Slack notification with runbook link → GitLab issue auto-created → auto-closed on resolution
+- **GitOps CI/CD with 9 stages** including Trivy container scanning and Gitleaks secret detection
+- **Self-healing automation** — crashloop recovery cronjobs, health check scripts with auto-fix
+- **Custom Python control plane** — TUI and menu-driven interface for full lab management
+
+---
+
 ## Screenshots
 
 **Cluster & App**
