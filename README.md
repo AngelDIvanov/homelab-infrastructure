@@ -6,9 +6,27 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code â
 
 ## Screenshots
 
+**Cluster & App**
+
 ![k3s control plane](docs/images/k3s-control-plane.png)
 ![API dashboard](docs/images/api-dashboard.png)
 ![Trengo app](docs/images/trengo-app.png)
+
+**Control & Health**
+
+![Control Panel TUI](docs/images/control-panel-tui.png)
+![check-lab.sh output](docs/images/check-lab-output.png)
+
+**CI/CD & GitLab**
+
+![Pipeline visualized](docs/images/pipeline-visualized.png)
+![Pipeline validation with job code](docs/images/pipeline-validation.png)
+![Merge requests with checklists](docs/images/merge-requests-checklists.png)
+![GitLab Issues from Alertmanager](docs/images/gitlab-issues-alertmanager.png)
+
+**Alerting**
+
+![Slack alert](docs/images/slack-alert.png)
 
 ---
 
