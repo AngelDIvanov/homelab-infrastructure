@@ -12,6 +12,23 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
+# Suppress ANSI when not running in a terminal (CronJob / log capture)
+[ ! -t 1 ] && { GREEN=''; RED=''; YELLOW=''; CYAN=''; BLUE=''; MAGENTA=''; BOLD=''; DIM=''; NC=''; }
+
+SECTION="general"
+
+# Structured logfmt output — parseable by Loki with | logfmt
+# Usage: slog <level> <check_desc> <status> <node> [msg]
+slog() {
+    local level="$1" desc="$2" status="$3" node="${4:-homelab}"
+    shift 4
+    local msg="${*:-}"
+    local key
+    key=$(printf '%s' "$desc" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/--*/-/g; s/^-//; s/-$//')
+    printf 'level=%s check=%s section=%s status=%s node=%s msg="%s"\n' \
+        "$level" "$key" "$SECTION" "$status" "$node" "${msg//\"/\'}"
+}
+
 PASS=0
 FAIL=0
 WARN=0
@@ -105,8 +122,9 @@ spinner() {
     printf "\r      \r"
 }
 
-# Section header
+# Section header — also updates SECTION for structured logs
 section() {
+    SECTION=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/--*/-/g; s/^-//; s/-$//')
     echo -e "\n${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BOLD}${CYAN}  $1${NC}"
     echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -116,6 +134,7 @@ section() {
 check() {
     local desc="$1"
     local cmd="$2"
+    local node="${3:-homelab}"
     printf "  %-55s" "$desc"
     eval "$cmd" &>/dev/null &
     local pid=$!
@@ -126,10 +145,12 @@ check() {
     if [ $result -eq 0 ]; then
         echo -e "${GREEN}OK PASS${NC}"
         ((PASS++))
+        slog INFO "$desc" PASS "$node" "ok"
         return 0
     else
         echo -e "${RED}FAIL FAIL${NC}"
         ((FAIL++))
+        slog ERROR "$desc" FAIL "$node" "check failed"
         return 1
     fi
 }
@@ -138,6 +159,7 @@ check() {
 check_warn() {
     local desc="$1"
     local cmd="$2"
+    local node="${3:-homelab}"
     printf "  %-55s" "$desc"
     eval "$cmd" &>/dev/null &
     local pid=$!
@@ -148,10 +170,12 @@ check_warn() {
     if [ $result -eq 0 ]; then
         echo -e "${GREEN}OK PASS${NC}"
         ((PASS++))
+        slog INFO "$desc" PASS "$node" "ok"
         return 0
     else
         echo -e "${YELLOW}[WARN] WARN${NC}"
         ((WARN++))
+        slog WARN "$desc" WARN "$node" "non-critical failure"
         return 1
     fi
 }
@@ -302,13 +326,13 @@ if [ "$STARTUP_NEEDED" = true ] || [ "$FORCE_RESTART" = true ]; then
 fi
 
 section "  VIRTUAL MACHINE CONNECTIVITY"
-check "ci-runner ($CI_RUNNER_IP)" "ping -c 1 -W 2 $CI_RUNNER_IP"
-check "k3s-control ($K3S_CONTROL_IP)" "ping -c 1 -W 2 $K3S_CONTROL_IP"
+check "ci-runner ($CI_RUNNER_IP)" "ping -c 1 -W 2 $CI_RUNNER_IP" "ci-runner"
+check "k3s-control ($K3S_CONTROL_IP)" "ping -c 1 -W 2 $K3S_CONTROL_IP" "k3s-control"
 
 # Dynamic worker connectivity checks
 for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
     worker_ip="${WORKERS[$worker_name]}"
-    check "$worker_name ($worker_ip)" "ping -c 1 -W 2 $worker_ip"
+    check "$worker_name ($worker_ip)" "ping -c 1 -W 2 $worker_ip" "$worker_name"
 done
 
 section "  CORE SERVICES"
@@ -498,10 +522,12 @@ if [ -z "$DISK_PCT" ]; then
     printf "  %-45s" "$NODE"
     echo -e "${RED}FAIL FAIL${NC} (unreachable)"
     ((FAIL++))
+    slog ERROR "disk-$NODE" FAIL "$NODE" "unreachable"
 elif [ "$DISK_PCT" -lt "$DISK_THRESHOLD" ]; then
     printf "  %-45s" "$NODE"
     echo -e "${GREEN}OK PASS${NC}  ${DISK_PCT}% used (${DISK_AVAIL} free)"
     ((PASS++))
+    slog INFO "disk-$NODE" PASS "$NODE" "${DISK_PCT}% used ${DISK_AVAIL} free"
 else
     printf "  %-45s" "$NODE"
     echo -e "${YELLOW}[WARN] ${DISK_PCT}% used - pruning...${NC}"
@@ -513,13 +539,16 @@ else
         if [ "$AFTER_PCT" -lt "$DISK_THRESHOLD" ]; then
             echo -e "    ${GREEN}OK Recovered: ${DISK_PCT}% → ${AFTER_PCT}% (${AFTER_AVAIL} free)${NC}"
             ((PASS++))
+            slog INFO "disk-$NODE" PASS "$NODE" "pruned ${DISK_PCT}% to ${AFTER_PCT}% ${AFTER_AVAIL} free"
         else
             echo -e "    ${RED}FAIL Still at ${AFTER_PCT}% after pruning${NC}"
             ((FAIL++))
+            slog ERROR "disk-$NODE" FAIL "$NODE" "still at ${AFTER_PCT}% after pruning"
         fi
     else
         echo -e "    ${RED}FAIL disk_check.sh not found${NC}"
         ((FAIL++))
+        slog ERROR "disk-$NODE" FAIL "$NODE" "disk_check.sh not found"
     fi
 fi
 
@@ -676,3 +705,9 @@ else
 fi
 
 echo -e "\n${DIM}Completed at: $(date '+%Y-%m-%d %H:%M:%S')${NC}\n"
+
+SECTION="summary"
+slog INFO summary DONE homelab "pass=$PASS fail=$FAIL warn=$WARN total=$((PASS+FAIL+WARN))"
+
+[ "$FAIL" -gt 0 ] && exit 1
+exit 0
