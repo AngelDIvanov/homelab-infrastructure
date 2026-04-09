@@ -1,0 +1,234 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: check-lab
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: check-lab
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "persistentvolumeclaims", "events", "namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "daemonsets"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: check-lab
+subjects:
+  - kind: ServiceAccount
+    name: check-lab
+    namespace: default
+roleRef:
+  kind: ClusterRole
+  name: check-lab
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: check-lab-script
+  namespace: default
+data:
+  check-lab.sh: |
+    #!/bin/sh
+    set -u
+
+    PASS=0
+    FAIL=0
+    WARN=0
+
+    K3S_CONTROL="${K3S_CONTROL_IP:-192.168.122.218}"
+    GITLAB_ADDR="${GITLAB_IP:-192.168.122.230}:${GITLAB_PORT:-8929}"
+
+    log() {
+      local level=$1 check=$2 status=$3
+      shift 3
+      printf '{"time":"%s","level":"%s","job":"check-lab","check":"%s","status":"%s","msg":"%s"}\n' \
+        "$(date -Iseconds)" "$level" "$check" "$status" "$*"
+    }
+
+    check() {
+      local name=$1; shift
+      if eval "$*" >/dev/null 2>&1; then
+        log INFO  "$name" PASS "ok"
+        PASS=$((PASS + 1))
+      else
+        log ERROR "$name" FAIL "check failed"
+        FAIL=$((FAIL + 1))
+      fi
+    }
+
+    check_warn() {
+      local name=$1; shift
+      if eval "$*" >/dev/null 2>&1; then
+        log INFO "$name" PASS "ok"
+        PASS=$((PASS + 1))
+      else
+        log WARN "$name" WARN "non-critical failure"
+        WARN=$((WARN + 1))
+      fi
+    }
+
+    log INFO start START "check-lab starting"
+
+    # ── Kubernetes nodes ──────────────────────────────────────────────────
+    check      "node/k3s-control"  "kubectl get node k3s-control  --no-headers | grep -q Ready"
+    check      "node/k3s-worker-1" "kubectl get node k3s-worker-1 --no-headers | grep -q Ready"
+    check_warn "node/k3s-worker-2" "kubectl get node k3s-worker-2 --no-headers | grep -q Ready"
+    check      "node/k3s-infra"    "kubectl get node k3s-infra    --no-headers | grep -q Ready"
+
+    # ── Application pods ──────────────────────────────────────────────────
+    check      "pod/trengo-prod"    \
+      "kubectl get pods -n default -l app=trengo-search          --no-headers | grep -q Running"
+    check_warn "pod/trengo-staging" \
+      "kubectl get pods -n default -l app=trengo-search-staging  --no-headers | grep -q Running"
+
+    # ── Monitoring stack ──────────────────────────────────────────────────
+    check      "pod/prometheus"   \
+      "kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus   --no-headers | grep -q Running"
+    check      "pod/grafana"      \
+      "kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana      --no-headers | grep -q Running"
+    check      "pod/alertmanager" \
+      "kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager --no-headers | grep -q Running"
+    check_warn "pod/loki"         \
+      "kubectl get pods -n monitoring -l app=loki                            --no-headers | grep -q Running"
+    check_warn "pod/webhook"      \
+      "kubectl get pods -n monitoring -l app=alertmanager-webhook            --no-headers | grep -q Running"
+
+    # ── HTTP reachability ─────────────────────────────────────────────────
+    check      "http/trengo-prod"    "curl -sf --max-time 5 http://$K3S_CONTROL:32504"
+    check_warn "http/trengo-staging" "curl -sf --max-time 5 http://$K3S_CONTROL:32505"
+    check      "http/grafana"        "curl -sf --max-time 5 -o /dev/null http://$K3S_CONTROL:30080"
+    check      "http/alertmanager"   "curl -sf --max-time 5 -o /dev/null http://$K3S_CONTROL:30093"
+    check      "http/gitlab"         "curl -sf --max-time 10 -o /dev/null http://$GITLAB_ADDR"
+
+    # ── PVC health ────────────────────────────────────────────────────────
+    PENDING_PVC=$(kubectl get pvc -A --no-headers 2>/dev/null | grep -c Pending || true)
+    if [ "${PENDING_PVC:-0}" -gt 0 ]; then
+      log ERROR "pvc/pending" FAIL "$PENDING_PVC PVC(s) stuck in Pending"
+      FAIL=$((FAIL + 1))
+    else
+      log INFO "pvc/pending" PASS "no pending PVCs"
+      PASS=$((PASS + 1))
+    fi
+
+    # ── Stuck terminating pods — force-delete ─────────────────────────────
+    kubectl get pods -A --no-headers 2>/dev/null | grep Terminating | \
+    while read -r ns pod _rest; do
+      log WARN "pod/stuck-terminating" WARN "force-deleting $ns/$pod"
+      kubectl delete pod "$pod" -n "$ns" --grace-period=0 --force >/dev/null 2>&1 || true
+    done
+
+    # ── Auto-fix: trengo-search CrashLoop / Error ─────────────────────────
+    TRENGO_BAD=$(kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null \
+      | grep -cE 'CrashLoopBackOff|Error|OOMKilled' || true)
+
+    if [ "${TRENGO_BAD:-0}" -gt 0 ]; then
+      log WARN "autofix/trengo" RUNNING "$TRENGO_BAD crashing pod(s) — attempting rollback"
+      FAIL=$((FAIL + 1))
+
+      REVISIONS=$(kubectl rollout history deployment/trengo-search -n default 2>/dev/null \
+        | grep -c REVISION || echo 0)
+
+      if [ "${REVISIONS:-0}" -gt 1 ]; then
+        kubectl rollout undo deployment/trengo-search -n default >/dev/null 2>&1
+        sleep 20
+        STILL_BAD=$(kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null \
+          | grep -cE 'CrashLoopBackOff|Error|OOMKilled' || true)
+        if [ "${STILL_BAD:-1}" -eq 0 ]; then
+          log INFO "autofix/trengo" PASS "rollback succeeded — pods recovered"
+          FAIL=$((FAIL - 1))
+          PASS=$((PASS + 1))
+        else
+          log ERROR "autofix/trengo" FAIL "rollback did not recover pods — manual intervention needed"
+        fi
+      else
+        log WARN "autofix/trengo" SKIP "no rollback history — force-deleting stuck pods"
+        kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null \
+          | grep -vE '^$|Running' | awk '{print $1}' \
+          | xargs -r -I{} kubectl delete pod {} -n default --force --grace-period=0 >/dev/null 2>&1 || true
+        sleep 20
+        STILL_BAD=$(kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null \
+          | grep -cE 'CrashLoopBackOff|Error|OOMKilled' || true)
+        if [ "${STILL_BAD:-1}" -eq 0 ]; then
+          log INFO "autofix/trengo" PASS "pod recreation succeeded"
+          FAIL=$((FAIL - 1))
+          PASS=$((PASS + 1))
+        else
+          log ERROR "autofix/trengo" FAIL "pods still failing after recreation"
+        fi
+      fi
+    fi
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    TOTAL=$((PASS + FAIL + WARN))
+    log INFO summary DONE "pass=$PASS fail=$FAIL warn=$WARN total=$TOTAL"
+
+    [ "$FAIL" -gt 0 ] && exit 1
+    exit 0
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: check-lab
+  namespace: default
+  labels:
+    app: check-lab
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: check-lab
+        spec:
+          serviceAccountName: check-lab
+          restartPolicy: Never
+          containers:
+            - name: check-lab
+              image: alpine/k8s:1.29.2
+              command: ["/bin/sh", "/scripts/check-lab.sh"]
+              env:
+                - name: K3S_CONTROL_IP
+                  value: "192.168.122.218"
+                - name: GITLAB_IP
+                  value: "192.168.122.230"
+                - name: GITLAB_PORT
+                  value: "8929"
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "200m"
+                  memory: "128Mi"
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+          volumes:
+            - name: script
+              configMap:
+                name: check-lab-script
+                defaultMode: 0755

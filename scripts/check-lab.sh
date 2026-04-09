@@ -80,10 +80,10 @@ clear
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════════════════╗"
 echo "║                                                                       ║"
-echo "║             DevOps Home Lab - Health Check                        ║"
+echo "║             DevOps Home Lab - Health Check                            ║"
 echo "║                                                                       ║"
 echo "╠═══════════════════════════════════════════════════════════════════════╣"
-echo "║  K3s │ GitLab CI/CD │ Prometheus │ Grafana │ Loki │ Security Tools   ║"
+echo "║  K3s │ GitLab CI/CD │ Prometheus │ Grafana │ Loki │ Security Tools    ║"
 echo "╚═══════════════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "${DIM}Started at: $(date '+%Y-%m-%d %H:%M:%S')${NC}\n"
@@ -631,9 +631,9 @@ echo -e "  ${YELLOW}[WARN] Warnings:${NC} $WARN"
 echo -e "  ${RED}FAIL Failed:${NC}   $FAIL"
 
 if [ $FAIL -eq 0 ]; then
-    echo -e "\n${GREEN}${BOLD}  ╔═════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}${BOLD}  ║        ALL SYSTEMS OPERATIONAL                  ║${NC}"
-    echo -e "${GREEN}${BOLD}  ╚═════════════════════════════════════════════════════╝${NC}"
+    echo -e "\n${GREEN}${BOLD}    ╔═════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}${BOLD}    ║        ALL SYSTEMS OPERATIONAL                      ║${NC}"
+    echo -e "${GREEN}${BOLD}    ╚═════════════════════════════════════════════════════╝${NC}"
     
     echo -e "\n${BOLD}   Quick Links:${NC}"
     echo -e "  ────────────────────────────────────────────────────────"
@@ -644,7 +644,7 @@ if [ $FAIL -eq 0 ]; then
     echo -e "  ${CYAN} GitLab:${NC}               http://$CI_RUNNER_IP"
     echo -e "  ${CYAN} Pipelines:${NC}            http://$CI_RUNNER_IP/root/trengo-search/-/pipelines"
     echo -e "  ${CYAN} Wiki:${NC}                 http://$CI_RUNNER_IP/root/trengo-search/-/wikis"
-    echo -e "  ${CYAN}K8s  K8s Dashboard:${NC}        https://$K3S_CONTROL_IP:30443"
+    echo -e "  ${CYAN} K8s  K8s Dashboard:${NC}        https://$K3S_CONTROL_IP:30443"
     echo -e "  ${CYAN} Portainer:${NC}            http://$K3S_CONTROL_IP:30777"
     
     echo -e "\n${BOLD}   K8s Dashboard Token:${NC}"
@@ -667,9 +667,9 @@ if [ $FAIL -eq 0 ]; then
         echo -e "  ${DIM}Password: prom-operator (default)${NC}"
     fi
 else
-    echo -e "\n${RED}${BOLD}  ╔═════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}${BOLD}  ║       [WARN]  SOME CHECKS FAILED - REVIEW               ║${NC}"
-    echo -e "${RED}${BOLD}  ╚═════════════════════════════════════════════════════╝${NC}"
+    echo -e "\n${RED}${BOLD}╔═══════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}${BOLD}  ║       [WARN]  SOME CHECKS FAILED - REVIEW             ║${NC}"
+    echo -e "${RED}${BOLD}  ╚═══════════════════════════════════════════════════════╝${NC}"
     echo -e "\n  ${YELLOW}Run the script again after fixing issues.${NC}"
     echo -e "  ${YELLOW}Or use './check-lab.sh --restart' for graceful restart.${NC}"
     echo -e "  ${YELLOW}Or use './check-lab.sh --reboot' for hard reboot (destroy).${NC}"
