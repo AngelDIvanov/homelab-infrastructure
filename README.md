@@ -4,6 +4,14 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code â
 
 ---
 
+## Screenshots
+
+![k3s control plane](docs/images/k3s-control-plane.png)
+![API dashboard](docs/images/api-dashboard.png)
+![Trengo app](docs/images/trengo-app.png)
+
+---
+
 ## What's in here
 
 | Layer | Tech |
