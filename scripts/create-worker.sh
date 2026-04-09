@@ -80,8 +80,8 @@ sudo virt-install \
   --noautoconsole \
   --import
 
-echo "✓ VM ${VM_NAME} created!"
+echo "OK VM ${VM_NAME} created!"
 echo "Waiting 60 seconds for boot..."
 sleep 60
 
-ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no andy@${IP_ADDRESS} "hostname" && echo "✓ SSH working!"
+ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no andy@${IP_ADDRESS} "hostname" && echo "OK SSH working!"

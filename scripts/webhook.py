@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""
-Alertmanager → GitLab Issues webhook receiver
-Runs inside k3s, receives Alertmanager webhooks and creates/closes GitLab issues
-"""
+# Alertmanager webhook → GitLab issues
+# Fires when Alertmanager POSTs; opens/closes issues based on alert state.
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
@@ -15,7 +13,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
 
-GITLAB_URL   = os.environ.get('GITLAB_URL',   'http://192.168.122.220')
+GITLAB_URL   = os.environ.get('GITLAB_URL',   'http://192.168.122.230:8929')
 GITLAB_TOKEN = os.environ.get('GITLAB_TOKEN', '')
 GITLAB_PROJECT_ID = os.environ.get('GITLAB_PROJECT_ID', '1')
 
@@ -25,19 +23,17 @@ SEVERITY_LABELS = {
     'info':     ['incident', 'info'],
 }
 
-SEVERITY_EMOJI = {
-    'critical': '🚨',
-    'warning':  '⚠️',
-    'info':     'ℹ️',
+SEVERITY_PREFIX = {
+    'critical': '[CRITICAL]',
+    'warning':  '[WARNING]',
+    'info':     '[INFO]',
 }
 
 def inc_number(alert):
-    """Generate a stable INC number from alert fingerprint."""
     fp = alert.get('fingerprint', alert['labels'].get('alertname', 'unknown'))
     return int(hashlib.md5(fp.encode()).hexdigest()[:5], 16) % 90000 + 10000
 
 def gitlab_request(method, path, data=None):
-    """Make a GitLab API request."""
     url = f"{GITLAB_URL}/api/v4/projects/{GITLAB_PROJECT_ID}{path}"
     headers = {
         'PRIVATE-TOKEN': GITLAB_TOKEN,
@@ -53,7 +49,6 @@ def gitlab_request(method, path, data=None):
         return None
 
 def find_open_issue(inc_num):
-    """Find an open issue with this INC number."""
     issues = gitlab_request('GET', f'/issues?state=opened&search=INC-{inc_num}&labels=incident')
     if issues:
         for issue in issues:
@@ -62,18 +57,17 @@ def find_open_issue(inc_num):
     return None
 
 def create_issue(alert, inc_num):
-    """Create a GitLab issue for a firing alert."""
     severity  = alert['labels'].get('severity', 'info')
     alertname = alert['labels'].get('alertname', 'Unknown')
     namespace = alert['labels'].get('namespace', 'N/A')
     summary   = alert['annotations'].get('summary', alertname)
     desc      = alert['annotations'].get('description', '')
-    emoji     = SEVERITY_EMOJI.get(severity, 'ℹ️')
+    prefix    = SEVERITY_PREFIX.get(severity, '[INFO]')
     labels    = SEVERITY_LABELS.get(severity, ['incident'])
 
-    title = f"{emoji} INC-{inc_num} | {severity.upper()} | {alertname}"
+    title = f"{prefix} INC-{inc_num} | {alertname}"
 
-    body = f"""## {emoji} Incident INC-{inc_num}
+    body = f"""## {prefix} Incident INC-{inc_num}
 
 **Severity:** {severity.upper()}
 **Alert:** {alertname}
@@ -89,7 +83,7 @@ def create_issue(alert, inc_num):
 ```
 
 ### Timeline
-- 🔴 **Fired:** {alert.get('startsAt', 'N/A')}
+- **Fired:** {alert.get('startsAt', 'N/A')}
 
 ---
 *Auto-created by Alertmanager*
@@ -106,12 +100,11 @@ def create_issue(alert, inc_num):
     return issue
 
 def close_issue(issue, alert, inc_num):
-    """Close a GitLab issue when alert resolves."""
     ends_at = alert.get('endsAt', 'N/A')
     
     # Add resolve comment
     gitlab_request('POST', f"/issues/{issue['iid']}/notes", {
-        'body': f"✅ **RESOLVED** — Alert cleared at {ends_at}\n\n*Auto-resolved by Alertmanager*"
+        'body': f"**RESOLVED** — Alert cleared at {ends_at}\n\n*Auto-resolved by Alertmanager*"
     })
 
     # Close the issue

@@ -25,9 +25,9 @@ for file in "${!DASHBOARD_MAP[@]}"; do
         printf "  %-45s" "$file"
         result=$(ssh $SSH_OPTS andy@$K3S_CONTROL "sudo k3s kubectl apply -f -" < "$filepath" 2>&1)
         if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✓ applied${NC}"
+            echo -e "${GREEN}OK applied${NC}"
         else
-            echo -e "${RED}✗ failed${NC}"
+            echo -e "${RED}FAIL failed${NC}"
             echo "    $result"
         fi
     fi
@@ -46,13 +46,13 @@ for json in "$DASHBOARD_DIR"/*.json; do
         --dry-run=client -o yaml | \
         sudo k3s kubectl apply -f -" < "$json" 2>&1)
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ synced${NC}"
+        echo -e "${GREEN}OK synced${NC}"
     else
-        echo -e "${RED}✗ failed${NC}"
+        echo -e "${RED}FAIL failed${NC}"
         echo "    $result"
     fi
 done
 
-echo -e "\n${GREEN}✓ Done — restart Grafana pod to reload dashboards${NC}"
+echo -e "\n${GREEN}OK Done — restart Grafana pod to reload dashboards${NC}"
 ssh $SSH_OPTS andy@$K3S_CONTROL "sudo k3s kubectl rollout restart deployment monitoring-grafana -n monitoring" 2>/dev/null
-echo -e "${GREEN}✓ Grafana restarting${NC}\n"
+echo -e "${GREEN}OK Grafana restarting${NC}\n"
