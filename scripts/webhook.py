@@ -385,14 +385,14 @@ def handle_lab(body_bytes):
         token = str(uuid.uuid4())
         pending[token] = {"commands": commands, "response_url": resp_url}
 
-        summary = _short_summary(diagnosis)
+        short = _short_summary(diagnosis)
 
         # Compact main message
         blocks = [
             {"type": "header",
              "text": {"type": "plain_text", "text": ":robot_face:  Claude Diagnosis"}},
             {"type": "section",
-             "text": {"type": "mrkdwn", "text": summary}},
+             "text": {"type": "mrkdwn", "text": short}},
         ]
 
         if commands:
@@ -462,7 +462,7 @@ def post_diagnosis(alert):
         token = str(uuid.uuid4())
         pending[token] = {"commands": commands, "response_url": "", "channel": SLACK_INCIDENTS}
 
-        summary = _short_summary(diagnosis)
+        short = _short_summary(diagnosis)
         cmd_count = f" · {len(commands)} command(s) ready" if commands else ""
 
         # Compact main message — just summary + buttons
@@ -470,7 +470,7 @@ def post_diagnosis(alert):
             {"type": "header",
              "text": {"type": "plain_text", "text": f":robot_face:  Claude Diagnosis — {alertname}"}},
             {"type": "section",
-             "text": {"type": "mrkdwn", "text": summary}},
+             "text": {"type": "mrkdwn", "text": short}},
         ]
 
         if commands:
