@@ -83,6 +83,23 @@ alertmanager:
           - alertname
           - namespace
 
+kube-state-metrics:
+  nodeSelector:
+    kubernetes.io/hostname: k3s-infra
+  tolerations:
+    - key: node-role
+      operator: Equal
+      value: infra
+      effect: NoSchedule
+
+# Node exporter needs to run on every node — ensure it tolerates the infra taint
+prometheus-node-exporter:
+  tolerations:
+    - key: node-role
+      operator: Equal
+      value: infra
+      effect: NoSchedule
+
 defaultRules:
   disabled:
     KubeSchedulerDown: true
