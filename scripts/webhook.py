@@ -272,11 +272,15 @@ def parse_commands(text):
     return commands
 
 # ── Slack Bot API helpers ─────────────────────────────────────────────────────
-def slack_post(channel, blocks, text=''):
+def slack_post(channel, blocks, text='', thread_ts=None):
+    """Post a message; returns the message ts (for threading) or None."""
     if not SLACK_BOT_TOKEN:
         log.warning("SLACK_BOT_TOKEN not set — skipping interactive post")
-        return
-    body = json.dumps({"channel": channel, "text": text, "blocks": blocks}).encode()
+        return None
+    payload = {"channel": channel, "text": text, "blocks": blocks}
+    if thread_ts:
+        payload["thread_ts"] = thread_ts
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         "https://slack.com/api/chat.postMessage",
         data=body,
@@ -291,8 +295,21 @@ def slack_post(channel, blocks, text=''):
             r = json.loads(resp.read())
             if not r.get('ok'):
                 log.error(f"Slack API error: {r.get('error')}")
+                return None
+            return r.get('ts')
     except Exception as e:
         log.error(f"Slack post failed: {e}")
+        return None
+
+def _short_summary(diagnosis):
+    """Extract first 2 sentences (≤ 280 chars) from diagnosis for compact view."""
+    text = diagnosis.strip()
+    # Try to grab up to 2 sentence-ending lines or 280 chars, whichever comes first
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    summary = ' '.join(sentences[:2])
+    if len(summary) > 280:
+        summary = summary[:277] + '…'
+    return summary
 
 def slack_respond(url, text, replace=True):
     body = json.dumps({"text": text, "replace_original": replace}).encode()
@@ -352,20 +369,18 @@ def handle_lab(body_bytes):
         token = str(uuid.uuid4())
         pending[token] = {"commands": commands, "response_url": resp_url}
 
-        short  = diagnosis[:2800] + '…' if len(diagnosis) > 2800 else diagnosis
+        summary = _short_summary(diagnosis)
+
+        # Compact main message
         blocks = [
             {"type": "header",
              "text": {"type": "plain_text", "text": ":robot_face:  Claude Diagnosis"}},
             {"type": "section",
-             "text": {"type": "mrkdwn", "text": short}},
+             "text": {"type": "mrkdwn", "text": summary}},
         ]
 
         if commands:
-            cmd_text = '\n'.join(f'`{c}`' for c in commands)
             blocks += [
-                {"type": "divider"},
-                {"type": "section",
-                 "text": {"type": "mrkdwn", "text": f"*Suggested commands:*\n{cmd_text}"}},
                 {"type": "actions",
                  "elements": [
                      {"type": "button",
@@ -386,7 +401,23 @@ def handle_lab(body_bytes):
                 "text": {"type": "mrkdwn", "text": "_No executable commands identified._"},
             })
 
-        slack_post(SLACK_INCIDENTS, blocks, text="Claude cluster diagnosis")
+        ts = slack_post(SLACK_INCIDENTS, blocks, text="Claude cluster diagnosis")
+
+        # Full diagnosis + commands in thread
+        if ts:
+            full = diagnosis[:2900] + '…' if len(diagnosis) > 2900 else diagnosis
+            thread_blocks = [
+                {"type": "section",
+                 "text": {"type": "mrkdwn", "text": full}},
+            ]
+            if commands:
+                cmd_text = '\n'.join(f'`{c}`' for c in commands)
+                thread_blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*Suggested commands:*\n{cmd_text}"},
+                })
+            slack_post(SLACK_INCIDENTS, thread_blocks,
+                       text="Full diagnosis", thread_ts=ts)
 
     threading.Thread(target=run, daemon=True).start()
     return json.dumps({
@@ -415,20 +446,19 @@ def post_diagnosis(alert):
         token = str(uuid.uuid4())
         pending[token] = {"commands": commands, "response_url": "", "channel": SLACK_INCIDENTS}
 
-        short  = diagnosis[:2800] + '…' if len(diagnosis) > 2800 else diagnosis
+        summary = _short_summary(diagnosis)
+        cmd_count = f" · {len(commands)} command(s) ready" if commands else ""
+
+        # Compact main message — just summary + buttons
         blocks = [
             {"type": "header",
              "text": {"type": "plain_text", "text": f":robot_face:  Claude Diagnosis — {alertname}"}},
             {"type": "section",
-             "text": {"type": "mrkdwn", "text": short}},
+             "text": {"type": "mrkdwn", "text": summary}},
         ]
 
         if commands:
-            cmd_text = '\n'.join(f'`{c}`' for c in commands)
             blocks += [
-                {"type": "divider"},
-                {"type": "section",
-                 "text": {"type": "mrkdwn", "text": f"*Suggested commands:*\n{cmd_text}"}},
                 {"type": "actions",
                  "elements": [
                      {"type": "button",
@@ -449,7 +479,23 @@ def post_diagnosis(alert):
                 "text": {"type": "mrkdwn", "text": "_No executable commands identified._"},
             })
 
-        slack_post(SLACK_INCIDENTS, blocks, text=f"Claude diagnosis for {alertname}")
+        ts = slack_post(SLACK_INCIDENTS, blocks, text=f"Claude diagnosis for {alertname}")
+
+        # Full diagnosis + commands in thread
+        if ts:
+            full = diagnosis[:2900] + '…' if len(diagnosis) > 2900 else diagnosis
+            thread_blocks = [
+                {"type": "section",
+                 "text": {"type": "mrkdwn", "text": full}},
+            ]
+            if commands:
+                cmd_text = '\n'.join(f'`{c}`' for c in commands)
+                thread_blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*Suggested commands:*\n{cmd_text}"},
+                })
+            slack_post(SLACK_INCIDENTS, thread_blocks,
+                       text="Full diagnosis", thread_ts=ts)
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -497,19 +543,36 @@ def handle_action(body_bytes):
                     out = dispatch_cmd(cmd)
                     results.append(f"$ {cmd}\n{out}")
 
-                full      = '\n\n'.join(results)
-                truncated = full[:2700] + '\n…(truncated)' if len(full) > 2700 else full
-                slack_post(
+                # Compact main message
+                status_lines = []
+                for cmd in cmds:
+                    short_cmd = cmd if len(cmd) <= 60 else cmd[:57] + '…'
+                    status_lines.append(f"`{short_cmd}`")
+                compact_text = '\n'.join(status_lines)
+
+                ts = slack_post(
                     ch,
                     blocks=[
                         {"type": "header",
                          "text": {"type": "plain_text",
-                                  "text": f":terminal:  Commands executed by {u}"}},
+                                  "text": f":white_check_mark:  {len(cmds)} command(s) run by {u}"}},
                         {"type": "section",
-                         "text": {"type": "mrkdwn", "text": f"```{truncated}```"}},
+                         "text": {"type": "mrkdwn", "text": compact_text}},
                     ],
-                    text=f"Command results ({u})",
+                    text=f"Commands run by {u}",
                 )
+
+                # Full output in thread
+                if ts:
+                    full      = '\n\n'.join(results)
+                    truncated = full[:2900] + '\n…(truncated)' if len(full) > 2900 else full
+                    slack_post(
+                        ch,
+                        blocks=[{"type": "section",
+                                 "text": {"type": "mrkdwn", "text": f"```{truncated}```"}}],
+                        text="Command output",
+                        thread_ts=ts,
+                    )
 
             threading.Thread(target=run_cmds, daemon=True).start()
             return b'ok'
