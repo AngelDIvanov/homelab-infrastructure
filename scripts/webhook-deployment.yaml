@@ -779,6 +779,13 @@ spec:
       labels:
         app: alertmanager-webhook
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: k3s-infra
+      tolerations:
+        - key: node-role
+          operator: Equal
+          value: infra
+          effect: NoSchedule
       containers:
         - name: webhook
           image: python:3.11-alpine
