@@ -25,30 +25,33 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 
 **Cluster & App**
 
-![k3s control plane](docs/images/k3s-control-plane.png)
-![API dashboard](docs/images/api-dashboard.png)
-![Trengo app](docs/images/trengo-app.png)
+| k3s control plane | API dashboard | Trengo app |
+|---|---|---|
+| ![](docs/images/k3s-control-plane.png) | ![](docs/images/api-dashboard.png) | ![](docs/images/trengo-app.png) |
 
 **Control & Health**
 
-![Control Panel TUI](docs/images/control-panel-tui.png)
-![check-lab.sh output](docs/images/check-lab-output.png)
+| Control Panel TUI | check-lab.sh output |
+|---|---|
+| ![](docs/images/control-panel-tui.png) | ![](docs/images/check-lab-output.png) |
 
 **CI/CD & GitLab**
 
-![Pipeline visualized](docs/images/pipeline-visualized.png)
-![Pipeline validation with job code](docs/images/pipeline-validation.png)
-![Merge requests with checklists](docs/images/merge-requests-checklists.png)
-![GitLab Issues from Alertmanager](docs/images/gitlab-issues-alertmanager.png)
+| Pipeline visualized | Pipeline validation with job code | Merge requests with checklists | GitLab Issues from Alertmanager |
+|---|---|---|---|
+| ![](docs/images/pipeline-visualized.png) | ![](docs/images/pipeline-validation.png) | ![](docs/images/merge-requests-checklists.png) | ![](docs/images/gitlab-issues-alertmanager.png) |
 
 **Alerting**
 
-![Slack alert](docs/images/slack-alert.png)
+| Slack alert |
+|---|
+| ![](docs/images/slack-alert.png) |
 
 **Claude AI Auto-healing**
 
-![Claude diagnosis in Slack](docs/images/slack-claude-diagnosis.png)
-![One-click auto-heal approved and resolved](docs/images/slack-claude-autohealed.png)
+| Claude diagnosis in Slack | One-click auto-heal approved and resolved |
+|---|---|
+| ![](docs/images/slack-claude-diagnosis.png) | ![](docs/images/slack-claude-autohealed.png) |
 
 ---
 
@@ -82,7 +85,9 @@ Host machine (KVM/libvirt, 32GB RAM)
 
 All IPs are in the default libvirt NAT range (`192.168.122.0/24`). Set `base_ip_octet` in `terraform.tfvars` if yours is different.
 
-Additional workers (k3s-worker-3, ...) are spun up on demand via Terraform. The GitLab runner is embedded in k3s-infra rather than a dedicated VM.
+Additional workers (`k3s-worker-3`, ...) are spun up on demand via Terraform. The GitLab runner is embedded in `k3s-infra` rather than a dedicated VM.
+
+> **Known limitation:** All VMs run on a single KVM host. This is intentional for a homelab but means the physical host is a single point of failure. Full recovery from host loss is documented in the [disaster recovery runbook](docs/runbooks/disaster-recovery/).
 
 ---
 
@@ -122,6 +127,7 @@ scripts/
   deploy.sh         build and push the trengo-search app
 
 terraform/          k3s worker VMs (dynamic scale)
+terraform-kubeadm/  standalone kubeadm cluster (separate experiment, not connected to main lab)
 ```
 
 ---
@@ -174,13 +180,48 @@ python3 scripts/lab-tui.py       # TUI (requires: pip install textual)
 
 Secrets (`K3S_TOKEN`, `GITLAB_TOKEN`, ...) are pulled from environment variables or Vaultwarden via the Bitwarden CLI. See `scripts/load-secrets.sh` for the bootstrap flow and `scripts/setup-vault.sh` to set Vaultwarden up from scratch.
 
+The secret rotation procedure for all 5 cluster secrets is documented in [`docs/runbooks/applications/secret-rotation.md`](docs/runbooks/applications/secret-rotation.md).
+
+---
+
+## Backups
+
+All stateful components are backed up automatically via Kubernetes CronJobs defined in `kubernetes/backup/`.
+
+| What | How | Schedule | Retention |
+|---|---|---|---|
+| k3s cluster state (SQLite) | `sqlite3 .backup` hot-copy via SSH | Every 12h | 14 snapshots |
+| Vaultwarden | `sqlite3 .backup` from NFS-mounted PVC | Daily 02:00 | 30 days |
+| GitLab (repos, issues, CI, wikis) | `gitlab-backup create` via SSH | Daily 03:00 | 7 backups |
+
+Restore procedures for each component are documented in the [runbooks](docs/runbooks/).
+
+**RPO:** ≤ 12h for cluster state, ≤ 24h for application data.
+**RTO:** ~2h for full cluster rebuild from scratch (documented in disaster recovery runbook).
+
+---
+
+## Security
+
+**NetworkPolicy** — default-deny applied in all namespaces. Explicit allow-rules cover Traefik ingress, inter-namespace registry pulls, and Prometheus scrape paths. Policies live in `kubernetes/policies/`.
+
+**RBAC** — each workload has a dedicated ServiceAccount with least-privilege roles. `automountServiceAccountToken: false` is set by default; tokens are only mounted where explicitly required. The `webhook.py` ServiceAccount is scoped to read-only pod/node access; command execution is routed via SSH with a dedicated key, not via the Kubernetes API.
+
+**Image pinning** — all third-party images (Vaultwarden, registry) are pinned to SHA256 digests to prevent supply-chain drift from mutable tags.
+
+**PodDisruptionBudgets** — applied to Traefik and pylab to prevent accidental full-cluster downtime during rolling updates.
+
+**Webhook security** — Slack request signatures are validated on every inbound payload using `SLACK_SIGNING_SECRET`. The webhook endpoint is not exposed to the internet; it is accessible only within the cluster via a ClusterIP service and Traefik ingress restricted to the internal network.
+
+**Secret rotation** — documented procedure for rotating all 5 cluster secrets: `docs/runbooks/applications/secret-rotation.md`.
+
 ---
 
 ## Alerting & Claude AI Auto-healing
 
 Most homelabs (and plenty of production setups) stop at "alert fires → someone gets paged". This goes further: when an alert fires, Claude AI reads the live cluster state, diagnoses the root cause, and posts a fix to Slack with a single **Approve & Run** button. One click and the remediation runs automatically — rebuilding missing images, restarting VMs, rolling back deployments — without ever opening a terminal.
 
-This is built entirely with open components: Prometheus, Alertmanager, a custom Python webhook, the Anthropic API, and Slack's Block Kit interactive messages. No third-party incident management platform required.
+Built entirely with open components: Prometheus, Alertmanager, a custom Python webhook, the Anthropic API, and Slack's Block Kit interactive messages. No third-party incident management platform required.
 
 ### How it works
 
@@ -201,10 +242,10 @@ Full diagnosis + suggested commands posted in thread
 Engineer clicks Approve & Run
        ↓
 Commands execute automatically, routed to the right host:
-  • virsh commands  → hypervisor (KVM host)
-  • docker commands → hypervisor (source code lives there)
+  • virsh commands   → hypervisor (KVM host)
+  • docker commands  → hypervisor (source code lives there)
   • kubectl commands → k3s-control with sudo
-  • ssh commands    → direct from webhook pod
+  • ssh commands     → direct from webhook pod
        ↓
 Command output posted in thread
        ↓
@@ -215,13 +256,13 @@ Alert resolves → GitLab issue auto-closed → RESOLVED posted to Slack
 
 | Alert | Root cause Claude identifies | Fix Claude suggests |
 |---|---|---|
-| `TrengoAppDown` | Deployment scaled to 0, image pull failure, crashloop | `kubectl rollout restart`, `docker build/push` |
-| `PodImagePullError` | Registry empty or unreachable | `docker build` + `docker push` from hypervisor source |
-| `K3sWorkerNodeDown` | VM powered off | `virsh start k3s-worker-N` |
-| `PodCrashLooping` | OOM, bad config, missing secret | `kubectl describe`, log fetch, rollback |
-| `LocalRegistryDown` | Registry pod crashed | `kubectl rollout restart deployment/registry` |
-| `NodeMemoryCritical` | stress-ng or runaway process | `pkill`, service restart |
-| `NodeDiskHigh` | Stale container images | `crictl rmi --prune` |
+| TrengoAppDown | Deployment scaled to 0, image pull failure, crashloop | `kubectl rollout restart`, `docker build/push` |
+| PodImagePullError | Registry empty or unreachable | `docker build` + `docker push` from hypervisor source |
+| K3sWorkerNodeDown | VM powered off | `virsh start k3s-worker-N` |
+| PodCrashLooping | OOM, bad config, missing secret | `kubectl describe`, log fetch, rollback |
+| LocalRegistryDown | Registry pod crashed | `kubectl rollout restart deployment/registry` |
+| NodeMemoryCritical | stress-ng or runaway process | `pkill`, service restart |
+| NodeDiskHigh | Stale container images | `crictl rmi --prune` |
 
 ### Slack message design
 
@@ -233,30 +274,6 @@ Alerts and diagnoses are kept compact in the channel — full details expand in 
 - **Resolution** — RESOLVED notification with duration, incident link auto-closed
 
 Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge is `scripts/webhook.py`.
-
----
-
-## Backups
-
-All stateful components are backed up automatically via Kubernetes CronJobs:
-
-| What | How | Schedule | Retention |
-|---|---|---|---|
-| k3s cluster state (SQLite) | `sqlite3 .backup` hot-copy via SSH | Every 12h | 14 snapshots |
-| Vaultwarden | `sqlite3 .backup` from NFS-mounted PVC | Daily 02:00 | 30 days |
-| GitLab (repos, issues, CI, wikis) | `gitlab-backup create` via SSH | Daily 03:00 | 7 backups |
-
-Backup jobs live in `kubernetes/backup/`. Restore procedures are documented in the runbooks.
-
----
-
-## Security
-
-- **NetworkPolicy** — default-deny in all namespaces; explicit allow-rules for Traefik ingress, inter-namespace registry pulls, and monitoring scrape paths
-- **RBAC** — each workload has a dedicated ServiceAccount with least-privilege roles; `automountServiceAccountToken: false` by default
-- **Image pinning** — all third-party images (Vaultwarden, registry) pinned to SHA256 digests to prevent supply-chain drift
-- **PodDisruptionBudgets** — on Traefik and pylab to prevent accidental full-cluster rollout downtime
-- **Secret rotation runbook** — documented procedure for rotating all 5 cluster secrets (`docs/runbooks/applications/secret-rotation.md`)
 
 ---
 
@@ -273,8 +290,35 @@ Backup jobs live in `kubernetes/backup/`. Restore procedures are documented in t
 | Monitoring | Monitoring stack down |
 | Disaster recovery | Full cluster recovery (RTO ~2h, RPO ≤24h) |
 
+Each runbook includes: symptoms, immediate triage steps, root cause checklist, resolution steps, and a verification procedure.
+
 ---
 
 ## CI/CD
 
-`.gitlab-ci.yml` stages: **lint** (yamllint, terraform fmt) → **validate** (kubeconform, promtool, terraform validate) → **security** (gitleaks, kubesec) → **deploy** (kubectl apply, helm upgrade — manual gate on main) → **smoke** (curl health checks).
+`.gitlab-ci.yml` stages running on the self-hosted GitLab runner embedded in `k3s-infra`:
+
+| Stage | Tools | What it checks |
+|---|---|---|
+| lint | yamllint, `terraform fmt` | YAML syntax, Terraform formatting |
+| validate | kubeconform, promtool, `terraform validate` | Manifest schema, alert rule syntax, Terraform config |
+| security | gitleaks, kubesec | Secret leaks in diff, Kubernetes security best-practices score |
+| deploy | `kubectl apply`, `helm upgrade` | Applied to cluster — manual gate required on `main` |
+| smoke test | curl, `kubectl rollout status` | Endpoint reachability, rollout completion |
+
+Merge requests require a 9-point checklist and at least one approval before merge to `main`.
+
+---
+
+## Known limitations & future work
+
+- **Single KVM host** — all VMs share one physical machine; host failure requires full rebuild (documented in DR runbook)
+- **No GitOps operator** — cluster state is applied via CI/CD push rather than continuously reconciled by ArgoCD or FluxCD
+- **SQLite k3s backend** — appropriate for this scale; etcd would be required for a true HA control plane
+- `terraform-kubeadm/` is a standalone experiment for learning kubeadm; it is not connected to the main lab
+
+---
+
+## License
+
+MIT
