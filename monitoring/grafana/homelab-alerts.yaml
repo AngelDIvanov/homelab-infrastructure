@@ -188,6 +188,69 @@ spec:
             description: "check-lab last ran {{ $value | humanizeDuration }} ago (expected every 15 min). CronJob may be suspended or the cluster scheduler is unhealthy. Check: kubectl get cronjob check-lab -n default"
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/pod-crashloop.md"
 
+        - alert: NodeCPUHigh
+          expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node CPU usage is high"
+            description: "Node {{ $labels.instance }} CPU usage is above 85% (current: {{ $value | printf \"%.1f\" }}%)."
+            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/node-memory-pressure.md"
+            dashboard_url: "http://192.168.122.218:30080/d/node-resources"
+
+        - alert: ContainerCPUThrottling
+          expr: rate(container_cpu_throttled_seconds_total[5m]) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Container is heavily CPU throttled"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} (namespace {{ $labels.namespace }}) is throttled >50% of the time. CPU limit may be too low."
+            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/node-memory-pressure.md"
+
+        - alert: PVCUsageHigh
+          expr: |
+            (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC usage is high"
+            description: "PVC {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} is {{ $value | printf \"%.1f\" }}% full."
+            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/storage/pvc-pending.md"
+
+        - alert: PVCUsageCritical
+          expr: |
+            (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 95
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PVC is almost full"
+            description: "PVC {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} is {{ $value | printf \"%.1f\" }}% full. Immediate action required."
+            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/storage/pvc-pending.md"
+
+        - alert: LocalRegistryDown
+          expr: probe_success{job="blackbox", instance=~".*30500.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Local Docker registry is unreachable"
+            description: "The local registry at 192.168.122.218:30500 has been unreachable for 2+ minutes. New image pulls will fail across the cluster."
+            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/registry-down.md"
+
+        - alert: K3sSnapshotMissing
+          expr: (time() - kube_cronjob_status_last_schedule_time{cronjob="k3s-db-snapshot", namespace="kube-system"}) > 46800
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "k3s database snapshot has not run in 13+ hours"
+            description: "The k3s-db-snapshot CronJob last ran {{ $value | humanizeDuration }} ago (expected every 12h). Check: kubectl get cronjob k3s-db-snapshot -n kube-system"
+            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/control-plane/api-server-down.md"
+
         - alert: K3sControlPlaneUnhealthy
           expr: up{job="apiserver"} == 0
           for: 2m

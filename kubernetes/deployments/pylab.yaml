@@ -6,6 +6,42 @@ metadata:
   name: pylab
 
 ---
+# ─── RBAC ─────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pylab
+  namespace: pylab
+automountServiceAccountToken: false
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pylab
+  namespace: pylab
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["pylab-config"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pylab
+  namespace: pylab
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pylab
+subjects:
+  - kind: ServiceAccount
+    name: pylab
+    namespace: pylab
+
+---
 # ─── ConfigMap ────────────────────────────────────────────────────────────────
 # Real-life issue: wrong value here → app misbehaves but doesn't crash.
 # Try changing APP_ENV to "production" or toggling FEATURE_FLAGS and re-deploying.
@@ -58,10 +94,11 @@ spec:
         prometheus.io/port: "8080"
         prometheus.io/path: "/metrics"
     spec:
+      serviceAccountName: pylab
       containers:
         - name: pylab
           image: 192.168.122.218:30500/pylab:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
 

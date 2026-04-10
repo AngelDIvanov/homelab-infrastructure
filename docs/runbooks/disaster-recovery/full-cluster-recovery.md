@@ -10,8 +10,20 @@ Host hypervisor (laptop) fails completely. All VMs are gone. Need to rebuild fro
 - Ansible playbooks (in `ansible/`, committed to Git)
 - All Kubernetes manifests (committed to Git)
 
-## RTO Target: ~2 hours
-## RPO: Last snapshot age (snapshots run every 12h, so worst case 12h of cluster state loss)
+## Recovery Targets
+
+| Component | RTO | RPO | Notes |
+|---|---|---|---|
+| **Full cluster (Terraform + Ansible)** | ~2 hours | 0 (infra-as-code) | VMs rebuilt from code; no data |
+| **k3s cluster state** | ~30 min | ≤ 12 hours | SQLite snapshot every 12h |
+| **Vaultwarden data** | ~15 min | ≤ 24 hours | SQLite backup daily at 02:00 |
+| **GitLab repos & CI** | ~20 min | ≤ 24 hours | `gitlab-backup` daily at 03:00 |
+| **Registry images** | ~30 min | 0 (rebuild from source) | Images rebuilt from Git; no state |
+| **NFS volumes** | ~1 hour | external backup cadence | No automated off-site backup yet |
+| **Monitoring data** | ~10 min | loss accepted | Loki/Prometheus data is ephemeral |
+
+**Overall cluster RTO: ~2 hours** (all services operational)
+**Worst-case data RPO: 24 hours** (GitLab/Vaultwarden backups)
 
 ---
 
