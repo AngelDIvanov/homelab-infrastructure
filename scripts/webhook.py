@@ -246,9 +246,16 @@ def call_claude(user_msg, state):
         "Only use kubectl, k3s, ssh, virsh, or docker commands. "
         "One command per line. No shell variables, no pipes, no conditionals, no comments inside the block. "
         "Put all explanations outside the block. "
-        "For destructive commands add a WARNING line before the block. "
+        "MINIMAL COMMANDS ONLY — only include commands that directly fix the reported issue. "
+        "Do NOT read private keys, tokens, secrets, or credential files under any circumstances. "
+        "Do NOT run kubectl get/describe secret. "
+        "Do NOT rebuild docker images or run kubectl rollout restart unless the alert is about "
+        "an image pull error or a crashlooping deployment — a node being down or a drift issue "
+        "does NOT require rebuilding images. "
+        "Do NOT delete jobs or pods unless they are the direct cause of the alert. "
         "To start a down VM: virsh start <node-name> "
-        "To restart k3s agent: ssh andy@<ip> sudo systemctl restart k3s-agent"
+        "To restart k3s agent: ssh andy@<ip> sudo systemctl restart k3s-agent "
+        "For cluster drift (VM running but not in cluster): check agent logs, restart agent first. "
     )
 
     payload = json.dumps({
@@ -278,13 +285,28 @@ def call_claude(user_msg, state):
 # ── Parse safe commands from Claude response ──────────────────────────────────
 _SAFE_CMD = re.compile(r'^(sudo\s+)?(kubectl|k3s|ssh|virsh|docker)\b')
 
+# Block commands that read sensitive files or perform destructive ops
+_BLOCKED_PATTERNS = [
+    re.compile(r'id_rsa|id_ed25519|\.pem|\.key|node-token|service\.env', re.IGNORECASE),
+    re.compile(r'(cat|less|more|head|tail|tee)\s+.*(secret|token|password|passwd|shadow)', re.IGNORECASE),
+    re.compile(r'kubectl\s+(get|describe)\s+secret', re.IGNORECASE),
+    re.compile(r'rm\s+-rf\s+/'),
+    re.compile(r'kubectl\s+delete\s+(job|pod)\s+.*drift-test'),  # cleanup of old test artifacts
+]
+
 def parse_commands(text):
     commands = []
     for block in re.findall(r'```(?:bash|sh|shell)?\n(.*?)```', text, re.DOTALL):
         for line in block.splitlines():
             line = line.strip()
-            if line and not line.startswith('#') and _SAFE_CMD.match(line):
-                commands.append(line)
+            if not line or line.startswith('#'):
+                continue
+            if not _SAFE_CMD.match(line):
+                continue
+            if any(p.search(line) for p in _BLOCKED_PATTERNS):
+                log.warning(f"Blocked sensitive/dangerous command: {line}")
+                continue
+            commands.append(line)
     return commands
 
 # ── Slack Bot API helpers ─────────────────────────────────────────────────────
