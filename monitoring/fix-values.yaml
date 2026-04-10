@@ -95,3 +95,20 @@ defaultRules:
 # Control plane health is covered by the K3sControlPlaneUnhealthy alert on up{job="apiserver"}.
 kubeEtcd:
   enabled: false
+
+loki:
+  enabled: true
+  config:
+    limits_config:
+      retention_period: 744h       # 31 days
+      enforce_metric_name: false
+      max_cache_freshness_per_query: 10m
+    compactor:
+      working_directory: /data/loki/compactor
+      compaction_interval: 10m
+      retention_enabled: true
+      retention_delete_delay: 2h
+      retention_delete_worker_count: 150
+  persistence:
+    enabled: true
+    size: 20Gi

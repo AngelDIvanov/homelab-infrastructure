@@ -26,6 +26,8 @@ Recovery procedures for homelab-infrastructure alerts and failure modes.
 | [Pod CrashLoop](applications/pod-crashloop.md) | `PodCrashLooping`, `CronJobFailed` |
 | [Pod Image Pull Error](applications/pod-image-pull-error.md) | `PodImagePullError` |
 | [Trengo App Down](applications/trengo-app-down.md) | `TrengoAppDown`, `TrengoAppDegraded` |
+| [Registry Down](applications/registry-down.md) | `LocalRegistryDown`, `PodImagePullError` |
+| [Secret Rotation](applications/secret-rotation.md) | Planned maintenance / compromise response |
 
 ## Monitoring Stack
 | Runbook | Alert |
