@@ -1,0 +1,86 @@
+---
+# k3s uses SQLite by default on a single control-plane node.
+# This job SSHes to k3s-control (.218) every 12h, copies the live DB safely,
+# and retains the 14 most recent snapshots on k3s-infra's local disk.
+#
+# Prerequisites:
+#   - Secret webhook-ssh-key must exist in kube-system namespace:
+#       kubectl create secret generic webhook-ssh-key \
+#         --from-file=id_rsa=/path/to/homelab_id_rsa -n kube-system
+#   - Directory /var/lib/k3s-snapshots must exist on k3s-infra (created by hostPath below)
+#
+# Restore procedure:
+#   1. Stop k3s: systemctl stop k3s
+#   2. Copy snapshot to /var/lib/rancher/k3s/server/db/state.db
+#   3. Start k3s: systemctl start k3s
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: k3s-db-snapshot
+  namespace: kube-system
+spec:
+  schedule: "0 */12 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          tolerations:
+            - key: node-role
+              operator: Equal
+              value: infra
+              effect: NoSchedule
+          nodeSelector:
+            node-role: infra
+          restartPolicy: OnFailure
+          containers:
+            - name: snapshot
+              image: alpine:3.19
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache openssh-client > /dev/null 2>&1
+
+                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                  BACKUP_DIR=/backup
+                  SNAPSHOT_FILE="$BACKUP_DIR/k3s-state-$TIMESTAMP.db"
+
+                  echo "[$(date)] Starting k3s SQLite snapshot..."
+
+                  # Make a hot copy of the SQLite DB on the control plane then stream it here.
+                  # Using '.backup' via sqlite3 ensures a consistent snapshot even under writes.
+                  ssh -i /root/.ssh/id_rsa \
+                      -o StrictHostKeyChecking=no \
+                      -o ConnectTimeout=10 \
+                      andy@192.168.122.218 \
+                      "sudo sqlite3 /var/lib/rancher/k3s/server/db/state.db '.backup /tmp/k3s-snap.db' && sudo cat /tmp/k3s-snap.db && sudo rm /tmp/k3s-snap.db" \
+                      > "$SNAPSHOT_FILE"
+
+                  SIZE=$(du -sh "$SNAPSHOT_FILE" | cut -f1)
+                  echo "[$(date)] Snapshot saved: $SNAPSHOT_FILE ($SIZE)"
+
+                  # Keep only the 14 most recent snapshots
+                  ls -t $BACKUP_DIR/k3s-state-*.db 2>/dev/null | tail -n +15 | xargs -r rm -v
+
+                  echo "[$(date)] Retained snapshots:"
+                  ls -lh $BACKUP_DIR/k3s-state-*.db
+              volumeMounts:
+                - name: ssh-key
+                  mountPath: /root/.ssh
+                  readOnly: true
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: ssh-key
+              secret:
+                secretName: webhook-ssh-key
+                defaultMode: 0400
+            - name: backup
+              hostPath:
+                path: /var/lib/k3s-snapshots
+                type: DirectoryOrCreate

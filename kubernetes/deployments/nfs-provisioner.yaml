@@ -43,4 +43,4 @@ metadata:
     storageclass.kubernetes.io/is-default-class: "false"
 provisioner: k8s-sigs.io/nfs-subdir-external-provisioner
 parameters:
-  archiveOnDelete: "false"
+  archiveOnDelete: "true"
