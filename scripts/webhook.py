@@ -215,7 +215,7 @@ def call_claude(user_msg, state):
         "- docker commands → hypervisor host (192.168.122.1) where source code lives. "
         "- kubectl commands → k3s-control with sudo. "
         "- ssh commands → direct from webhook pod with key injected. "
-        "LOCAL REGISTRY: 192.168.122.218:30500 (unauthenticated, emptyDir — images lost on pod restart). "
+        "LOCAL REGISTRY: 192.168.122.218:30500 (unauthenticated, NFS-backed PVC — images persist across pod restarts). "
         "APP SOURCE PATHS ON HYPERVISOR (192.168.122.1): "
         "  pylab       → /home/andy/pylab/       → 192.168.122.218:30500/pylab:latest "
         "  trengo-search → /home/andy/trengo-search/ → 192.168.122.218:30500/trengo-search:latest "
@@ -726,7 +726,9 @@ def notify_firing(alert, inc_num, issue=None, remediation=None):
         }],
     })
 
-    if severity in ('critical', 'warning'):
+    # Always diagnose critical/warning; also diagnose specific info alerts that need a fix offer
+    DIAGNOSE_INFO = {'K3sWorkerNodeDown', 'K3sSnapshotMissing', 'LocalRegistryDown'}
+    if severity in ('critical', 'warning') or alertname in DIAGNOSE_INFO:
         post_diagnosis(alert)
 
 def notify_resolved(alert, inc_num, issue=None):
