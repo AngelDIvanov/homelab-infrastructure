@@ -2,6 +2,8 @@
 
 A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code — VMs, cluster config, monitoring, CI/CD pipelines, and alerting.
 
+> **Highlight:** This lab includes a working Claude AI auto-healing system — when an alert fires, Claude diagnoses the root cause in real time and posts a one-click fix to Slack. No scripts, no runbook lookup, no SSH-ing into nodes. See [Alerting & Claude AI Auto-healing](#alerting--claude-ai-auto-healing) below.
+
 ---
 
 ## What this demonstrates
@@ -11,7 +13,7 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 - **Complete incident management pipeline** — alert fires → Slack notification with runbook link → GitLab issue auto-created → auto-closed on resolution
 - **GitOps CI/CD with 9 stages** including Trivy container scanning and Gitleaks secret detection
 - **Self-healing automation** — crashloop recovery cronjobs, health check scripts with auto-fix
-- **Claude AI auto-healing** — Alertmanager fires → Claude diagnoses root cause → one-click Approve in Slack runs the fix
+- **Claude AI auto-healing** — Alertmanager fires → Claude reads live cluster state → diagnoses root cause → one-click Approve in Slack executes the fix automatically
 - **Custom Python control plane** — TUI and menu-driven interface for full lab management
 
 ---
@@ -161,7 +163,9 @@ Secrets (`K3S_TOKEN`, `GITLAB_TOKEN`, ...) are pulled from environment variables
 
 ## Alerting & Claude AI Auto-healing
 
-This lab implements a fully automated incident response pipeline powered by Claude AI.
+Most homelabs (and plenty of production setups) stop at "alert fires → someone gets paged". This goes further: when an alert fires, Claude AI reads the live cluster state, diagnoses the root cause, and posts a fix to Slack with a single **Approve & Run** button. One click and the remediation runs automatically — rebuilding missing images, restarting VMs, rolling back deployments — without ever opening a terminal.
+
+This is built entirely with open components: Prometheus, Alertmanager, a custom Python webhook, the Anthropic API, and Slack's Block Kit interactive messages. No third-party incident management platform required.
 
 ### How it works
 
