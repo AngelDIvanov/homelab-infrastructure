@@ -1,0 +1,72 @@
+---
+# GitLab daily backup CronJob.
+#
+# What it does:
+#   1. SSHes to k3s-infra (.230) where GitLab CE runs
+#   2. Runs gitlab-backup create (repos, issues, wikis, uploads, CI artifacts)
+#   3. GitLab stores backups in /var/opt/gitlab/backups/ by default
+#   4. Retains last 7 backups (configurable via BACKUP_KEEP_TIME in gitlab.rb)
+#
+# Restore procedure:
+#   https://docs.gitlab.com/ee/raketasks/restore_gitlab.html
+#   1. sudo gitlab-ctl stop puma sidekiq
+#   2. sudo gitlab-backup restore BACKUP=<timestamp>
+#   3. sudo gitlab-ctl restart
+#   4. sudo gitlab-rake gitlab:check SANITIZE=true
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gitlab-backup
+  namespace: kube-system
+spec:
+  schedule: "0 3 * * *"        # Daily at 03:00 (after Vaultwarden backup)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          tolerations:
+            - key: node-role
+              operator: Equal
+              value: infra
+              effect: NoSchedule
+          nodeSelector:
+            node-role: infra
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: alpine:3.19
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache openssh-client > /dev/null 2>&1
+
+                  echo "[$(date)] Triggering GitLab backup on k3s-infra..."
+
+                  ssh -i /root/.ssh/id_rsa \
+                      -o StrictHostKeyChecking=no \
+                      -o ConnectTimeout=10 \
+                      andy@192.168.122.230 \
+                      "sudo gitlab-backup create STRATEGY=copy BACKUP=auto 2>&1"
+
+                  echo "[$(date)] GitLab backup complete."
+
+                  # List current backups on the remote host
+                  ssh -i /root/.ssh/id_rsa \
+                      -o StrictHostKeyChecking=no \
+                      andy@192.168.122.230 \
+                      "sudo ls -lht /var/opt/gitlab/backups/*.tar 2>/dev/null | head -10"
+              volumeMounts:
+                - name: ssh-key
+                  mountPath: /root/.ssh
+                  readOnly: true
+          volumes:
+            - name: ssh-key
+              secret:
+                secretName: webhook-ssh-key
+                defaultMode: 0400

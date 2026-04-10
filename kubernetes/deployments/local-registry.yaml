@@ -60,7 +60,7 @@ spec:
     spec:
       containers:
         - name: registry
-          image: registry:2
+          image: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
           ports:
             - containerPort: 5000
           env:
@@ -87,11 +87,8 @@ spec:
               cpu: "200m"
       volumes:
         - name: data
-          # ⚠️  emptyDir loses all images on pod restart.
-          # TODO: replace with an NFS PVC for persistence:
-          #   persistentVolumeClaim:
-          #     claimName: registry-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: registry-data
         - name: auth
           secret:
             secretName: registry-credentials

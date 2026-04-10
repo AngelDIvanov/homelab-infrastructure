@@ -1,0 +1,75 @@
+---
+# Vaultwarden daily backup CronJob.
+#
+# What it does:
+#   1. SSHes to k3s-infra (.230) where the NFS share lives
+#   2. Copies the Vaultwarden SQLite database using sqlite3 .backup (safe hot copy)
+#   3. Stores timestamped backup under /data/backups/vaultwarden/ on the NFS server
+#   4. Retains last 30 backups (~1 month)
+#
+# Restore:
+#   1. Scale down vaultwarden: kubectl scale deploy vaultwarden -n vaultwarden --replicas=0
+#   2. Copy backup to NFS: cp /data/backups/vaultwarden/<backup>.db /data/vaultwarden/db.sqlite3
+#   3. Scale back up:       kubectl scale deploy vaultwarden -n vaultwarden --replicas=1
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vaultwarden-backup
+  namespace: vaultwarden
+spec:
+  schedule: "0 2 * * *"        # Daily at 02:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          tolerations:
+            - key: node-role
+              operator: Equal
+              value: infra
+              effect: NoSchedule
+          nodeSelector:
+            node-role: infra
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: alpine:3.19
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  apk add --no-cache sqlite > /dev/null 2>&1
+
+                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                  BACKUP_DIR=/data/backups/vaultwarden
+                  mkdir -p "$BACKUP_DIR"
+
+                  echo "[$(date)] Starting Vaultwarden backup..."
+                  sqlite3 /vaultwarden/db.sqlite3 ".backup $BACKUP_DIR/vaultwarden-$TIMESTAMP.db"
+
+                  SIZE=$(du -sh "$BACKUP_DIR/vaultwarden-$TIMESTAMP.db" | cut -f1)
+                  echo "[$(date)] Backup saved: vaultwarden-$TIMESTAMP.db ($SIZE)"
+
+                  # Keep last 30 backups
+                  ls -t $BACKUP_DIR/vaultwarden-*.db 2>/dev/null | tail -n +31 | xargs -r rm -v
+
+                  echo "[$(date)] Retained backups:"
+                  ls -lh $BACKUP_DIR/
+              volumeMounts:
+                - name: vaultwarden-data
+                  mountPath: /vaultwarden
+                  readOnly: true
+                - name: backup-storage
+                  mountPath: /data/backups
+          volumes:
+            - name: vaultwarden-data
+              persistentVolumeClaim:
+                claimName: vaultwarden-nfs
+            - name: backup-storage
+              hostPath:
+                path: /data/backups
+                type: DirectoryOrCreate
