@@ -186,7 +186,7 @@ data:
         "alerts": [{
             "labels": {
                 "alertname": "ClusterDrift",
-                "severity":  "warning",
+                "severity":  "critical",
                 "namespace": "kube-system",
             },
             "annotations": {
