@@ -41,6 +41,8 @@ SEVERITY_LABELS = {
 
 WIKI_BASE = 'http://192.168.122.230:8929/root/homelab-infrastructure/-/wikis'
 
+GITHUB_RUNBOOKS = 'https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks'
+
 RUNBOOK_URLS = {
     'TrengoAppDown':     f'{WIKI_BASE}/runbooks/TrengoAppDown',
     'TrengoAppDegraded': f'{WIKI_BASE}/runbooks/TrengoAppDegraded',
@@ -49,6 +51,9 @@ RUNBOOK_URLS = {
     'NodeDiskHigh':      f'{WIKI_BASE}/runbooks/NodeDiskHigh',
     'PodCrashLooping':   f'{WIKI_BASE}/runbooks/PodCrashLooping',
     'PodImagePullError': f'{WIKI_BASE}/runbooks/PodImagePullError',
+    'ClusterDrift':      f'{GITHUB_RUNBOOKS}/nodes/cluster-drift.md',
+    'K3sWorkerNodeDown': f'{GITHUB_RUNBOOKS}/nodes/worker-node-not-ready.md',
+    'LocalRegistryDown': f'{GITHUB_RUNBOOKS}/applications/registry-down.md',
 }
 
 POSTMORTEM_URLS = {
