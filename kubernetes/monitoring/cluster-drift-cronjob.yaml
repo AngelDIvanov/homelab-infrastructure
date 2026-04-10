@@ -1,0 +1,268 @@
+---
+# Cluster Drift Detection CronJob
+#
+# Runs every 5 minutes. Compares:
+#   - Expected nodes (static config + Terraform-managed workers)
+#   - virsh list --all on hypervisor (VM actually running?)
+#   - kubectl get nodes (joined k3s cluster and Ready?)
+#
+# If a VM is running but not in the cluster (e.g. invalid token, cert issue,
+# agent crash) it SSHes in, grabs the last agent log lines, and POSTs a
+# ClusterDrift alert to the alertmanager-webhook which triggers Claude
+# diagnosis and a Slack message with Approve/Dismiss buttons.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: drift-checker
+  namespace: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: drift-checker
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: drift-checker
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: drift-checker
+subjects:
+  - kind: ServiceAccount
+    name: drift-checker
+    namespace: monitoring
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drift-check-script
+  namespace: monitoring
+data:
+  drift-check.py: |
+    #!/usr/bin/env python3
+    """
+    Cluster drift detector.
+    Compares expected nodes (virsh) against actual k3s cluster membership.
+    Posts a ClusterDrift alert to alertmanager-webhook if anything is off.
+    """
+    import subprocess, json, urllib.request, sys, os, re
+
+    SSH_KEY        = '/root/.ssh/id_rsa'
+    HYPERVISOR_IP  = os.environ.get('HYPERVISOR_IP', '192.168.122.1')
+    K3S_CONTROL_IP = os.environ.get('K3S_CONTROL_IP', '192.168.122.218')
+    WEBHOOK_URL    = os.environ.get('WEBHOOK_URL', 'http://alertmanager-webhook:8080/')
+
+    # Static node definitions — name: {ip, role}
+    # Dynamic Terraform workers are discovered from virsh automatically
+    STATIC_NODES = {
+        'k3s-control':  {'ip': '192.168.122.218', 'role': 'control-plane'},
+        'k3s-worker-1': {'ip': '192.168.122.219', 'role': 'worker'},
+        'k3s-infra':    {'ip': '192.168.122.230', 'role': 'infra'},
+    }
+
+    # Nodes that are allowed to be absent from the cluster (infra not a k3s worker per se)
+    # k3s-infra IS a k3s node (it runs workloads), so we check it too
+    SKIP_CLUSTER_CHECK = set()
+
+    def ssh(host, cmd, timeout=20):
+        try:
+            r = subprocess.run(
+                ['ssh', '-i', SSH_KEY,
+                 '-o', 'StrictHostKeyChecking=no',
+                 '-o', 'ConnectTimeout=10',
+                 '-o', 'UserKnownHostsFile=/dev/null',
+                 f'andy@{host}', cmd],
+                capture_output=True, text=True, timeout=timeout
+            )
+            return (r.stdout + r.stderr).strip()
+        except Exception as e:
+            return f'(ssh error: {e})'
+
+    def get_virsh_states():
+        """Returns dict of {vm_name: 'running'|'shut off'|...} for k3s VMs."""
+        out = ssh(HYPERVISOR_IP, 'virsh list --all')
+        if 'ssh error' in out or 'Connection refused' in out or not out.strip():
+            print(f"WARNING: could not reach hypervisor via SSH: {out}", file=sys.stderr)
+            return None   # None = hypervisor unreachable, distinct from empty
+        states = {}
+        for line in out.splitlines():
+            # Lines look like: "  10   k3s-worker-2   running"
+            # or:              "   -   k3s-worker-1   shut off"
+            parts = line.strip().split()
+            if len(parts) >= 3 and (parts[0].isdigit() or parts[0] == '-'):
+                name  = parts[1]
+                state = ' '.join(parts[2:])
+                if name.startswith('k3s-'):
+                    states[name] = state
+        return states
+
+    def get_cluster_nodes():
+        """Returns dict of {node_name: ready_bool} from kubectl."""
+        out = ssh(K3S_CONTROL_IP, 'sudo k3s kubectl get nodes --no-headers 2>/dev/null')
+        nodes = {}
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                name  = parts[0]
+                ready = parts[1] == 'Ready'
+                nodes[name] = ready
+        return nodes
+
+    def get_agent_error(ip):
+        """Grab last meaningful error from k3s-agent journal."""
+        out = ssh(ip,
+            'sudo journalctl -u k3s-agent --no-pager -n 5 2>/dev/null'
+            ' | grep -i "error\\|fail\\|invalid" | tail -2'
+        )
+        return out.strip() or '(no recent errors found)'
+
+    # ── Gather state ──────────────────────────────────────────────────────────
+    drift          = []
+    virsh_states   = get_virsh_states()
+    cluster_nodes  = get_cluster_nodes()
+
+    if virsh_states is None:
+        print("Cannot reach hypervisor — skipping virsh checks, cluster-only check.")
+        drift.append("`hypervisor` — SSH unreachable from drift-checker pod")
+        virsh_states = {}
+
+    # Build full expected node map: static + any k3s-worker-N found in virsh
+    expected_nodes = dict(STATIC_NODES)
+    for vm_name, state in virsh_states.items():
+        if re.match(r'^k3s-worker-\d+$', vm_name) and vm_name not in expected_nodes:
+            # Dynamic worker discovered from virsh (Terraform-managed)
+            octet = int(vm_name.split('-')[-1])
+            ip    = f'192.168.122.{219 + octet - 1}'   # worker-2→.221, worker-3→.222, etc
+            expected_nodes[vm_name] = {'ip': ip, 'role': 'worker'}
+
+    # ── Check each expected node ──────────────────────────────────────────────
+    for name, info in sorted(expected_nodes.items()):
+        vm_state   = virsh_states.get(name, 'not found in virsh')
+        in_cluster = name in cluster_nodes
+        is_ready   = cluster_nodes.get(name, False)
+
+        if 'not found' in vm_state:
+            drift.append(f"`{name}` — VM not found in virsh (may not be provisioned)")
+            continue
+
+        if 'shut off' in vm_state:
+            drift.append(f"`{name}` — VM is shut off")
+            continue
+
+        # VM is running — check cluster membership
+        if name in SKIP_CLUSTER_CHECK:
+            continue
+
+        if not in_cluster:
+            agent_err = get_agent_error(info['ip'])
+            drift.append(
+                f"`{name}` ({info['ip']}) — VM running but NOT in cluster.\n"
+                f"  Agent error: {agent_err}"
+            )
+        elif not is_ready:
+            drift.append(f"`{name}` — in cluster but NotReady")
+
+    # ── Report ────────────────────────────────────────────────────────────────
+    if not drift:
+        print("All nodes healthy — no drift detected.")
+        sys.exit(0)
+
+    description = '\n'.join(drift)
+    summary     = f"{len(drift)} node(s) out of sync with expected cluster state"
+    print(f"DRIFT DETECTED:\n{description}")
+
+    alert_payload = json.dumps({
+        "status": "firing",
+        "alerts": [{
+            "labels": {
+                "alertname": "ClusterDrift",
+                "severity":  "warning",
+                "namespace": "kube-system",
+            },
+            "annotations": {
+                "summary":     summary,
+                "description": description,
+            },
+            "startsAt": __import__('datetime').datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+        }],
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            WEBHOOK_URL, data=alert_payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        urllib.request.urlopen(req, timeout=10)
+        print("Alert posted to webhook.")
+    except Exception as e:
+        print(f"Failed to post alert: {e}", file=sys.stderr)
+        sys.exit(1)
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cluster-drift-check
+  namespace: monitoring
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: drift-checker
+          tolerations:
+            - key: node-role
+              operator: Equal
+              value: infra
+              effect: NoSchedule
+          nodeSelector:
+            kubernetes.io/hostname: k3s-infra
+          restartPolicy: OnFailure
+          containers:
+            - name: checker
+              image: alpine:3.19
+              command: ["sh", "-c", "apk add --no-cache openssh-client python3 > /dev/null 2>&1 && python3 /scripts/drift-check.py"]
+              env:
+                - name: HYPERVISOR_IP
+                  value: "192.168.122.1"
+                - name: K3S_CONTROL_IP
+                  value: "192.168.122.218"
+                - name: WEBHOOK_URL
+                  value: "http://alertmanager-webhook:8080/"
+              volumeMounts:
+                - name: ssh-key
+                  mountPath: /root/.ssh
+                  readOnly: true
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "200m"
+                  memory: "128Mi"
+          volumes:
+            - name: ssh-key
+              secret:
+                secretName: webhook-ssh-key
+                defaultMode: 0400
+            - name: script
+              configMap:
+                name: drift-check-script
+                defaultMode: 0755
