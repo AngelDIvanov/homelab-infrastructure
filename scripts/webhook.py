@@ -217,6 +217,10 @@ def call_claude(user_msg, state):
         "When a worker node is down, check BOTH virsh list --all and kubectl get nodes "
         "to identify which one. Use the correct IP when SSHing. "
         "To restart k3s-agent: ssh andy@<correct-ip> sudo systemctl restart k3s-agent. "
+        "CLUSTER DRIFT: if a VM is running but not in the cluster, common causes are: "
+        "1) invalid token — check /etc/systemd/system/k3s-agent.service.env on the node, "
+        "compare K3S_TOKEN with: ssh andy@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token "
+        "2) stale certs — fix with: ssh andy@<ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt && sudo systemctl restart k3s-agent "
         "COMMAND ROUTING (handled automatically — just write the command): "
         "- virsh commands → hypervisor host (192.168.122.1). "
         "- docker commands → hypervisor host (192.168.122.1) where source code lives. "
@@ -734,7 +738,7 @@ def notify_firing(alert, inc_num, issue=None, remediation=None):
     })
 
     # Always diagnose critical/warning; also diagnose specific info alerts that need a fix offer
-    DIAGNOSE_INFO = {'K3sWorkerNodeDown', 'K3sSnapshotMissing', 'LocalRegistryDown'}
+    DIAGNOSE_INFO = {'K3sWorkerNodeDown', 'K3sSnapshotMissing', 'LocalRegistryDown', 'ClusterDrift'}
     if severity in ('critical', 'warning') or alertname in DIAGNOSE_INFO:
         post_diagnosis(alert)
 
