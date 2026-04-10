@@ -11,6 +11,7 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 - **Complete incident management pipeline** — alert fires → Slack notification with runbook link → GitLab issue auto-created → auto-closed on resolution
 - **GitOps CI/CD with 9 stages** including Trivy container scanning and Gitleaks secret detection
 - **Self-healing automation** — crashloop recovery cronjobs, health check scripts with auto-fix
+- **Claude AI auto-healing** — Alertmanager fires → Claude diagnoses root cause → one-click Approve in Slack runs the fix
 - **Custom Python control plane** — TUI and menu-driven interface for full lab management
 
 ---
@@ -38,6 +39,11 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 **Alerting**
 
 ![Slack alert](docs/images/slack-alert.png)
+
+**Claude AI Auto-healing**
+
+![Claude diagnosis in Slack](docs/images/slack-claude-diagnosis.png)
+![One-click auto-heal approved and resolved](docs/images/slack-claude-autohealed.png)
 
 ---
 
@@ -153,9 +159,61 @@ Secrets (`K3S_TOKEN`, `GITLAB_TOKEN`, ...) are pulled from environment variables
 
 ---
 
-## Alerting
+## Alerting & Claude AI Auto-healing
 
-Alertmanager fires webhooks at `webhook.py` which opens/closes GitLab issues automatically. Alert rules live in `monitoring/grafana/homelab-alerts.yaml`.
+This lab implements a fully automated incident response pipeline powered by Claude AI.
+
+### How it works
+
+```
+Prometheus alert fires
+       ↓
+Alertmanager → webhook.py
+       ↓
+GitLab issue auto-created (with severity, runbook link, timeline)
+       ↓
+Slack notification posted (#incidents for critical/warning)
+       ↓
+Claude gathers live cluster state (nodes, unhealthy pods, events, registry)
+       ↓
+Claude posts compact diagnosis (2-sentence summary + Approve / Dismiss buttons)
+Full diagnosis + suggested commands posted in thread
+       ↓
+Engineer clicks Approve & Run
+       ↓
+Commands execute automatically, routed to the right host:
+  • virsh commands  → hypervisor (KVM host)
+  • docker commands → hypervisor (source code lives there)
+  • kubectl commands → k3s-control with sudo
+  • ssh commands    → direct from webhook pod
+       ↓
+Command output posted in thread
+       ↓
+Alert resolves → GitLab issue auto-closed → RESOLVED posted to Slack
+```
+
+### What Claude can fix automatically (one Approve click)
+
+| Alert | Root cause Claude identifies | Fix Claude suggests |
+|---|---|---|
+| `TrengoAppDown` | Deployment scaled to 0, image pull failure, crashloop | `kubectl rollout restart`, `docker build/push` |
+| `PodImagePullError` | Registry empty or unreachable | `docker build` + `docker push` from hypervisor source |
+| `K3sWorkerNodeDown` | VM powered off | `virsh start k3s-worker-N` |
+| `PodCrashLooping` | OOM, bad config, missing secret | `kubectl describe`, log fetch, rollback |
+| `LocalRegistryDown` | Registry pod crashed | `kubectl rollout restart deployment/registry` |
+| `NodeMemoryCritical` | stress-ng or runaway process | `pkill`, service restart |
+| `NodeDiskHigh` | Stale container images | `crictl rmi --prune` |
+
+### Slack message design
+
+Alerts and diagnoses are kept compact in the channel — full details expand in a thread:
+
+- **Alert notification** — severity badge, summary, runbook link, GitLab incident link
+- **Claude diagnosis** — 2-sentence summary + Approve & Run / Dismiss buttons in channel; full diagnosis + all commands in thread
+- **Command output** — list of commands run in channel; full stdout/stderr in thread
+- **Resolution** — RESOLVED notification with duration, incident link auto-closed
+
+Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge is `scripts/webhook.py`.
 
 ---
 
