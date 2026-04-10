@@ -5,42 +5,6 @@ metadata:
   name: registry
 
 ---
-# Registry credentials secret.
-# Generate with:
-#   htpasswd -Bc /tmp/htpasswd registry
-#   kubectl create secret generic registry-credentials \
-#     --from-file=htpasswd=/tmp/htpasswd -n registry
-#
-# Then update k3s registries.yaml on ALL nodes to include credentials:
-#   mirrors:
-#     "192.168.122.218:30500":
-#       endpoint:
-#         - "http://192.168.122.218:30500"
-#   configs:
-#     "192.168.122.218:30500":
-#       auth:
-#         username: registry
-#         password: <your-password>
-#
-# And update imagePullSecrets in all deployments that pull from this registry.
-#
-# DEPLOYMENT ORDER:
-#   1. Create the htpasswd secret (above)
-#   2. Update registries.yaml on all nodes and restart k3s-agent
-#   3. Apply this manifest
-#   4. Rebuild/push all images (they'll need to re-authenticate)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: registry-credentials
-  namespace: registry
-type: Opaque
-# Placeholder — replace with real htpasswd output via:
-#   kubectl create secret generic registry-credentials --from-file=htpasswd=/tmp/htpasswd -n registry
-data:
-  htpasswd: ""
-
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -66,18 +30,9 @@ spec:
           env:
             - name: REGISTRY_STORAGE_DELETE_ENABLED
               value: "true"
-            - name: REGISTRY_AUTH
-              value: "htpasswd"
-            - name: REGISTRY_AUTH_HTPASSWD_REALM
-              value: "homelab-registry"
-            - name: REGISTRY_AUTH_HTPASSWD_PATH
-              value: "/auth/htpasswd"
           volumeMounts:
             - name: data
               mountPath: /var/lib/registry
-            - name: auth
-              mountPath: /auth
-              readOnly: true
           resources:
             requests:
               memory: "64Mi"
@@ -89,9 +44,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: registry-data
-        - name: auth
-          secret:
-            secretName: registry-credentials
 
 ---
 apiVersion: v1
