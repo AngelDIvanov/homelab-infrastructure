@@ -44,22 +44,26 @@ virsh start k3s-worker-1   # or k3s-worker-2 / k3s-infra
 
 ### Step 2 — Restart k3s-agent if VM is running but node NotReady
 ```bash
-ssh andy@192.168.122.219 sudo systemctl restart k3s-agent
+# Replace <ip> with 192.168.122.219 (worker-1) or 192.168.122.221 (worker-2)
+ssh andy@<ip> sudo systemctl restart k3s-agent
 # Watch node come back:
 kubectl get nodes -w
 ```
 
-### Step 3 — If agent won't start (certificate issues)
+### Step 3 — If agent won't start (certificate or token issues)
 ```bash
-ssh andy@192.168.122.219 sudo systemctl stop k3s-agent
-ssh andy@192.168.122.219 sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt
-ssh andy@192.168.122.219 sudo systemctl start k3s-agent
+ssh andy@<ip> sudo systemctl stop k3s-agent
+ssh andy@<ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt
+ssh andy@<ip> sudo systemctl start k3s-agent
+# If still failing with "invalid token format":
+#   Check /etc/systemd/system/k3s-agent.service.env on the node
+#   Token must match: sudo cat /var/lib/rancher/k3s/server/node-token (from k3s-control)
 ```
 
 ### Step 4 — If node is stuck Terminating for a long time
 ```bash
 # Force-remove the node (only if VM is truly gone and won't return)
-kubectl delete node k3s-worker-1
+kubectl delete node <node-name>   # e.g. k3s-worker-1 or k3s-worker-2
 # Pods will reschedule to healthy nodes automatically
 ```
 

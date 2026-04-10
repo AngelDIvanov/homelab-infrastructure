@@ -88,6 +88,12 @@ RUNBOOKS = {
             'description': 'Pruned unused container images on k3s-worker-1.',
         },
         {
+            'instance_contains': '192.168.122.221',
+            'host': '192.168.122.221',
+            'cmd': 'sudo k3s crictl rmi --prune',
+            'description': 'Pruned unused container images on k3s-worker-2.',
+        },
+        {
             'instance_contains': '192.168.122.230',
             'host': '192.168.122.230',
             'cmd': 'sudo k3s crictl rmi --prune',
@@ -207,9 +213,10 @@ def call_claude(user_msg, state):
         "You are an SRE assistant for a homelab k3s cluster. "
         "Nodes: k3s-control (.218), k3s-worker-1 (.219), k3s-worker-2 (.221), "
         "k3s-infra (.230 — GitLab CE + Prometheus/Grafana/Loki/Alertmanager). "
-        "You are an SRE assistant for a homelab k3s cluster. "
-        "Nodes: k3s-control (.218), k3s-worker-1 (.219), k3s-worker-2 (.221), "
-        "k3s-infra (.230 — GitLab CE + Prometheus/Grafana/Loki/Alertmanager). "
+        "WORKER NODES: both k3s-worker-1 (.219) AND k3s-worker-2 (.221) run workloads. "
+        "When a worker node is down, check BOTH virsh list --all and kubectl get nodes "
+        "to identify which one. Use the correct IP when SSHing. "
+        "To restart k3s-agent: ssh andy@<correct-ip> sudo systemctl restart k3s-agent. "
         "COMMAND ROUTING (handled automatically — just write the command): "
         "- virsh commands → hypervisor host (192.168.122.1). "
         "- docker commands → hypervisor host (192.168.122.1) where source code lives. "
