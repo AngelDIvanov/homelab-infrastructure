@@ -11,7 +11,7 @@ data:
 
     from http.server import HTTPServer, BaseHTTPRequestHandler
     import json, urllib.request, urllib.error, urllib.parse
-    import os, hashlib, hmac, logging, subprocess, threading, time, uuid, re
+    import os, hashlib, hmac, logging, subprocess, threading, time, uuid, re, shlex
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     log = logging.getLogger(__name__)
@@ -23,6 +23,8 @@ data:
     SSH_KEY           = os.environ.get('SSH_KEY',           '/root/.ssh/id_rsa')
     SSH_USER          = os.environ.get('SSH_USER',          'andy')
     K3S_CONTROL_IP    = os.environ.get('K3S_CONTROL_IP',    '192.168.122.218')
+    HYPERVISOR_IP     = os.environ.get('HYPERVISOR_IP',     '192.168.122.1')
+    REGISTRY_URL      = os.environ.get('REGISTRY_URL',      'http://192.168.122.218:30500')
 
     ANTHROPIC_API_KEY    = os.environ.get('ANTHROPIC_API_KEY',    '')
     ANTHROPIC_MODEL      = os.environ.get('ANTHROPIC_MODEL',      'claude-sonnet-4-6')
@@ -122,6 +124,31 @@ data:
     def ssh_kube(args, timeout=20):
         return _ssh(K3S_CONTROL_IP, f'sudo k3s kubectl {args}', timeout)
 
+    def dispatch_cmd(cmd, timeout=60):
+        """Route an approved command to the correct host."""
+        c = cmd.strip()
+        if re.match(r'^virsh\b', c):
+            return _ssh(HYPERVISOR_IP, c, timeout=timeout)
+        if re.match(r'^docker\b', c):
+            return _ssh(HYPERVISOR_IP, c, timeout=120)
+        if re.match(r'^(sudo\s+)?kubectl\b', c):
+            kubectl_args = re.sub(r'^(sudo\s+)?kubectl\s+', '', c)
+            return _ssh(K3S_CONTROL_IP, f'sudo k3s kubectl {kubectl_args}', timeout=timeout)
+        if re.match(r'^ssh\b', c):
+            c_fixed = re.sub(
+                r'^ssh\b',
+                f'ssh -i {SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null',
+                c,
+            )
+            try:
+                r = subprocess.run(shlex.split(c_fixed), capture_output=True, text=True, timeout=timeout)
+                return (r.stdout + r.stderr).strip() or '(no output)'
+            except subprocess.TimeoutExpired:
+                return '(timeout)'
+            except Exception as e:
+                return f'(error: {e})'
+        return _ssh(K3S_CONTROL_IP, c, timeout=timeout)
+
     # ── Cluster state gathering ───────────────────────────────────────────────────
     def gather_state():
         out = []
@@ -163,6 +190,14 @@ data:
                 if logs and '(no output)' not in logs:
                     out.append(f"=== LOGS ({ns}/{pod}) ===\n{logs}")
 
+        try:
+            with urllib.request.urlopen(f'{REGISTRY_URL}/v2/_catalog', timeout=5) as resp:
+                catalog = json.loads(resp.read()).get('repositories', [])
+                out.append(f"=== LOCAL REGISTRY ({REGISTRY_URL}) ===\n" +
+                           (', '.join(catalog) if catalog else '(empty — all images missing)'))
+        except Exception as e:
+            out.append(f"=== LOCAL REGISTRY ===\n(unreachable: {e})")
+
         return '\n\n'.join(out)
 
     # ── Claude API ────────────────────────────────────────────────────────────────
@@ -174,11 +209,29 @@ data:
             "You are an SRE assistant for a homelab k3s cluster. "
             "Nodes: k3s-control (.218), k3s-worker-1 (.219), k3s-worker-2 (.221), "
             "k3s-infra (.230 — GitLab CE + Prometheus/Grafana/Loki/Alertmanager). "
+            "COMMAND ROUTING (handled automatically — just write the command): "
+            "- virsh commands → hypervisor host (192.168.122.1). "
+            "- docker commands → hypervisor host (192.168.122.1) where source code lives. "
+            "- kubectl commands → k3s-control with sudo. "
+            "- ssh commands → direct from webhook pod with key injected. "
+            "LOCAL REGISTRY: 192.168.122.218:30500 (unauthenticated, emptyDir — images lost on pod restart). "
+            "APP SOURCE PATHS ON HYPERVISOR (192.168.122.1): "
+            "  pylab       → /home/andy/pylab/       → 192.168.122.218:30500/pylab:latest "
+            "  trengo-search → /home/andy/trengo-search/ → 192.168.122.218:30500/trengo-search:latest "
+            "If the registry is empty or an image is missing, rebuild with: "
+            "  docker build -t 192.168.122.218:30500/<app>:latest /home/andy/<app>/ "
+            "  docker push 192.168.122.218:30500/<app>:latest "
             "Analyze the cluster state, then respond with: "
             "1) Brief diagnosis (2-3 sentences). "
             "2) Root cause. "
-            "3) Fix commands in a single ```bash code block — kubectl/k3s/ssh only. "
-            "Prefix any destructive command with a WARNING comment."
+            "3) Fix commands in a single ```bash code block. "
+            "STRICT RULES for the bash block: "
+            "Only use kubectl, k3s, ssh, virsh, or docker commands. "
+            "One command per line. No shell variables, no pipes, no conditionals, no comments inside the block. "
+            "Put all explanations outside the block. "
+            "For destructive commands add a WARNING line before the block. "
+            "To start a down VM: virsh start <node-name> "
+            "To restart k3s agent: ssh andy@<ip> sudo systemctl restart k3s-agent"
         )
 
         payload = json.dumps({
@@ -206,7 +259,7 @@ data:
             return f"Claude API error: {e}"
 
     # ── Parse safe commands from Claude response ──────────────────────────────────
-    _SAFE_CMD = re.compile(r'^(sudo\s+)?(kubectl|k3s|ssh)\b')
+    _SAFE_CMD = re.compile(r'^(sudo\s+)?(kubectl|k3s|ssh|virsh|docker)\b')
 
     def parse_commands(text):
         commands = []
@@ -340,6 +393,65 @@ data:
             "text": ":mag: Gathering cluster state — results in #incidents shortly…",
         }).encode()
 
+    # ── Auto Claude diagnosis on alert fire ───────────────────────────────────────
+    def post_diagnosis(alert):
+        alertname = alert['labels'].get('alertname', 'Unknown')
+        severity  = alert['labels'].get('severity', 'info')
+        namespace = alert['labels'].get('namespace', 'N/A')
+        summary   = alert['annotations'].get('summary', alertname)
+        desc      = alert['annotations'].get('description', '')
+
+        def run():
+            state    = gather_state()
+            user_msg = (
+                f"Alert fired: {alertname} (severity={severity}, namespace={namespace})\n"
+                f"Summary: {summary}\n"
+                f"Description: {desc}"
+            )
+            diagnosis = call_claude(user_msg, state)
+            commands  = parse_commands(diagnosis)
+
+            token = str(uuid.uuid4())
+            pending[token] = {"commands": commands, "response_url": "", "channel": SLACK_INCIDENTS}
+
+            short  = diagnosis[:2800] + '…' if len(diagnosis) > 2800 else diagnosis
+            blocks = [
+                {"type": "header",
+                 "text": {"type": "plain_text", "text": f":robot_face:  Claude Diagnosis — {alertname}"}},
+                {"type": "section",
+                 "text": {"type": "mrkdwn", "text": short}},
+            ]
+
+            if commands:
+                cmd_text = '\n'.join(f'`{c}`' for c in commands)
+                blocks += [
+                    {"type": "divider"},
+                    {"type": "section",
+                     "text": {"type": "mrkdwn", "text": f"*Suggested commands:*\n{cmd_text}"}},
+                    {"type": "actions",
+                     "elements": [
+                         {"type": "button",
+                          "text": {"type": "plain_text", "text": ":white_check_mark:  Approve & Run"},
+                          "style": "primary",
+                          "value": token,
+                          "action_id": "lab_approve"},
+                         {"type": "button",
+                          "text": {"type": "plain_text", "text": ":x:  Dismiss"},
+                          "style": "danger",
+                          "value": token,
+                          "action_id": "lab_dismiss"},
+                     ]},
+                ]
+            else:
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "_No executable commands identified._"},
+                })
+
+            slack_post(SLACK_INCIDENTS, blocks, text=f"Claude diagnosis for {alertname}")
+
+        threading.Thread(target=run, daemon=True).start()
+
     # ── Slack interactivity handler ───────────────────────────────────────────────
     def handle_action(body_bytes):
         params   = dict(urllib.parse.parse_qsl(body_bytes.decode()))
@@ -352,32 +464,42 @@ data:
             token = action.get('value')
 
             if aid == 'lab_dismiss':
-                pending.pop(token, None)
-                slack_respond(resp_url, f":x: Dismissed by *{user}*.")
+                entry   = pending.pop(token, None)
+                channel = entry.get('channel', SLACK_INCIDENTS) if entry else SLACK_INCIDENTS
+                if resp_url:
+                    slack_respond(resp_url, f":x: Dismissed by *{user}*.")
+                else:
+                    slack_post(channel,
+                               [{"type": "section",
+                                 "text": {"type": "mrkdwn", "text": f":x: Dismissed by *{user}*."}}],
+                               text=f"Dismissed by {user}")
                 return b'ok'
 
             if aid == 'lab_approve':
                 entry = pending.pop(token, None)
                 if not entry:
-                    slack_respond(resp_url, ":warning: Token expired or already used.")
+                    if resp_url:
+                        slack_respond(resp_url, ":warning: Token expired or already used.")
                     return b'ok'
 
                 commands = entry['commands']
-                slack_respond(
-                    resp_url,
-                    f":hourglass_flowing_sand: Approved by *{user}* — running {len(commands)} command(s)…"
-                )
+                channel  = entry.get('channel', SLACK_INCIDENTS)
+                if resp_url:
+                    slack_respond(
+                        resp_url,
+                        f":hourglass_flowing_sand: Approved by *{user}* — running {len(commands)} command(s)…"
+                    )
 
-                def run_cmds(cmds=commands, u=user):
+                def run_cmds(cmds=commands, u=user, ch=channel):
                     results = []
                     for cmd in cmds:
-                        out = _ssh(K3S_CONTROL_IP, cmd, timeout=60)
+                        out = dispatch_cmd(cmd)
                         results.append(f"$ {cmd}\n{out}")
 
                     full      = '\n\n'.join(results)
                     truncated = full[:2700] + '\n…(truncated)' if len(full) > 2700 else full
                     slack_post(
-                        SLACK_INCIDENTS,
+                        ch,
                         blocks=[
                             {"type": "header",
                              "text": {"type": "plain_text",
@@ -424,8 +546,8 @@ data:
         try:
             with urllib.request.urlopen(req) as resp:
                 return json.loads(resp.read())
-        except urllib.error.HTTPError as e:
-            log.error(f"GitLab API error {e.code}: {e.read()}")
+        except (urllib.error.HTTPError, urllib.error.URLError) as e:
+            log.error(f"GitLab API error: {e}")
             return None
 
     def find_open_issue(inc_num):
@@ -539,6 +661,9 @@ data:
                 'footer': 'Homelab Alertmanager | http://192.168.122.218:30093',
             }],
         })
+
+        if severity in ('critical', 'warning'):
+            post_diagnosis(alert)
 
     def notify_resolved(alert, inc_num, issue=None):
         severity  = alert['labels'].get('severity', 'info')
@@ -693,16 +818,19 @@ spec:
                 secretKeyRef:
                   name: slack-bot-token
                   key: token
+                  optional: true
             - name: SLACK_SIGNING_SECRET
               valueFrom:
                 secretKeyRef:
                   name: slack-signing-secret
                   key: secret
+                  optional: true
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: anthropic-api-key
                   key: key
+                  optional: true
           volumeMounts:
             - name: webhook-script
               mountPath: /app

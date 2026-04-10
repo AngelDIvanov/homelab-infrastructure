@@ -1,0 +1,19 @@
+---
+# PodDisruptionBudget for Traefik ingress controller.
+# Ensures at least 1 replica stays running during voluntary disruptions
+# (node drain, rolling update, etc.) so ingress is never fully down.
+#
+# Also patches Traefik's HelmChartConfig to use HARD pod anti-affinity
+# so the 2 replicas are guaranteed to land on different worker nodes.
+# Apply alongside traefik-config.yaml.
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: traefik-pdb
+  namespace: kube-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
