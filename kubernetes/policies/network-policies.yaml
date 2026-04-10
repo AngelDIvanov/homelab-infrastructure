@@ -1,0 +1,190 @@
+---
+# Network Policies for homelab-infrastructure
+#
+# IMPORTANT — apply these incrementally and verify connectivity after each:
+#   kubectl apply -f kubernetes/policies/network-policies.yaml
+#
+# If something breaks, roll back the specific policy:
+#   kubectl delete networkpolicy <name> -n <namespace>
+#
+# Namespaces covered: vaultwarden, registry, monitoring, pylab
+# DNS (port 53 UDP/TCP) is always allowed — required for service discovery.
+
+# ── vaultwarden ───────────────────────────────────────────────────────────────
+# Only Traefik may reach Vaultwarden. No egress except DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vaultwarden-ingress
+  namespace: vaultwarden
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 3012  # WebSocket notifications
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# ── registry ──────────────────────────────────────────────────────────────────
+# Registry is reachable from all cluster namespaces (pods pull images)
+# and from CI runner (.220 via NodePort 30500). No egress except DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: registry-ingress
+  namespace: registry
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 5000
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# ── monitoring ────────────────────────────────────────────────────────────────
+# Prometheus must scrape all namespaces (egress to any pod on metrics ports).
+# Grafana must reach Prometheus and Loki internally.
+# Alertmanager must reach Slack/GitLab (egress to internet on 443).
+# Ingress: only Traefik (for dashboards) and intra-namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-ingress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow Traefik to reach Grafana/Alertmanager dashboards
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+    # Allow intra-namespace (Grafana → Prometheus → Loki, etc.)
+    - from:
+        - podSelector: {}
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-egress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Intra-namespace (Grafana → Prometheus, Prometheus → Alertmanager, etc.)
+    - to:
+        - podSelector: {}
+    # Scrape metrics from all namespaces (common metrics ports)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 9090   # Prometheus
+        - protocol: TCP
+          port: 9091
+        - protocol: TCP
+          port: 9093   # Alertmanager
+        - protocol: TCP
+          port: 9100   # node-exporter
+        - protocol: TCP
+          port: 8080   # generic app metrics
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 10250  # kubelet
+        - protocol: TCP
+          port: 10255
+    # Egress to internet: Slack webhooks and external APIs (port 443)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+
+---
+# ── pylab ─────────────────────────────────────────────────────────────────────
+# pylab is a web app: ingress from Traefik, egress to internet + DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pylab-ingress
+  namespace: pylab
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+  egress:
+    # DNS
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Internet access (pylab makes external API calls)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80

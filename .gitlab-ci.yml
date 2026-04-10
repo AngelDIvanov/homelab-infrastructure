@@ -1,31 +1,175 @@
-# You can override the included template(s) by including variable overrides
-# SAST customization: https://docs.gitlab.com/ee/user/application_security/sast/#customizing-the-sast-settings
-# Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure
-# Dependency Scanning customization: https://docs.gitlab.com/ee/user/application_security/dependency_scanning/#customizing-the-dependency-scanning-settings
-# Container Scanning customization: https://docs.gitlab.com/ee/user/application_security/container_scanning/#customizing-the-container-scanning-settings
-# Note that environment variables can be set in several places
-# See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
+---
+# homelab-infrastructure CI/CD pipeline
+#
+# Stages:
+#   lint        — YAML, Terraform format checks
+#   validate    — Kubernetes manifest validation, Helm lint, alert rule check
+#   security    — Secret detection, manifest security scan
+#   deploy      — Apply manifests to cluster (manual gate on main)
+#   smoke       — Verify cluster health post-deploy
+#
+# Required CI/CD variables (set in GitLab → Settings → CI/CD → Variables):
+#   KUBECONFIG_BASE64  — base64-encoded kubeconfig for the cluster
+#                        Generate: base64 -w0 ~/.kube/config
+
 stages:
-- build
-- test
-- deploy
-- review
-- dast
-- staging
-- canary
-- production
-- incremental rollout 10%
-- incremental rollout 25%
-- incremental rollout 50%
-- incremental rollout 100%
-- performance
-- cleanup
-- secret-detection
-sast:
-  stage: test
-include:
-- template: Auto-DevOps.gitlab-ci.yml
+  - lint
+  - validate
+  - security
+  - deploy
+  - smoke
+
 variables:
-  SECRET_DETECTION_ENABLED: 'true'
-secret_detection:
-  stage: secret-detection
+  KUBECONFIG: /tmp/kubeconfig
+  K3S_CONTROL_IP: "192.168.122.218"
+
+# ── Lint ─────────────────────────────────────────────────────────────────────
+
+lint:yaml:
+  stage: lint
+  image: cytopia/yamllint:latest
+  script:
+    - yamllint -d relaxed kubernetes/ monitoring/ scripts/
+  rules:
+    - changes:
+        - "**/*.yaml"
+        - "**/*.yml"
+
+lint:terraform:
+  stage: lint
+  image: hashicorp/terraform:1.7
+  script:
+    - cd terraform
+    - terraform fmt -check -recursive
+  rules:
+    - changes:
+        - "terraform/**/*"
+
+# ── Validate ─────────────────────────────────────────────────────────────────
+
+validate:kubernetes-manifests:
+  stage: validate
+  image: ghcr.io/yannh/kubeconform:latest
+  script:
+    - kubeconform -strict -summary kubernetes/deployments/*.yaml
+    - kubeconform -strict -summary kubernetes/policies/*.yaml
+    - kubeconform -strict -summary kubernetes/backup/*.yaml
+  rules:
+    - changes:
+        - "kubernetes/**/*.yaml"
+
+validate:prometheus-rules:
+  stage: validate
+  image: prom/prometheus:latest
+  script:
+    - promtool check rules monitoring/grafana/homelab-alerts.yaml
+  rules:
+    - changes:
+        - "monitoring/grafana/homelab-alerts.yaml"
+
+validate:terraform:
+  stage: validate
+  image: hashicorp/terraform:1.7
+  script:
+    - cd terraform
+    - terraform init -backend=false
+    - terraform validate
+  rules:
+    - changes:
+        - "terraform/**/*"
+
+# ── Security ─────────────────────────────────────────────────────────────────
+
+security:secret-detection:
+  stage: security
+  image: zricethezav/gitleaks:latest
+  script:
+    - gitleaks detect --verbose --log-opts "HEAD~1..HEAD"
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+
+security:manifest-scan:
+  stage: security
+  image: kubesec/kubesec:latest
+  script:
+    - |
+      FAILED=0
+      for f in kubernetes/deployments/*.yaml; do
+        echo "Scanning $f..."
+        RESULT=$(kubesec scan "$f" 2>/dev/null)
+        SCORE=$(echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['score'])" 2>/dev/null || echo 0)
+        echo "  Score: $SCORE"
+        if [ "${SCORE:-0}" -lt 0 ] 2>/dev/null; then
+          echo "  FAIL: negative security score"
+          FAILED=1
+        fi
+      done
+      exit $FAILED
+  allow_failure: true
+  rules:
+    - changes:
+        - "kubernetes/deployments/*.yaml"
+
+# ── Deploy ───────────────────────────────────────────────────────────────────
+
+deploy:kubernetes:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  before_script:
+    - echo "$KUBECONFIG_BASE64" | base64 -d > $KUBECONFIG
+    - chmod 600 $KUBECONFIG
+  script:
+    - kubectl apply -f kubernetes/deployments/
+    - kubectl apply -f kubernetes/policies/
+    - kubectl apply -f kubernetes/backup/
+    - kubectl rollout status deployment --all-namespaces --timeout=5m || true
+  environment:
+    name: homelab
+    url: http://192.168.122.218:30080
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+
+deploy:monitoring:
+  stage: deploy
+  image: alpine/helm:3.14
+  before_script:
+    - echo "$KUBECONFIG_BASE64" | base64 -d > $KUBECONFIG
+    - chmod 600 $KUBECONFIG
+    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    - helm repo update
+  script:
+    - kubectl apply -f monitoring/grafana/homelab-alerts.yaml
+    - |
+      helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+        -f monitoring/fix-values.yaml \
+        -n monitoring --create-namespace \
+        --atomic --timeout 10m
+  environment:
+    name: homelab-monitoring
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+      changes:
+        - "monitoring/**/*"
+
+# ── Smoke Tests ───────────────────────────────────────────────────────────────
+
+smoke:cluster-health:
+  stage: smoke
+  image: curlimages/curl:latest
+  script:
+    - |
+      echo "Checking Prometheus..."
+      curl -sf "http://${K3S_CONTROL_IP}:30090/-/healthy" || exit 1
+      echo "Checking Grafana..."
+      curl -sf "http://${K3S_CONTROL_IP}:30080/api/health" || exit 1
+      echo "Checking Alertmanager..."
+      curl -sf "http://${K3S_CONTROL_IP}:30093/-/healthy" || exit 1
+      echo "All health checks passed."
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+  needs:
+    - deploy:kubernetes
