@@ -9,11 +9,14 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 ## What this demonstrates
 
 - **Full infrastructure-as-code lifecycle** — VM provisioning through Terraform, configuration via Ansible, container orchestration on k3s
-- **Production-grade observability** — Prometheus, Grafana, Loki, Alertmanager with custom dashboards per service
+- **Production-grade observability** — Prometheus, Grafana, Loki (31-day retention), Alertmanager with 20+ custom alert rules
 - **Complete incident management pipeline** — alert fires → Slack notification with runbook link → GitLab issue auto-created → auto-closed on resolution
-- **GitOps CI/CD with 9 stages** including Trivy container scanning and Gitleaks secret detection
+- **GitOps CI/CD** — lint, validate (kubeconform + promtool), security scan (gitleaks + kubesec), deploy, smoke test stages
+- **Automated backups** — k3s SQLite snapshots every 12h, Vaultwarden SQLite hot-copy daily, GitLab full backup daily; all retained with configurable history
+- **Security hardening** — NetworkPolicy default-deny, RBAC least-privilege ServiceAccounts, image SHA pinning, PodDisruptionBudgets, pod anti-affinity
 - **Self-healing automation** — crashloop recovery cronjobs, health check scripts with auto-fix
 - **Claude AI auto-healing** — Alertmanager fires → Claude reads live cluster state → diagnoses root cause → one-click Approve in Slack executes the fix automatically
+- **Runbook library** — 13 runbooks covering control plane, nodes, storage, applications, monitoring, and full disaster recovery with RTO/RPO targets
 - **Custom Python control plane** — TUI and menu-driven interface for full lab management
 
 ---
@@ -55,11 +58,15 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 |---|---|
 | VM provisioning | Terraform + libvirt provider |
 | Configuration management | Ansible |
-| Container orchestration | k3s |
-| CI/CD | GitLab CE (self-hosted) |
-| Monitoring | Prometheus + Grafana + Loki + Alertmanager |
-| Secrets | Vaultwarden |
-| Registry | Local Docker registry in-cluster |
+| Container orchestration | k3s (SQLite, snapshots every 12h) |
+| CI/CD | GitLab CE (self-hosted) + `.gitlab-ci.yml` |
+| Monitoring | Prometheus + Grafana + Loki (31d retention) + Alertmanager |
+| Alerting | 20+ custom rules, auto-diagnosis via Claude AI |
+| Incident management | Slack + GitLab Issues (auto-open/close) + runbooks |
+| Backups | k3s state, Vaultwarden, GitLab — daily CronJobs |
+| Secrets | Vaultwarden (self-hosted) |
+| Registry | Local Docker registry — NFS-backed persistent storage |
+| Security | NetworkPolicy, RBAC, image SHA pinning, PodDisruptionBudgets |
 
 ---
 
@@ -87,26 +94,34 @@ ansible/
   playbooks/         bootstrap, hardening, app installs
 
 kubernetes/
-  deployments/       k8s manifests (registry, NFS, pylab, vaultwarden...)
-  self-healing-cronjobs.yaml
+  deployments/       k8s manifests (registry, NFS, pylab, vaultwarden, traefik...)
+  backup/            CronJobs — k3s SQLite snapshot, Vaultwarden, GitLab
+  policies/          NetworkPolicies (default-deny), PodDisruptionBudgets
 
 monitoring/
-  fix-values.yaml              Helm overrides for kube-prometheus-stack
-  grafana/                     dashboards, alert rules, datasources, silences
-  promtail-values.yaml
+  fix-values.yaml              Helm overrides for kube-prometheus-stack + Loki
+  grafana/
+    homelab-alerts.yaml        20+ custom Prometheus alert rules
+    dashboards/                per-service Grafana dashboards
+    datasources/
+
+docs/
+  runbooks/          13 runbooks — nodes, storage, apps, DR with RTO/RPO table
+    control-plane/
+    nodes/
+    storage/
+    applications/    pod-crashloop, image-pull, registry-down, secret-rotation
+    monitoring/
+    disaster-recovery/
 
 scripts/
+  webhook.py        Alertmanager → Claude AI → Slack → GitLab incident bridge
   lab-control.py    main control panel — start/stop VMs, deploy, run scenarios
   lab-tui.py        Textual TUI version of the above
-  lab-manager.py    lower-level VM management helpers
   check-lab.sh      health check + auto-fix script
   deploy.sh         build and push the trengo-search app
-  webhook.py        Alertmanager → GitLab issues bridge
-  sync-dashboards.sh
-  setup-vault.sh
 
 terraform/          k3s worker VMs (dynamic scale)
-terraform-kubeadm/  standalone kubeadm cluster (separate experiment)
 ```
 
 ---
@@ -221,6 +236,45 @@ Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge
 
 ---
 
+## Backups
+
+All stateful components are backed up automatically via Kubernetes CronJobs:
+
+| What | How | Schedule | Retention |
+|---|---|---|---|
+| k3s cluster state (SQLite) | `sqlite3 .backup` hot-copy via SSH | Every 12h | 14 snapshots |
+| Vaultwarden | `sqlite3 .backup` from NFS-mounted PVC | Daily 02:00 | 30 days |
+| GitLab (repos, issues, CI, wikis) | `gitlab-backup create` via SSH | Daily 03:00 | 7 backups |
+
+Backup jobs live in `kubernetes/backup/`. Restore procedures are documented in the runbooks.
+
+---
+
+## Security
+
+- **NetworkPolicy** — default-deny in all namespaces; explicit allow-rules for Traefik ingress, inter-namespace registry pulls, and monitoring scrape paths
+- **RBAC** — each workload has a dedicated ServiceAccount with least-privilege roles; `automountServiceAccountToken: false` by default
+- **Image pinning** — all third-party images (Vaultwarden, registry) pinned to SHA256 digests to prevent supply-chain drift
+- **PodDisruptionBudgets** — on Traefik and pylab to prevent accidental full-cluster rollout downtime
+- **Secret rotation runbook** — documented procedure for rotating all 5 cluster secrets (`docs/runbooks/applications/secret-rotation.md`)
+
+---
+
+## Runbooks
+
+13 runbooks in `docs/runbooks/` covering every alert category:
+
+| Category | Runbooks |
+|---|---|
+| Control plane | API server down |
+| Nodes | Worker not ready, memory pressure, disk full |
+| Storage | NFS server down, PVC pending |
+| Applications | Pod crashloop, image pull error, registry down, Trengo app down, secret rotation |
+| Monitoring | Monitoring stack down |
+| Disaster recovery | Full cluster recovery (RTO ~2h, RPO ≤24h) |
+
+---
+
 ## CI/CD
 
-`.gitlab-ci.yml` runs on the self-hosted runner. Pipeline stages: build → scan (Trivy + Gitleaks) → deploy to k3s → smoke test.
+`.gitlab-ci.yml` stages: **lint** (yamllint, terraform fmt) → **validate** (kubeconform, promtool, terraform validate) → **security** (gitleaks, kubesec) → **deploy** (kubectl apply, helm upgrade — manual gate on main) → **smoke** (curl health checks).
