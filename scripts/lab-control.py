@@ -152,19 +152,67 @@ def wait_for_ssh(ip, timeout=120):
     print(r(f"  SSH timeout for {ip}"))
     return False
 
+def preflight_cluster_check():
+    """Abort if control plane is unreachable or cluster is degraded."""
+    print(y("  pre-flight: checking cluster health..."))
+    res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes --no-headers 2>/dev/null"', capture=True)
+    if res.returncode != 0:
+        print(r("  ABORT: cannot reach k3s-control — cluster may be down."))
+        return False
+    not_ready = [l for l in res.stdout.splitlines() if "NotReady" in l]
+    if not_ready:
+        print(r(f"  ABORT: {len(not_ready)} node(s) NotReady before operation:"))
+        for l in not_ready: print(r(f"    {l}"))
+        print(r("  Fix cluster health before scaling."))
+        return False
+    print(g(f"  cluster healthy ({len(res.stdout.splitlines())} nodes Ready)"))
+    return True
+
 def join_k3s(ip, name):
     print(y(f"  joining {name} to k3s..."))
-    cmd = f'ssh {SSH_OPTS} andy@{ip} "curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN()} sh -"'
+
+    # Fetch full token and validate format before touching the node
+    token_result = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo cat /var/lib/rancher/k3s/server/node-token"', capture=True)
+    full_token = token_result.stdout.strip()
+    if not full_token or '::server:' not in full_token:
+        print(r(f"  ABORT: node-token from control plane looks wrong: '{full_token[:40]}...'"))
+        print(r("  Expected format: K10<hash>::server:<secret>"))
+        return False
+    print(g(f"  token validated (format OK)"))
+
+    # Install k3s agent
+    cmd = f'ssh {SSH_OPTS} andy@{ip} "curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={full_token} sh -s - agent"'
     if run(cmd).returncode != 0:
         print(r(f"  failed to install k3s on {name}"))
         return False
-    run(f'ssh {SSH_OPTS} andy@{ip} "sudo systemctl restart k3s-agent"', capture=True)
+
+    # The install script wipes the env file — explicitly write the full token back
+    print(y("  writing token to agent env file (install script wipes it)..."))
+    run(f'ssh {SSH_OPTS} andy@{ip} "printf \'K3S_TOKEN=%s\\nK3S_URL=%s\\n\' \'{full_token}\' \'{K3S_URL}\' | sudo tee /etc/systemd/system/k3s-agent.service.env > /dev/null"', capture=True)
+    run(f'ssh {SSH_OPTS} andy@{ip} "sudo systemctl daemon-reload && sudo systemctl restart k3s-agent"', capture=True)
+
+    # Verify agent is active
     time.sleep(5)
     result = run(f'ssh {SSH_OPTS} andy@{ip} "systemctl is-active k3s-agent"', capture=True)
-    if result.stdout.strip() == "active":
-        print(g(f"  {name} joined cluster"))
-        return True
-    print(r(f"  k3s-agent failed on {name}"))
+    if result.stdout.strip() != "active":
+        logs = run(f'ssh {SSH_OPTS} andy@{ip} "sudo journalctl -u k3s-agent -n 5 --no-pager 2>/dev/null | grep -i error"', capture=True).stdout.strip()
+        print(r(f"  k3s-agent failed on {name}"))
+        if logs: print(r(f"  Agent errors: {logs}"))
+        return False
+
+    # Verify node actually appears in cluster (not just service active)
+    print(y(f"  waiting for {name} to appear in cluster..."))
+    for _ in range(18):  # 90s
+        res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get node {name} --no-headers 2>/dev/null"', capture=True)
+        if res.stdout.strip():
+            status = res.stdout.split()[1] if len(res.stdout.split()) > 1 else "Unknown"
+            if status == "Ready":
+                print(g(f"  {name} joined cluster and is Ready"))
+                return True
+            print(f"  {name} status: {status}, waiting...")
+        time.sleep(5)
+
+    print(r(f"  {name} did not become Ready within 90s — check agent logs"))
     return False
 
 def drain_node(name):
@@ -478,6 +526,8 @@ def do_health_check():
 
 def do_upscale():
     divider("UPSCALE -- Adding new worker")
+    if not preflight_cluster_check(): return
+
     current   = get_vm_count()
     new_count = current + 1
     new_wnum  = new_count + 1
@@ -529,6 +579,8 @@ def do_upscale():
 
 def do_downscale():
     divider("DOWNSCALE -- Removing worker")
+    if not preflight_cluster_check(): return
+
     current = get_vm_count()
     if current <= 0:
         print(r("  No Terraform-managed workers to remove.")); return
@@ -536,6 +588,23 @@ def do_downscale():
     wname = f"k3s-worker-{wnum}"
     wip   = get_worker_ip(wnum)
     print(f"  Worker to remove : {wname}  ({wip})")
+
+    # Safety check: warn if any deployment would drop to 0 replicas after drain
+    print(y("  checking pod safety before drain..."))
+    pods_res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get pods -A --no-headers --field-selector spec.nodeName={wname} 2>/dev/null"', capture=True)
+    if pods_res.stdout.strip():
+        running_pods = [l.split() for l in pods_res.stdout.splitlines() if l.strip()]
+        print(f"  {len(running_pods)} pod(s) currently on {wname}:")
+        for p in running_pods:
+            print(f"    {p[0]}/{p[1]}")
+        # Check for single-replica deployments that would go to 0
+        risky = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get deployments -A --no-headers 2>/dev/null | awk \'$5==1 && $4==1\'"', capture=True).stdout.strip()
+        if risky:
+            print(y("  WARNING: these deployments have only 1 ready replica and may become unavailable:"))
+            for l in risky.splitlines(): print(y(f"    {l}"))
+    else:
+        print(g(f"  no pods on {wname} — safe to drain"))
+
     if input(f"\n{y('  Proceed? (y/n): ')}").lower() != 'y':
         print("  Cancelled."); return
 
