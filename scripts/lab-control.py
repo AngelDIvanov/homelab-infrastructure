@@ -721,20 +721,27 @@ def do_downscale():
     if input(f"\n{y('  Proceed? (y/n): ')}").lower() != 'y':
         print("  Cancelled."); return
 
-    divider("Step 1/3 -- Draining from k3s")
+    # Scale app replicas down before draining so pods aren't rescheduled mid-drain
+    remaining_workers = (current - 1) + 1
+    divider("Step 0/4 -- Pre-scaling app replicas")
+    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas={remaining_workers}"', capture=True)
+    print(g(f"  scaled trengo-search to {remaining_workers} replicas"))
+
+    divider("Step 1/4 -- Draining from k3s")
     drain_node(wname)
 
-    divider("Step 2/3 -- Terraform scale down")
+    divider("Step 2/4 -- Terraform scale down")
     set_vm_count(current - 1)
     os.chdir(TERRAFORM_DIR)
     run("terraform apply -auto-approve")
 
-    divider("Step 3/3 -- Updating Ansible inventory")
+    divider("Step 3/4 -- Cleaning up SSH known_hosts")
+    run(f"ssh-keygen -f ~/.ssh/known_hosts -R {wip} 2>/dev/null || true", capture=True)
+    print(g(f"  removed {wip} from known_hosts"))
+
+    divider("Step 4/4 -- Updating Ansible inventory")
     update_ansible_inventory()
 
-    remaining_workers = (current - 1) + 1
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas={remaining_workers}"', capture=True)
-    print(g(f"  scaled trengo-search to {remaining_workers} replicas"))
     print(f"\n{g('='*50)}\n{g(f'DOWNSCALE COMPLETE -- removed {wname}')}\n{g('='*50)}")
 
 def do_sync_all():
