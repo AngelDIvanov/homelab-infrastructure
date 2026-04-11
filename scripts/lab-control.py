@@ -215,6 +215,79 @@ def join_k3s(ip, name):
     print(r(f"  {name} did not become Ready within 90s — check agent logs"))
     return False
 
+def repair_agent(ip, name):
+    """Fix k3s-agent on any permanent node (infra, worker-1) without reinstalling.
+    Writes the correct token from control plane into the env file and restarts."""
+    print(y(f"  repairing k3s-agent on {name} ({ip})..."))
+
+    token_result = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo cat /var/lib/rancher/k3s/server/node-token"', capture=True)
+    full_token = token_result.stdout.strip()
+    if not full_token or '::server:' not in full_token:
+        print(r(f"  ABORT: could not fetch valid token from control plane: '{full_token[:40]}'"))
+        return False
+
+    current = run(f'ssh {SSH_OPTS} andy@{ip} "sudo cat /etc/systemd/system/k3s-agent.service.env 2>/dev/null"', capture=True).stdout.strip()
+    print(f"  Current env: {current[:80] or '(empty)'}")
+
+    run(f'ssh {SSH_OPTS} andy@{ip} "printf \'K3S_TOKEN=%s\\nK3S_URL=%s\\n\' \'{full_token}\' \'{K3S_URL}\' | sudo tee /etc/systemd/system/k3s-agent.service.env > /dev/null"', capture=True)
+    run(f'ssh {SSH_OPTS} andy@{ip} "sudo systemctl daemon-reload && sudo systemctl restart k3s-agent"', capture=True)
+
+    time.sleep(6)
+    status = run(f'ssh {SSH_OPTS} andy@{ip} "systemctl is-active k3s-agent"', capture=True).stdout.strip()
+    if status != "active":
+        logs = run(f'ssh {SSH_OPTS} andy@{ip} "sudo journalctl -u k3s-agent -n 5 --no-pager 2>/dev/null | grep -i error"', capture=True).stdout.strip()
+        print(r(f"  k3s-agent still not active on {name}"))
+        if logs: print(r(f"  Errors: {logs}"))
+        return False
+
+    print(y(f"  waiting for {name} to appear Ready in cluster..."))
+    for _ in range(18):
+        res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get node {name} --no-headers 2>/dev/null"', capture=True)
+        if res.stdout.strip() and "Ready" in res.stdout:
+            print(g(f"  {name} is Ready"))
+            return True
+        time.sleep(5)
+    print(r(f"  {name} not Ready after 90s"))
+    return False
+
+def check_infra_services():
+    """Check that key services on k3s-infra are reachable."""
+    import urllib.request
+    print(c("\n  k3s-infra service health"))
+    services = [
+        ("GitLab",       f"http://{K3S_INFRA_IP}:8929/-/health"),
+        ("Prometheus",   f"http://{K3S_CONTROL_IP}:30090/-/healthy"),
+        ("Alertmanager", f"http://{K3S_CONTROL_IP}:30093/-/healthy"),
+        ("Grafana",      f"http://{K3S_INFRA_IP}:30300/api/health"),
+    ]
+    all_ok = True
+    for name, url in services:
+        try:
+            code = urllib.request.urlopen(url, timeout=5).getcode()
+            print(g(f"    {name:<14} UP   ({code})  {url}"))
+        except Exception as e:
+            print(r(f"    {name:<14} DOWN  {url}  — {e}"))
+            all_ok = False
+
+    # Check GitLab runner registration on ci-runner
+    print(c("\n  ci-runner health"))
+    res = run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo gitlab-runner list 2>&1 | grep -c Executor || echo 0"', capture=True)
+    runner_count = res.stdout.strip()
+    if runner_count.isdigit() and int(runner_count) > 0:
+        print(g(f"    GitLab Runner  UP   ({runner_count} executor(s) registered)"))
+    else:
+        print(r(f"    GitLab Runner  DOWN — no executors registered (run: sudo gitlab-runner register)"))
+        all_ok = False
+
+    # Check NFS export is reachable from control
+    nfs_check = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "showmount -e {K3S_INFRA_IP} 2>/dev/null | head -3"', capture=True)
+    if nfs_check.returncode == 0 and nfs_check.stdout.strip():
+        print(g(f"    NFS            UP   ({nfs_check.stdout.splitlines()[0].strip()})"))
+    else:
+        print(r(f"    NFS            DOWN — cannot reach NFS exports on {K3S_INFRA_IP}"))
+        all_ok = False
+    return all_ok
+
 def drain_node(name):
     print(y(f"  draining {name}..."))
     run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl drain {name} --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true"')
@@ -345,17 +418,19 @@ def main_menu():
 {c('|')}  {bold('7.')}  Scale              add / remove k3s workers         {c('|')}
 {c('|')}  {bold('8.')}  Ansible            run playbooks                    {c('|')}
 {c('|')}  {bold('9.')}  Sync Images        push to all k3s nodes            {c('|')}
-{c('|')}  {bold('10.')} Rejoin Workers     re-attach nodes to k3s           {c('|')}
-{c('|')}  {bold('11.')} k3s Status         nodes + virsh overview           {c('|')}
+{c('|')}  {bold('10.')} Repair Node        fix agent token/cert (any node)  {c('|')}
+{c('|')}  {bold('11.')} Rejoin Nodes       full reinstall (all agents)      {c('|')}
+{c('|')}  {bold('12.')} k3s Status         nodes + virsh overview           {c('|')}
+{c('|')}  {bold('13.')} Infra Health       GitLab/Prometheus/NFS/Runner     {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('ALERTING')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('12.')} Alerting Tests     app nuke, RAM nuke,              {c('|')}
+{c('|')}  {bold('14.')} Alerting Tests     app nuke, RAM nuke,              {c('|')}
 {c('|')}       {dim('               auto-remediation demos')}              {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('SERVICES')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('13.')} Service Links      all URLs and access info         {c('|')}
+{c('|')}  {bold('15.')} Service Links      all URLs and access info         {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('0.')}  Exit                                                {c('|')}
 {c('+----------------------------------------------------------+')}""")
@@ -634,19 +709,70 @@ def do_sync_all():
         sync_images(ip, name)
     print(g("\n  All workers synced."))
 
-def do_rejoin():
-    divider("REJOIN -- Re-attach workers to k3s")
+def do_repair_node():
+    """Lightweight agent repair — fix token + restart, no k3s reinstall."""
+    divider("REPAIR NODE AGENT")
+    # All permanent nodes that run k3s-agent
+    all_nodes = {
+        "k3s-worker-1": K3S_WORKER1_IP,
+        "k3s-infra":    K3S_INFRA_IP,
+    }
     vm_count = get_vm_count()
-    if vm_count <= 0:
-        print(r("  No Terraform-managed workers found.")); return
-    workers = [(i+2, f"k3s-worker-{i+2}", get_worker_ip(i+2)) for i in range(vm_count)]
-    for _, name, ip in workers:
-        print(f"  {name}: {ip}")
-    if input(f"\n{y('  Rejoin all? (y/n): ')}").lower() != 'y':
+    for i in range(vm_count):
+        wnum = i + 2
+        all_nodes[f"k3s-worker-{wnum}"] = get_worker_ip(wnum)
+
+    print("  Which node needs repair?\n")
+    node_list = sorted(all_nodes.items())
+    for i, (name, ip) in enumerate(node_list, 1):
+        print(f"  {i}.  {name}  ({ip})")
+    print("  a.  All nodes")
+    print("  0.  Back")
+
+    choice = input(f"\n{y('  Select: ')}").strip()
+    if choice == '0':
+        return
+    elif choice == 'a':
+        targets = node_list
+    elif choice.isdigit() and 1 <= int(choice) <= len(node_list):
+        targets = [node_list[int(choice) - 1]]
+    else:
+        print(r("  Invalid choice.")); return
+
+    if not preflight_cluster_check(): return
+
+    for name, ip in targets:
+        divider(f"Repairing {name} ({ip})")
+        if not wait_for_ssh(ip, timeout=30):
+            print(r(f"  SSH unavailable — is the VM running?")); continue
+        repair_agent(ip, name)
+
+    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
+
+def do_rejoin():
+    divider("REJOIN -- Full re-attach (reinstalls k3s-agent)")
+    # All nodes that should be in the cluster
+    all_nodes = [
+        ("k3s-worker-1", K3S_WORKER1_IP),
+        ("k3s-infra",    K3S_INFRA_IP),
+    ]
+    vm_count = get_vm_count()
+    for i in range(vm_count):
+        wnum = i + 2
+        all_nodes.append((f"k3s-worker-{wnum}", get_worker_ip(wnum)))
+
+    print("  Nodes that will be rejoined:\n")
+    for name, ip in all_nodes:
+        print(f"    {name}  ({ip})")
+    print(f"\n  {y('NOTE: This reinstalls k3s-agent on each node.')}")
+    print(f"  {y('Use Repair Node instead if you just need to fix a token/cert.')}")
+    if input(f"\n{y('  Proceed? (y/n): ')}").lower() != 'y':
         print("  Cancelled."); return
 
-    print(c("\n  Cleaning old node entries..."))
-    for _, name, _ in workers:
+    if not preflight_cluster_check(): return
+
+    print(c("\n  Cleaning old node entries from cluster..."))
+    for name, _ in all_nodes:
         run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl delete node {name} 2>/dev/null || true"', capture=True)
 
     print(c("  Restarting k3s server..."))
@@ -654,16 +780,14 @@ def do_rejoin():
     print("  Waiting 30s for k3s to restart...")
     time.sleep(30)
 
-    for _, name, ip in workers:
-        divider(f"Processing {name} ({ip})")
+    for name, ip in all_nodes:
+        divider(f"Rejoining {name} ({ip})")
         if not wait_for_ssh(ip, timeout=60):
-            print(r(f"  SSH unavailable for {name}")); continue
+            print(r(f"  SSH unavailable for {name} — skipping")); continue
         run(f'ssh {SSH_OPTS} andy@{ip} "sudo rm -f /etc/rancher/node/password"', capture=True)
         run(f'ssh {SSH_OPTS} andy@{ip} "sudo systemctl stop k3s-agent 2>/dev/null || true"', capture=True)
         join_k3s(ip, name)
 
-    print(c("\n  Waiting for nodes to be Ready..."))
-    time.sleep(30)
     run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
     update_ansible_inventory()
     print(g("\n  Rejoin complete."))
@@ -1070,19 +1194,21 @@ def do_service_links():
 # ─────────────────────────────────────────────────────────────
 def main():
     dispatch = {
-        '1':  lambda: (do_start_k3s(),      pause()),
-        '2':  lambda: (do_stop_k3s(),       pause()),
-        '3':  lambda: (do_start_k8s(),      pause()),
-        '4':  lambda: (do_stop_k8s(),       pause()),
-        '5':  lambda: (do_k8s_status(),     pause()),
-        '6':  lambda: (do_health_check(),   pause()),
+        '1':  lambda: (do_start_k3s(),           pause()),
+        '2':  lambda: (do_stop_k3s(),            pause()),
+        '3':  lambda: (do_start_k8s(),           pause()),
+        '4':  lambda: (do_stop_k8s(),            pause()),
+        '5':  lambda: (do_k8s_status(),          pause()),
+        '6':  lambda: (do_health_check(),        pause()),
         '7':  scale_menu,
         '8':  ansible_menu,
-        '9':  lambda: (do_sync_all(),       pause()),
-        '10': lambda: (do_rejoin(),         pause()),
-        '11': lambda: (do_status(),         pause()),
-        '12': alerting_menu,
-        '13': lambda: (do_service_links(),  pause()),
+        '9':  lambda: (do_sync_all(),            pause()),
+        '10': lambda: (do_repair_node(),         pause()),
+        '11': lambda: (do_rejoin(),              pause()),
+        '12': lambda: (do_status(),              pause()),
+        '13': lambda: (check_infra_services(),   pause()),
+        '14': alerting_menu,
+        '15': lambda: (do_service_links(),       pause()),
     }
 
     while True:
