@@ -760,11 +760,11 @@ def do_repair_node():
 
 def do_rejoin():
     divider("REJOIN -- Full re-attach (reinstalls k3s-agent)")
-    # All nodes that should be in the cluster
-    all_nodes = [
-        ("k3s-worker-1", K3S_WORKER1_IP),
-        ("k3s-infra",    K3S_INFRA_IP),
-    ]
+    # k3s-infra is intentionally excluded — it hosts the monitoring stack
+    # (Prometheus, Grafana, Alertmanager, GitLab). Rejoining it restarts
+    # k3s-agent and evicts all pods on that node. Use Repair Node (option 10)
+    # for non-destructive infra agent fixes.
+    all_nodes = [("k3s-worker-1", K3S_WORKER1_IP)]
     vm_count = get_vm_count()
     for i in range(vm_count):
         wnum = i + 2
@@ -774,6 +774,7 @@ def do_rejoin():
     for name, ip in all_nodes:
         print(f"    {name}  ({ip})")
     print(f"\n  {y('NOTE: This reinstalls k3s-agent on each node.')}")
+    print(f"  {y('k3s-infra is excluded — use Repair Node (10) to fix infra agent.')}")
     print(f"  {y('Use Repair Node instead if you just need to fix a token/cert.')}")
     if input(f"\n{y('  Proceed? (y/n): ')}").lower() != 'y':
         print("  Cancelled."); return
