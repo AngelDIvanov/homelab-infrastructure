@@ -44,17 +44,30 @@ kubectl logs -n monitoring -l job-name=drift-manual -f
 
 ### Invalid token (`invalid token format` in agent logs)
 
+The token in the agent env file must match the **full** token from the control plane,
+including the `::server:<secret>` suffix. A common mistake is the token being stored
+without the suffix (e.g. set during initial provisioning before the server token was
+fully written).
+
 ```bash
 # Get the correct token from control plane
 ssh andy@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token
+# Expected format: K10<hash>::server:<secret>
 
-# Check what token the agent is using
+# Check what token the agent is using — compare carefully
 ssh andy@<node-ip> sudo cat /etc/systemd/system/k3s-agent.service.env
+# If it's missing ::server:<secret> that's the problem
 
 # Update the token on the node
-ssh andy@<node-ip> sudo sed -i "s|K3S_TOKEN=.*|K3S_TOKEN=<correct-token>|" /etc/systemd/system/k3s-agent.service.env
+CORRECT_TOKEN="<full token including ::server: suffix>"
+ssh andy@<node-ip> "sudo sed -i \"s|K3S_TOKEN=.*|K3S_TOKEN='${CORRECT_TOKEN}'|\" /etc/systemd/system/k3s-agent.service.env"
+ssh andy@<node-ip> sudo systemctl daemon-reload
 ssh andy@<node-ip> sudo systemctl restart k3s-agent
 ```
+
+**Root cause (2026-04-11):** k3s-worker-2 was provisioned with a truncated token —
+the `::server:` suffix was missing. Token must be copied in full from
+`/var/lib/rancher/k3s/server/node-token` on the control plane.
 
 ### Stale certificates (`certificate signed by unknown authority`)
 
