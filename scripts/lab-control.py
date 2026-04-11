@@ -659,6 +659,35 @@ def do_upscale():
     divider("Step 6b -- Scaling app replicas")
     run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas={total_workers}"')
     print(g(f"  scaled trengo-search to {total_workers} replicas"))
+
+    divider("Step 6c -- Verifying DaemonSet pods on new node")
+    # node-exporter must be running on the new node for it to appear in Grafana.
+    # If it's missing, the node will be invisible to Prometheus.
+    ds_check_cmd = (
+        f'sudo k3s kubectl get pods -A --no-headers '
+        f'--field-selector spec.nodeName={new_name} 2>/dev/null '
+        f'| grep -E "node-exporter|kube-proxy|calico|flannel"'
+    )
+    ok = False
+    for i in range(18):   # up to 3 minutes
+        res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "{ds_check_cmd}"', capture=True)
+        running = [l for l in res.stdout.splitlines() if "Running" in l]
+        pending = [l for l in res.stdout.splitlines() if "Running" not in l and l.strip()]
+        if running and not pending:
+            for l in running: print(g(f"  {l.split()[0]}/{l.split()[1]}  Running"))
+            ok = True; break
+        if running or pending:
+            all_pods = running + pending
+            for l in all_pods: print(f"  {l.split()[0]}/{l.split()[1]}  {l.split()[3] if len(l.split())>3 else '?'}")
+        print(f"  waiting for DaemonSet pods... [{i*10}/180s]")
+        time.sleep(10)
+    if not ok:
+        print(y(f"  WARNING: node-exporter may not be running on {new_name}."))
+        print(y(f"  The node may not appear in Grafana until the DaemonSet pod schedules."))
+        print(y(f"  Check: kubectl get pods -A --field-selector spec.nodeName={new_name}"))
+    else:
+        print(g(f"  DaemonSet pods confirmed on {new_name} — node will appear in Grafana"))
+
     print(f"\n{g('='*50)}\n{g(f'UPSCALE COMPLETE -- {new_name} ({new_ip})')}\n{g('='*50)}")
 
 def do_downscale():
