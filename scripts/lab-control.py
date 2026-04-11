@@ -255,16 +255,25 @@ def check_infra_services():
     import urllib.request
     print(c("\n  k3s-infra service health"))
     services = [
-        ("GitLab",       f"http://{K3S_INFRA_IP}:8929/-/health"),
+        ("GitLab",       f"http://{K3S_INFRA_IP}:8929/"),
         ("Prometheus",   f"http://{K3S_CONTROL_IP}:30090/-/healthy"),
         ("Alertmanager", f"http://{K3S_CONTROL_IP}:30093/-/healthy"),
-        ("Grafana",      f"http://{K3S_INFRA_IP}:30300/api/health"),
+        ("Grafana",      f"http://{K3S_INFRA_IP}:30080/api/health"),
     ]
     all_ok = True
     for name, url in services:
         try:
-            code = urllib.request.urlopen(url, timeout=5).getcode()
-            print(g(f"    {name:<14} UP   ({code})  {url}"))
+            # Don't follow redirects — a 302 from GitLab means it's up (login page)
+            req = urllib.request.Request(url)
+            try:
+                code = urllib.request.urlopen(req, timeout=5).getcode()
+            except urllib.error.HTTPError as e:
+                code = e.code
+            if code in (200, 302):
+                print(g(f"    {name:<14} UP   ({code})  {url}"))
+            else:
+                print(r(f"    {name:<14} DOWN ({code})  {url}"))
+                all_ok = False
         except Exception as e:
             print(r(f"    {name:<14} DOWN  {url}  — {e}"))
             all_ok = False
