@@ -69,6 +69,17 @@ ssh andy@<node-ip> sudo systemctl restart k3s-agent
 the `::server:` suffix was missing. Token must be copied in full from
 `/var/lib/rancher/k3s/server/node-token` on the control plane.
 
+**Also:** running `curl -sfL https://get.k3s.io | ... sh -s - agent` to upgrade k3s
+**wipes `/etc/systemd/system/k3s-agent.service.env`**, removing K3S_TOKEN and K3S_URL.
+Always restore the env file and restart the agent after an in-place upgrade:
+
+```bash
+TOKEN=$(ssh andy@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token)
+printf 'K3S_TOKEN=%s\nK3S_URL=https://192.168.122.218:6443\n' "$TOKEN" \
+  | sudo tee /etc/systemd/system/k3s-agent.service.env
+sudo systemctl daemon-reload && sudo systemctl restart k3s-agent
+```
+
 ### Stale certificates (`certificate signed by unknown authority`)
 
 ```bash
