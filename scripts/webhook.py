@@ -714,7 +714,7 @@ def close_issue(issue, alert, inc_num):
     gitlab_request('PUT', f"/issues/{issue['iid']}", {'state_event': 'close'})
     log.info(f"Closed issue #{issue['iid']} — INC-{inc_num}")
 
-def notify_firing(alert, inc_num, issue=None, remediation=None):
+def notify_firing(alert, inc_num, issue=None, remediation=None, repeat=False):
     severity   = alert['labels'].get('severity', 'info')
     alertname  = alert['labels'].get('alertname', 'Unknown')
     namespace  = alert['labels'].get('namespace', 'N/A')
@@ -740,6 +740,19 @@ def notify_firing(alert, inc_num, issue=None, remediation=None):
         header     = f"INFO | {alertname}"
         oncall     = ''
 
+    if repeat:
+        # Compact "still firing" reminder — no diagnosis, no spam
+        slack_send(webhook_url, {
+            'channel': channel,
+            'attachments': [{
+                'color': color,
+                'title': f":repeat: Still firing | {alertname}",
+                'text': f"*{summary}*\n{desc}" + (f"\n*Incident:* {issue.get('web_url', '')}" if issue else ''),
+                'footer': f'Homelab Alertmanager | {ALERTMANAGER_URL}',
+            }],
+        })
+        return
+
     lines = [
         f"*Summary:* {summary}",
         f"*Description:* {desc}",
@@ -758,9 +771,9 @@ def notify_firing(alert, inc_num, issue=None, remediation=None):
         'channel': channel,
         'attachments': [{
             'color': color, 'title': header,
-            'title_link': 'http://192.168.122.218:30090/alerts',
+            'title_link': f'{PROMETHEUS_URL}/alerts',
             'text': '\n'.join(lines),
-            'footer': 'Homelab Alertmanager | http://192.168.122.218:30093',
+            'footer': f'Homelab Alertmanager | {ALERTMANAGER_URL}',
         }],
     })
 
@@ -849,7 +862,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     else:
                         notify_firing(alert, inc_num, None, remediation)
                 else:
-                    log.info(f"Issue already exists for INC-{inc_num} — skipping")
+                    log.info(f"Issue already exists for INC-{inc_num} — sending repeat notification")
+                    notify_firing(alert, inc_num, existing, repeat=True)
 
             elif status == 'resolved':
                 issue = find_open_issue(inc_num) if severity == 'critical' else None
