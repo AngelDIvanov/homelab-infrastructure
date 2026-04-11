@@ -1,0 +1,55 @@
+---
+# ngrok tunnel — exposes alertmanager-webhook to the internet so Slack can reach it.
+#
+# Image: custom Alpine wrapper around the official ngrok binary.
+# Reason: ngrok/ngrok:latest is Nix-built and uses absolute symlinks (e.g.
+# /etc/passwd -> /nix/store/...) that containerd 2.2+ rejects with
+# "path escapes from parent". The wrapper copies just the static binary
+# into a clean Alpine base. Rebuild when ngrok releases a new version:
+#
+#   docker build -t <registry>/ngrok:<version> -f kubernetes/deployments/Dockerfile.ngrok .
+#   docker push <registry>/ngrok:<version>
+#   kubectl set image deployment/ngrok-webhook ngrok=<registry>/ngrok:<version> -n monitoring
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ngrok-webhook
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ngrok-webhook
+  template:
+    metadata:
+      labels:
+        app: ngrok-webhook
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k3s-infra
+      tolerations:
+        - key: node-role
+          operator: Equal
+          value: infra
+          effect: NoSchedule
+      containers:
+        - name: ngrok
+          image: 192.168.122.218:30500/ngrok:3.37.6
+          imagePullPolicy: IfNotPresent
+          args:
+            - http
+            - alertmanager-webhook.monitoring.svc.cluster.local:8080
+            - --log=stdout
+          env:
+            - name: NGROK_AUTHTOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ngrok-token
+                  key: token
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              memory: "128Mi"

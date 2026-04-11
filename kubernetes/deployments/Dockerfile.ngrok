@@ -1,0 +1,21 @@
+# Wrapper image: copies the ngrok static binary from the official Nix-built
+# image into a clean Alpine base.
+#
+# The official ngrok/ngrok image is built with Nix and uses absolute symlinks
+# (e.g. /etc/passwd -> /nix/store/...) that containerd 2.2+ rejects.
+# This wrapper avoids that by keeping only the binary in a standard filesystem.
+#
+# To update: find the new Nix store path for the binary inside the new image:
+#   docker create --name tmp ngrok/ngrok:latest
+#   docker export tmp | tar -t | grep 'ngrok-[0-9]*/bin/ngrok'
+#   docker rm tmp
+# Then update the COPY path and the image tag below.
+#
+# Build & push:
+#   docker build -t <registry>/ngrok:<version> -f Dockerfile.ngrok .
+#   docker push <registry>/ngrok:<version>
+
+FROM ngrok/ngrok:latest AS src
+FROM alpine:3.19
+COPY --from=src /nix/store/hylndpagbhv7gww08jnxdcb3k2kc945y-ngrok-3.37.6/bin/ngrok /usr/local/bin/ngrok
+ENTRYPOINT ["/usr/local/bin/ngrok"]
