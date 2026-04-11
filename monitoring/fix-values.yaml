@@ -28,6 +28,14 @@ prometheus:
         operator: Equal
         value: infra
         effect: NoSchedule
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
   service:
     type: NodePort
     nodePort: 30090
