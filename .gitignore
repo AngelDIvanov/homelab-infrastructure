@@ -10,6 +10,9 @@
 terraform/terraform.tfvars
 terraform-kubeadm/terraform.tfvars
 
+# Network config contains real IPs — use lab-network-config.example.yaml as a template
+kubernetes/monitoring/lab-network-config.yaml
+
 # Python
 __pycache__/
 *.pyc

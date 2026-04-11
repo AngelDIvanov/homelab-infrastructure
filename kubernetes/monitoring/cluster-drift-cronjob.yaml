@@ -58,16 +58,18 @@ data:
     import subprocess, json, urllib.request, sys, os, re
 
     SSH_KEY        = '/root/.ssh/id_rsa'
-    HYPERVISOR_IP  = os.environ.get('HYPERVISOR_IP', '192.168.122.1')
-    K3S_CONTROL_IP = os.environ.get('K3S_CONTROL_IP', '192.168.122.218')
+    HYPERVISOR_IP  = os.environ['HYPERVISOR_IP']
+    K3S_CONTROL_IP = os.environ['K3S_CONTROL_IP']
+    WORKER1_IP     = os.environ['WORKER1_IP']
+    INFRA_IP       = os.environ['INFRA_IP']
     WEBHOOK_URL    = os.environ.get('WEBHOOK_URL', 'http://alertmanager-webhook:8080/')
 
     # Static node definitions — name: {ip, role}
     # Dynamic Terraform workers are discovered from virsh automatically
     STATIC_NODES = {
-        'k3s-control':  {'ip': '192.168.122.218', 'role': 'control-plane'},
-        'k3s-worker-1': {'ip': '192.168.122.219', 'role': 'worker'},
-        'k3s-infra':    {'ip': '192.168.122.230', 'role': 'infra'},
+        'k3s-control':  {'ip': K3S_CONTROL_IP, 'role': 'control-plane'},
+        'k3s-worker-1': {'ip': WORKER1_IP,      'role': 'worker'},
+        'k3s-infra':    {'ip': INFRA_IP,         'role': 'infra'},
     }
 
     # Nodes that are allowed to be absent from the cluster (infra not a k3s worker per se)
@@ -141,8 +143,11 @@ data:
     for vm_name, state in virsh_states.items():
         if re.match(r'^k3s-worker-\d+$', vm_name) and vm_name not in expected_nodes:
             # Dynamic worker discovered from virsh (Terraform-managed)
-            octet = int(vm_name.split('-')[-1])
-            ip    = f'192.168.122.{219 + octet - 1}'   # worker-2→.221, worker-3→.222, etc
+            # IP derived from WORKER1_IP: worker-2 → worker1_octet+1, worker-3 → +2, etc.
+            octet      = int(vm_name.split('-')[-1])
+            base_octet = int(WORKER1_IP.split('.')[-1])
+            subnet     = '.'.join(WORKER1_IP.split('.')[:3])
+            ip         = f'{subnet}.{base_octet + octet - 1}'
             expected_nodes[vm_name] = {'ip': ip, 'role': 'worker'}
 
     # ── Check each expected node ──────────────────────────────────────────────
@@ -237,11 +242,10 @@ spec:
             - name: checker
               image: alpine:3.19
               command: ["sh", "-c", "apk add --no-cache openssh-client python3 > /dev/null 2>&1 && python3 /scripts/drift-check.py"]
+              envFrom:
+                - configMapRef:
+                    name: lab-network-config
               env:
-                - name: HYPERVISOR_IP
-                  value: "192.168.122.1"
-                - name: K3S_CONTROL_IP
-                  value: "192.168.122.218"
                 - name: WEBHOOK_URL
                   value: "http://alertmanager-webhook:8080/"
               volumeMounts:
