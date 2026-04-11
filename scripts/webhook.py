@@ -57,11 +57,13 @@ RUNBOOK_URLS = {
 }
 
 POSTMORTEM_URLS = {
-    'TrengoAppDown':      f'{WIKI_BASE}/post-mortems/PM-005-TrengoAppDown-Accidental-Scaling',
-    'NodeMemoryHigh':     f'{WIKI_BASE}/post-mortems/PM-003-CI-Runner-OOM',
-    'NodeMemoryCritical': f'{WIKI_BASE}/post-mortems/PM-003-CI-Runner-OOM',
-    'PodImagePullError':  f'{WIKI_BASE}/post-mortems/PM-002-Alertmanager-Trunc-Function',
-    'PodCrashLooping':    f'{WIKI_BASE}/post-mortems/PM-004-k3s-False-Positive-Storm',
+    'TrengoAppDown':                          f'{WIKI_BASE}/post-mortems/PM-005-TrengoAppDown-Accidental-Scaling',
+    'NodeMemoryHigh':                         f'{WIKI_BASE}/post-mortems/PM-003-CI-Runner-OOM',
+    'NodeMemoryCritical':                     f'{WIKI_BASE}/post-mortems/PM-003-CI-Runner-OOM',
+    'PodImagePullError':                      f'{WIKI_BASE}/post-mortems/PM-002-Alertmanager-Trunc-Function',
+    'PodCrashLooping':                        f'{WIKI_BASE}/post-mortems/PM-004-k3s-False-Positive-Storm',
+    'AlertmanagerClusterFailedToSendAlerts':  f'{WIKI_BASE}/post-mortems/PM-006-ngrok-containerd-2.2-symlink',
+    'AlertmanagerFailedToSendAlerts':         f'{WIKI_BASE}/post-mortems/PM-006-ngrok-containerd-2.2-symlink',
 }
 
 RUNBOOKS = {
