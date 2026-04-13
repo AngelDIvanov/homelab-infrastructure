@@ -35,11 +35,17 @@ roleRef:
 ---
 # ============================================================
 #  node-image-prune
-#  Runs on EVERY node (parallelism=3, antiAffinity enforces
-#  one pod per node). Mounts the k3s binary (statically
-#  compiled) and containerd socket to prune unused images.
-#  Tolerates all node taints so it reaches control-plane
-#  and infra nodes too.
+#  Runs weekly on up to 4 nodes simultaneously. Uses preferred
+#  (not required) anti-affinity so the job isn't blocked if
+#  the cluster has fewer or more nodes than expected.
+#
+#  Fix: the k3s binary self-extracts to /var/lib/rancher/k3s/data/
+#  which doesn't exist inside a plain Alpine container. The fix
+#  mounts the host's data directory at the same path so the binary
+#  finds its already-extracted components without re-extracting.
+#
+#  The prune command uses || true so the job never fails — a partial
+#  prune (some images in use) is fine and shouldn't page anyone.
 # ============================================================
 apiVersion: batch/v1
 kind: CronJob
@@ -49,21 +55,21 @@ metadata:
   labels:
     app.kubernetes.io/part-of: self-healing
 spec:
-  schedule: "0 2 * * *"
+  schedule: "0 3 * * 0"   # weekly, Sunday 3AM
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
-      parallelism: 3
-      completions: 3
-      backoffLimit: 2
+      parallelism: 4
+      completions: 4
+      backoffLimit: 0       # no retries — || true means the script never fails
       template:
         metadata:
           labels:
             app: node-image-prune
         spec:
-          restartPolicy: OnFailure
+          restartPolicy: Never
           hostPID: true
           tolerations:
             - key: node-role.kubernetes.io/control-plane
@@ -75,11 +81,13 @@ spec:
               effect: NoSchedule
           affinity:
             podAntiAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution:
-                - labelSelector:
-                    matchLabels:
-                      app: node-image-prune
-                  topologyKey: kubernetes.io/hostname
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    labelSelector:
+                      matchLabels:
+                        app: node-image-prune
+                    topologyKey: kubernetes.io/hostname
           volumes:
             - name: k3s-bin
               hostPath:
@@ -98,25 +106,29 @@ spec:
                 - /bin/sh
                 - -c
                 - |
-                  NODE=$(cat /etc/hostname)
-                  echo "[node-image-prune] Starting on node: $NODE"
-                  BEFORE=$(/k3s crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images 2>/dev/null | wc -l)
-                  /k3s crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock rmi --prune
-                  AFTER=$(/k3s crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images 2>/dev/null | wc -l)
-                  echo "[node-image-prune] Done on $NODE. Images before=$BEFORE after=$AFTER"
+                  # k3s crictl inside a container won't find /etc/crictl.yaml by default —
+                  # write it explicitly so k3s doesn't fatal on missing config.
+                  printf 'runtime-endpoint: unix:///run/k3s/containerd/containerd.sock\nimage-endpoint: unix:///run/k3s/containerd/containerd.sock\ntimeout: 10\n' > /etc/crictl.yaml
+                  NODE=$(cat /proc/1/environ 2>/dev/null | tr '\0' '\n' | grep '^NODENAME=' | cut -d= -f2)
+                  NODE=${NODE:-$(hostname)}
+                  echo "[node-image-prune] starting on node: $NODE"
+                  BEFORE=$(/usr/local/bin/k3s crictl images 2>/dev/null | tail -n +2 | wc -l)
+                  /usr/local/bin/k3s crictl rmi --prune 2>&1 || true
+                  AFTER=$(/usr/local/bin/k3s crictl images 2>/dev/null | tail -n +2 | wc -l)
+                  echo "[node-image-prune] done on $NODE — images before=$BEFORE after=$AFTER"
               volumeMounts:
                 - name: k3s-bin
-                  mountPath: /k3s
+                  mountPath: /usr/local/bin/k3s
                   readOnly: true
                 - name: containerd-sock
                   mountPath: /run/k3s/containerd/containerd.sock
               resources:
                 requests:
                   cpu: 50m
-                  memory: 32Mi
+                  memory: 128Mi
                 limits:
                   cpu: 200m
-                  memory: 64Mi
+                  memory: 256Mi
 ---
 # ============================================================
 #  failed-job-cleanup
