@@ -27,6 +27,7 @@ SLACK_INCIDENTS      = os.environ.get('SLACK_INCIDENTS',      '#incidents')
 SLACK_CRITICAL_URL = os.environ.get('SLACK_CRITICAL_URL', '')
 SLACK_WARNING_URL  = os.environ.get('SLACK_WARNING_URL',  '')
 SLACK_INFO_URL     = os.environ.get('SLACK_INFO_URL',     '')
+ALERTMANAGER_URL   = os.environ.get('ALERTMANAGER_URL',   f'http://{K3S_CONTROL_IP}:30093')
 
 SLACK_CRITICAL_CHANNEL = '#incidents'
 SLACK_WARNING_CHANNEL  = '#incidents'
