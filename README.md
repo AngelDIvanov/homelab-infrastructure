@@ -279,7 +279,7 @@ Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge
 
 ## Runbooks
 
-13 runbooks in `docs/runbooks/` covering every alert category:
+14 runbooks in `docs/runbooks/` covering every alert category:
 
 | Category | Runbooks |
 |---|---|
@@ -287,7 +287,7 @@ Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge
 | Nodes | Worker not ready, memory pressure, disk full |
 | Storage | NFS server down, PVC pending |
 | Applications | Pod crashloop, image pull error, registry down, Trengo app down, secret rotation |
-| Monitoring | Monitoring stack down |
+| Monitoring | Monitoring stack down, webhook receiver down |
 | Disaster recovery | Full cluster recovery (RTO ~2h, RPO ≤24h) |
 
 Each runbook includes: symptoms, immediate triage steps, root cause checklist, resolution steps, and a verification procedure.
