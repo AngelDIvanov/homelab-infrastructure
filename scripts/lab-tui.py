@@ -54,8 +54,8 @@ K3S_TOKEN = _get_secret("K3S_TOKEN", "homelab-k3s-token")
 BASE_IP_OCTET  = 221
 SSH_OPTS       = "-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no"
 
-# All VMs we care about
-ALL_VMS = ["k3s-control", "k3s-worker-1", "k3s-worker-2", "ci-runner", "crc"]
+# Static VMs — workers are discovered dynamically from virsh
+STATIC_VMS = ["k3s-control", "ci-runner", "crc"]
 
 # Services to check
 SERVICES = [
@@ -76,11 +76,17 @@ def run_cmd(cmd):
 def vm_states():
     _, out, _ = run_cmd("virsh list --all 2>/dev/null")
     running = set()
+    all_defined = []
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) >= 3 and parts[2] == "running":
-            running.add(parts[1])
-    return {vm: vm in running for vm in ALL_VMS}
+        if len(parts) >= 2 and parts[0].lstrip("-").isdigit() or (len(parts) >= 2 and parts[0] == "-"):
+            name = parts[1] if parts[0] == "-" else parts[1]
+            all_defined.append(name)
+            if len(parts) >= 3 and parts[2] == "running":
+                running.add(name)
+    workers = sorted(vm for vm in all_defined if vm.startswith("k3s-worker-"))
+    vms = ["k3s-control"] + workers + ["ci-runner", "crc"]
+    return {vm: vm in running for vm in vms}
 
 def service_states():
     """Return dict of {name: bool} — True = reachable."""
@@ -180,7 +186,7 @@ class StatusPanel(Static):
             lines.append("  [dim]Loading...[/dim]")
         else:
             row = []
-            for vm in ALL_VMS:
+            for vm in self.vm_data:
                 on = self.vm_data.get(vm, False)
                 icon = "[UP]" if on else "[DOWN]"
                 row.append(f"{icon} [bold]{vm}[/bold]")
