@@ -117,6 +117,7 @@ def _ssh(host, cmd, timeout=30):
     try:
         r = subprocess.run(
             ['ssh', '-i', SSH_KEY, '-o', 'StrictHostKeyChecking=no',
+             '-o', 'UserKnownHostsFile=/dev/null',
              '-o', 'ConnectTimeout=10', f'{SSH_USER}@{host}', cmd],
             capture_output=True, text=True, timeout=timeout,
         )
@@ -166,6 +167,11 @@ def gather_state():
 
     nodes = ssh_kube('get nodes -o wide')
     out.append(f"=== NODES ===\n{nodes}")
+
+    # Deployments — surfaces zero-replica and unavailable deployments explicitly
+    deployments = ssh_kube('get deployments -A -o wide 2>/dev/null')
+    if deployments and '(no output)' not in deployments:
+        out.append(f"=== DEPLOYMENTS ===\n{deployments}")
 
     unhealthy = ssh_kube(
         "get pods -A --no-headers 2>/dev/null | grep -vE '(Running|Completed|Succeeded)'"
@@ -251,6 +257,10 @@ def call_claude(user_msg, state):
         "MINIMAL COMMANDS ONLY — only include commands that directly fix the reported issue. "
         "Do NOT read private keys, tokens, secrets, or credential files under any circumstances. "
         "Do NOT run kubectl get/describe secret. "
+        "ZERO REPLICA DEPLOYMENTS: if the DEPLOYMENTS section shows a deployment with 0 desired "
+        "replicas (e.g. '0/0' or 'DESIRED: 0'), that deployment has been manually scaled to zero. "
+        "The fix is: kubectl scale deployment/<name> -n <namespace> --replicas=1 "
+        "Do NOT use rollout restart for a zero-replica deployment — it does nothing. "
         "Do NOT rebuild docker images or run kubectl rollout restart unless the alert is about "
         "an image pull error or a crashlooping deployment — a node being down or a drift issue "
         "does NOT require rebuilding images. "
