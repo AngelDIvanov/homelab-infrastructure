@@ -8,51 +8,49 @@ data:
   webhook.py: |
     #!/usr/bin/env python3
     # Alertmanager webhook → GitLab issues + Slack /lab AI diagnosis command
-
+    
     from http.server import HTTPServer, BaseHTTPRequestHandler
     import json, urllib.request, urllib.error, urllib.parse
     import os, hashlib, hmac, logging, subprocess, threading, time, uuid, re, shlex
-
+    
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     log = logging.getLogger(__name__)
-
+    
     # ── Config ────────────────────────────────────────────────────────────────────
-    GITLAB_URL        = os.environ['GITLAB_URL']
+    GITLAB_URL        = os.environ.get('GITLAB_URL',        'http://192.168.122.230:8929')
     GITLAB_TOKEN      = os.environ.get('GITLAB_TOKEN',      '')
     GITLAB_PROJECT_ID = os.environ.get('GITLAB_PROJECT_ID', '1')
     SSH_KEY           = os.environ.get('SSH_KEY',           '/root/.ssh/id_rsa')
     SSH_USER          = os.environ.get('SSH_USER',          'andy')
-    K3S_CONTROL_IP    = os.environ['K3S_CONTROL_IP']
-    WORKER1_IP        = os.environ['WORKER1_IP']
-    INFRA_IP          = os.environ['INFRA_IP']
-    HYPERVISOR_IP     = os.environ['HYPERVISOR_IP']
-    REGISTRY_URL      = os.environ['REGISTRY_URL']
-    PROMETHEUS_URL    = os.environ.get('PROMETHEUS_URL',    '')
-    ALERTMANAGER_URL  = os.environ.get('ALERTMANAGER_URL',  '')
-
+    K3S_CONTROL_IP    = os.environ.get('K3S_CONTROL_IP',    '192.168.122.218')
+    HYPERVISOR_IP     = os.environ.get('HYPERVISOR_IP',     '192.168.122.1')
+    REGISTRY_URL      = os.environ.get('REGISTRY_URL',      'http://192.168.122.218:30500')
+    
     ANTHROPIC_API_KEY    = os.environ.get('ANTHROPIC_API_KEY',    '')
     ANTHROPIC_MODEL      = os.environ.get('ANTHROPIC_MODEL',      'claude-sonnet-4-6')
     SLACK_BOT_TOKEN      = os.environ.get('SLACK_BOT_TOKEN',      '')
     SLACK_SIGNING_SECRET = os.environ.get('SLACK_SIGNING_SECRET', '')
     SLACK_INCIDENTS      = os.environ.get('SLACK_INCIDENTS',      '#incidents')
-
+    
     SLACK_CRITICAL_URL = os.environ.get('SLACK_CRITICAL_URL', '')
     SLACK_WARNING_URL  = os.environ.get('SLACK_WARNING_URL',  '')
     SLACK_INFO_URL     = os.environ.get('SLACK_INFO_URL',     '')
-
+    
     SLACK_CRITICAL_CHANNEL = '#incidents'
     SLACK_WARNING_CHANNEL  = '#incidents'
     SLACK_INFO_CHANNEL     = '#all-homelab-alerts'
     ONCALL = '<!here>'
-
+    
     SEVERITY_LABELS = {
         'critical': ['incident', 'critical', 'bug'],
         'warning':  ['incident', 'warning'],
         'info':     ['incident', 'info'],
     }
-
-    WIKI_BASE = f'{GITLAB_URL}/root/homelab-infrastructure/-/wikis'
-
+    
+    WIKI_BASE = 'http://192.168.122.230:8929/root/homelab-infrastructure/-/wikis'
+    
+    GITHUB_RUNBOOKS = 'https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks'
+    
     RUNBOOK_URLS = {
         'TrengoAppDown':     f'{WIKI_BASE}/runbooks/TrengoAppDown',
         'TrengoAppDegraded': f'{WIKI_BASE}/runbooks/TrengoAppDegraded',
@@ -61,55 +59,73 @@ data:
         'NodeDiskHigh':      f'{WIKI_BASE}/runbooks/NodeDiskHigh',
         'PodCrashLooping':   f'{WIKI_BASE}/runbooks/PodCrashLooping',
         'PodImagePullError': f'{WIKI_BASE}/runbooks/PodImagePullError',
+        'ClusterDrift':      f'{GITHUB_RUNBOOKS}/nodes/cluster-drift.md',
+        'K3sWorkerNodeDown': f'{GITHUB_RUNBOOKS}/nodes/worker-node-not-ready.md',
+        'LocalRegistryDown': f'{GITHUB_RUNBOOKS}/applications/registry-down.md',
     }
-
+    
     POSTMORTEM_URLS = {
-        'TrengoAppDown':      f'{WIKI_BASE}/post-mortems/PM-005-TrengoAppDown-Accidental-Scaling',
-        'NodeMemoryHigh':     f'{WIKI_BASE}/post-mortems/PM-003-CI-Runner-OOM',
-        'NodeMemoryCritical': f'{WIKI_BASE}/post-mortems/PM-003-CI-Runner-OOM',
-        'PodImagePullError':  f'{WIKI_BASE}/post-mortems/PM-002-Alertmanager-Trunc-Function',
-        'PodCrashLooping':    f'{WIKI_BASE}/post-mortems/PM-004-k3s-False-Positive-Storm',
+        'TrengoAppDown':                          f'{WIKI_BASE}/post-mortems/PM-005-TrengoAppDown-Accidental-Scaling',
+        'NodeMemoryHigh':                         f'{WIKI_BASE}/post-mortems/PM-003-CI-Runner-OOM',
+        'NodeMemoryCritical':                     f'{WIKI_BASE}/post-mortems/PM-003-CI-Runner-OOM',
+        'PodImagePullError':                      f'{WIKI_BASE}/post-mortems/PM-002-Alertmanager-Trunc-Function',
+        'PodCrashLooping':                        f'{WIKI_BASE}/post-mortems/PM-004-k3s-False-Positive-Storm',
+        'AlertmanagerClusterFailedToSendAlerts':  f'{WIKI_BASE}/post-mortems/PM-006-ngrok-containerd-2.2-symlink',
+        'AlertmanagerFailedToSendAlerts':         f'{WIKI_BASE}/post-mortems/PM-006-ngrok-containerd-2.2-symlink',
     }
-
+    
     RUNBOOKS = {
         'NodeMemoryCritical': [
             {
-                'instance_contains': INFRA_IP,
-                'host': INFRA_IP,
+                'instance_contains': '192.168.122.230',
+                'host': '192.168.122.230',
                 'cmd': 'sudo pkill -f stress-ng 2>/dev/null; sudo gitlab-ctl restart',
                 'description': 'Killed stress-ng and restarted GitLab on k3s-infra.',
+            },
+            {
+                'instance_contains': '192.168.122.220',
+                'host': '192.168.122.220',
+                'cmd': 'sudo pkill -f stress-ng 2>/dev/null; sudo gitlab-runner restart',
+                'description': 'Killed stress-ng and restarted GitLab runner on ci-runner.',
             },
         ],
         'NodeDiskHigh': [
             {
-                'instance_contains': K3S_CONTROL_IP,
-                'host': K3S_CONTROL_IP,
+                'instance_contains': '192.168.122.218',
+                'host': '192.168.122.218',
                 'cmd': 'sudo k3s crictl rmi --prune',
                 'description': 'Pruned unused container images on k3s-control.',
             },
             {
-                'instance_contains': WORKER1_IP,
-                'host': WORKER1_IP,
+                'instance_contains': '192.168.122.219',
+                'host': '192.168.122.219',
                 'cmd': 'sudo k3s crictl rmi --prune',
                 'description': 'Pruned unused container images on k3s-worker-1.',
             },
             {
-                'instance_contains': INFRA_IP,
-                'host': INFRA_IP,
+                'instance_contains': '192.168.122.221',
+                'host': '192.168.122.221',
+                'cmd': 'sudo k3s crictl rmi --prune',
+                'description': 'Pruned unused container images on k3s-worker-2.',
+            },
+            {
+                'instance_contains': '192.168.122.230',
+                'host': '192.168.122.230',
                 'cmd': 'sudo k3s crictl rmi --prune',
                 'description': 'Pruned unused container images on k3s-infra.',
             },
         ],
     }
-
+    
     # ── Pending /lab approvals (in-memory) ───────────────────────────────────────
     pending = {}   # token → {commands, response_url}
-
+    
     # ── SSH helpers ───────────────────────────────────────────────────────────────
     def _ssh(host, cmd, timeout=30):
         try:
             r = subprocess.run(
                 ['ssh', '-i', SSH_KEY, '-o', 'StrictHostKeyChecking=no',
+                 '-o', 'UserKnownHostsFile=/dev/null',
                  '-o', 'ConnectTimeout=10', f'{SSH_USER}@{host}', cmd],
                 capture_output=True, text=True, timeout=timeout,
             )
@@ -118,21 +134,27 @@ data:
             return '(timeout)'
         except Exception as e:
             return f'(error: {e})'
-
+    
     def ssh_kube(args, timeout=20):
         return _ssh(K3S_CONTROL_IP, f'sudo k3s kubectl {args}', timeout)
-
+    
     def dispatch_cmd(cmd, timeout=60):
         """Route an approved command to the correct host."""
         c = cmd.strip()
         if re.match(r'^virsh\b', c):
+            # virsh lives on the hypervisor host, not inside any VM
             return _ssh(HYPERVISOR_IP, c, timeout=timeout)
-        if re.match(r'^docker\b', c):
-            return _ssh(HYPERVISOR_IP, c, timeout=120)
         if re.match(r'^(sudo\s+)?kubectl\b', c):
+            # kubectl as andy on k3s-control can't read k3s.yaml — use sudo k3s kubectl
             kubectl_args = re.sub(r'^(sudo\s+)?kubectl\s+', '', c)
             return _ssh(K3S_CONTROL_IP, f'sudo k3s kubectl {kubectl_args}', timeout=timeout)
+        if re.match(r'^docker\b', c):
+            # docker build/push runs on the hypervisor where source code lives
+            return _ssh(HYPERVISOR_IP, c, timeout=120)
         if re.match(r'^ssh\b', c):
+            # Run SSH directly from the webhook pod — it has the homelab@ansible key
+            # that is authorized on all nodes. Routing through k3s-control would use
+            # andy's key there, which may not match.
             c_fixed = re.sub(
                 r'^ssh\b',
                 f'ssh -i {SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null',
@@ -146,33 +168,38 @@ data:
             except Exception as e:
                 return f'(error: {e})'
         return _ssh(K3S_CONTROL_IP, c, timeout=timeout)
-
+    
     # ── Cluster state gathering ───────────────────────────────────────────────────
     def gather_state():
         out = []
-
+    
         nodes = ssh_kube('get nodes -o wide')
         out.append(f"=== NODES ===\n{nodes}")
-
+    
+        # Deployments — surfaces zero-replica and unavailable deployments explicitly
+        deployments = ssh_kube('get deployments -A -o wide 2>/dev/null')
+        if deployments and '(no output)' not in deployments:
+            out.append(f"=== DEPLOYMENTS ===\n{deployments}")
+    
         unhealthy = ssh_kube(
             "get pods -A --no-headers 2>/dev/null | grep -vE '(Running|Completed|Succeeded)'"
         )
         if unhealthy and '(no output)' not in unhealthy:
             out.append(f"=== UNHEALTHY PODS ===\n{unhealthy}")
-
+    
         warnings = ssh_kube(
             "get events -A --field-selector=type=Warning "
             "--sort-by='.lastTimestamp' 2>/dev/null | tail -15"
         )
         if warnings and '(no output)' not in warnings:
             out.append(f"=== RECENT WARNINGS ===\n{warnings}")
-
+    
         jobs = ssh_kube(
             "get jobs -A --no-headers 2>/dev/null | grep -v ' 1/1 '"
         )
         if jobs and '(no output)' not in jobs:
             out.append(f"=== FAILED/INCOMPLETE JOBS ===\n{jobs}")
-
+    
         first_bad = ssh_kube(
             "get pods -A --no-headers 2>/dev/null "
             "| grep -vE '(Running|Completed|Succeeded)' | head -1"
@@ -187,7 +214,7 @@ data:
                 )
                 if logs and '(no output)' not in logs:
                     out.append(f"=== LOGS ({ns}/{pod}) ===\n{logs}")
-
+    
         try:
             with urllib.request.urlopen(f'{REGISTRY_URL}/v2/_catalog', timeout=5) as resp:
                 catalog = json.loads(resp.read()).get('repositories', [])
@@ -195,31 +222,38 @@ data:
                            (', '.join(catalog) if catalog else '(empty — all images missing)'))
         except Exception as e:
             out.append(f"=== LOCAL REGISTRY ===\n(unreachable: {e})")
-
+    
         return '\n\n'.join(out)
-
+    
     # ── Claude API ────────────────────────────────────────────────────────────────
     def call_claude(user_msg, state):
         if not ANTHROPIC_API_KEY:
             return 'ANTHROPIC_API_KEY not set — cannot call Claude.'
-
-        registry_host = REGISTRY_URL.replace('http://', '').replace('https://', '')
+    
         system = (
             "You are an SRE assistant for a homelab k3s cluster. "
-            f"Nodes: k3s-control ({K3S_CONTROL_IP}), k3s-worker-1 ({WORKER1_IP}), "
-            f"k3s-infra ({INFRA_IP} — GitLab CE + Prometheus/Grafana/Loki/Alertmanager). "
+            "Nodes: k3s-control (.218), k3s-worker-1 (.219), k3s-worker-2 (.221), "
+            "k3s-infra (.230 — GitLab CE + Prometheus/Grafana/Loki/Alertmanager). "
+            "WORKER NODES: both k3s-worker-1 (.219) AND k3s-worker-2 (.221) run workloads. "
+            "When a worker node is down, check BOTH virsh list --all and kubectl get nodes "
+            "to identify which one. Use the correct IP when SSHing. "
+            "To restart k3s-agent: ssh andy@<correct-ip> sudo systemctl restart k3s-agent. "
+            "CLUSTER DRIFT: if a VM is running but not in the cluster, common causes are: "
+            "1) invalid token — check /etc/systemd/system/k3s-agent.service.env on the node, "
+            "compare K3S_TOKEN with: ssh andy@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token "
+            "2) stale certs — fix with: ssh andy@<ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt && sudo systemctl restart k3s-agent "
             "COMMAND ROUTING (handled automatically — just write the command): "
-            f"- virsh commands → hypervisor host ({HYPERVISOR_IP}). "
-            f"- docker commands → hypervisor host ({HYPERVISOR_IP}) where source code lives. "
+            "- virsh commands → hypervisor host (192.168.122.1). "
+            "- docker commands → hypervisor host (192.168.122.1) where source code lives. "
             "- kubectl commands → k3s-control with sudo. "
             "- ssh commands → direct from webhook pod with key injected. "
-            f"LOCAL REGISTRY: {registry_host} (unauthenticated, NFS-backed PVC — images persist across pod restarts). "
-            f"APP SOURCE PATHS ON HYPERVISOR ({HYPERVISOR_IP}): "
-            f"  pylab       → /home/andy/pylab/       → {registry_host}/pylab:latest "
-            f"  trengo-search → /home/andy/trengo-search/ → {registry_host}/trengo-search:latest "
+            "LOCAL REGISTRY: 192.168.122.218:30500 (unauthenticated, NFS-backed PVC — images persist across pod restarts). "
+            "APP SOURCE PATHS ON HYPERVISOR (192.168.122.1): "
+            "  pylab       → /home/andy/pylab/       → 192.168.122.218:30500/pylab:latest "
+            "  trengo-search → /home/andy/trengo-search/ → 192.168.122.218:30500/trengo-search:latest "
             "If the registry is empty or an image is missing, rebuild with: "
-            f"  docker build -t {registry_host}/<app>:latest /home/andy/<app>/ "
-            f"  docker push {registry_host}/<app>:latest "
+            "  docker build -t 192.168.122.218:30500/<app>:latest /home/andy/<app>/ "
+            "  docker push 192.168.122.218:30500/<app>:latest "
             "Analyze the cluster state, then respond with: "
             "1) Brief diagnosis (2-3 sentences). "
             "2) Root cause. "
@@ -228,18 +262,29 @@ data:
             "Only use kubectl, k3s, ssh, virsh, or docker commands. "
             "One command per line. No shell variables, no pipes, no conditionals, no comments inside the block. "
             "Put all explanations outside the block. "
-            "For destructive commands add a WARNING line before the block. "
+            "MINIMAL COMMANDS ONLY — only include commands that directly fix the reported issue. "
+            "Do NOT read private keys, tokens, secrets, or credential files under any circumstances. "
+            "Do NOT run kubectl get/describe secret. "
+            "ZERO REPLICA DEPLOYMENTS: if the DEPLOYMENTS section shows a deployment with 0 desired "
+            "replicas (e.g. '0/0' or 'DESIRED: 0'), that deployment has been manually scaled to zero. "
+            "The fix is: kubectl scale deployment/<name> -n <namespace> --replicas=1 "
+            "Do NOT use rollout restart for a zero-replica deployment — it does nothing. "
+            "Do NOT rebuild docker images or run kubectl rollout restart unless the alert is about "
+            "an image pull error or a crashlooping deployment — a node being down or a drift issue "
+            "does NOT require rebuilding images. "
+            "Do NOT delete jobs or pods unless they are the direct cause of the alert. "
             "To start a down VM: virsh start <node-name> "
-            "To restart k3s agent: ssh andy@<ip> sudo systemctl restart k3s-agent"
+            "To restart k3s agent: ssh andy@<ip> sudo systemctl restart k3s-agent "
+            "For cluster drift (VM running but not in cluster): check agent logs, restart agent first. "
         )
-
+    
         payload = json.dumps({
             "model": ANTHROPIC_MODEL,
             "max_tokens": 1024,
             "system": system,
             "messages": [{"role": "user", "content": f"{user_msg}\n\nCluster state:\n{state}"}],
         }).encode()
-
+    
         req = urllib.request.Request(
             "https://api.anthropic.com/v1/messages",
             data=payload,
@@ -256,25 +301,44 @@ data:
         except Exception as e:
             log.error(f"Claude API error: {e}")
             return f"Claude API error: {e}"
-
+    
     # ── Parse safe commands from Claude response ──────────────────────────────────
     _SAFE_CMD = re.compile(r'^(sudo\s+)?(kubectl|k3s|ssh|virsh|docker)\b')
-
+    
+    # Block commands that read sensitive files or perform destructive ops
+    _BLOCKED_PATTERNS = [
+        re.compile(r'id_rsa|id_ed25519|\.pem|\.key|node-token|service\.env', re.IGNORECASE),
+        re.compile(r'(cat|less|more|head|tail|tee)\s+.*(secret|token|password|passwd|shadow)', re.IGNORECASE),
+        re.compile(r'kubectl\s+(get|describe)\s+secret', re.IGNORECASE),
+        re.compile(r'rm\s+-rf\s+/'),
+        re.compile(r'kubectl\s+delete\s+(job|pod)\s+.*drift-test'),  # cleanup of old test artifacts
+    ]
+    
     def parse_commands(text):
         commands = []
         for block in re.findall(r'```(?:bash|sh|shell)?\n(.*?)```', text, re.DOTALL):
             for line in block.splitlines():
                 line = line.strip()
-                if line and not line.startswith('#') and _SAFE_CMD.match(line):
-                    commands.append(line)
+                if not line or line.startswith('#'):
+                    continue
+                if not _SAFE_CMD.match(line):
+                    continue
+                if any(p.search(line) for p in _BLOCKED_PATTERNS):
+                    log.warning(f"Blocked sensitive/dangerous command: {line}")
+                    continue
+                commands.append(line)
         return commands
-
+    
     # ── Slack Bot API helpers ─────────────────────────────────────────────────────
-    def slack_post(channel, blocks, text=''):
+    def slack_post(channel, blocks, text='', thread_ts=None):
+        """Post a message; returns the message ts (for threading) or None."""
         if not SLACK_BOT_TOKEN:
             log.warning("SLACK_BOT_TOKEN not set — skipping interactive post")
-            return
-        body = json.dumps({"channel": channel, "text": text, "blocks": blocks}).encode()
+            return None
+        payload = {"channel": channel, "text": text, "blocks": blocks}
+        if thread_ts:
+            payload["thread_ts"] = thread_ts
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             "https://slack.com/api/chat.postMessage",
             data=body,
@@ -289,9 +353,22 @@ data:
                 r = json.loads(resp.read())
                 if not r.get('ok'):
                     log.error(f"Slack API error: {r.get('error')}")
+                    return None
+                return r.get('ts')
         except Exception as e:
             log.error(f"Slack post failed: {e}")
-
+            return None
+    
+    def _short_summary(diagnosis):
+        """Extract first 2 sentences (≤ 280 chars) from diagnosis for compact view."""
+        text = diagnosis.strip()
+        # Try to grab up to 2 sentence-ending lines or 280 chars, whichever comes first
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        summary = ' '.join(sentences[:2])
+        if len(summary) > 280:
+            summary = summary[:277] + '…'
+        return summary
+    
     def slack_respond(url, text, replace=True):
         body = json.dumps({"text": text, "replace_original": replace}).encode()
         req = urllib.request.Request(
@@ -303,7 +380,7 @@ data:
             urllib.request.urlopen(req, timeout=10)
         except Exception as e:
             log.error(f"Slack response_url failed: {e}")
-
+    
     def slack_send(webhook_url, payload):
         if not webhook_url:
             log.warning("Slack webhook URL not configured — skipping")
@@ -316,7 +393,7 @@ data:
                 log.info(f"Slack notification sent: {resp.status}")
         except Exception as e:
             log.error(f"Slack error: {e}")
-
+    
     # ── Slack signature verification ──────────────────────────────────────────────
     def verify_slack(headers, body_bytes):
         if not SLACK_SIGNING_SECRET:
@@ -335,35 +412,33 @@ data:
             SLACK_SIGNING_SECRET.encode(), base.encode(), hashlib.sha256
         ).hexdigest()
         return hmac.compare_digest(expected, sig)
-
+    
     # ── /lab slash command handler ────────────────────────────────────────────────
     def handle_lab(body_bytes):
         params   = dict(urllib.parse.parse_qsl(body_bytes.decode()))
         user_msg = params.get('text', '').strip() or 'diagnose the cluster'
         resp_url = params.get('response_url', '')
-
+    
         def run():
             state     = gather_state()
             diagnosis = call_claude(user_msg, state)
             commands  = parse_commands(diagnosis)
-
+    
             token = str(uuid.uuid4())
             pending[token] = {"commands": commands, "response_url": resp_url}
-
-            short  = diagnosis[:2800] + '…' if len(diagnosis) > 2800 else diagnosis
+    
+            short = _short_summary(diagnosis)
+    
+            # Compact main message
             blocks = [
                 {"type": "header",
                  "text": {"type": "plain_text", "text": ":robot_face:  Claude Diagnosis"}},
                 {"type": "section",
                  "text": {"type": "mrkdwn", "text": short}},
             ]
-
+    
             if commands:
-                cmd_text = '\n'.join(f'`{c}`' for c in commands)
                 blocks += [
-                    {"type": "divider"},
-                    {"type": "section",
-                     "text": {"type": "mrkdwn", "text": f"*Suggested commands:*\n{cmd_text}"}},
                     {"type": "actions",
                      "elements": [
                          {"type": "button",
@@ -383,15 +458,31 @@ data:
                     "type": "section",
                     "text": {"type": "mrkdwn", "text": "_No executable commands identified._"},
                 })
-
-            slack_post(SLACK_INCIDENTS, blocks, text="Claude cluster diagnosis")
-
+    
+            ts = slack_post(SLACK_INCIDENTS, blocks, text="Claude cluster diagnosis")
+    
+            # Full diagnosis + commands in thread
+            if ts:
+                full = diagnosis[:2900] + '…' if len(diagnosis) > 2900 else diagnosis
+                thread_blocks = [
+                    {"type": "section",
+                     "text": {"type": "mrkdwn", "text": full}},
+                ]
+                if commands:
+                    cmd_text = '\n'.join(f'`{c}`' for c in commands)
+                    thread_blocks.append({
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f"*Suggested commands:*\n{cmd_text}"},
+                    })
+                slack_post(SLACK_INCIDENTS, thread_blocks,
+                           text="Full diagnosis", thread_ts=ts)
+    
         threading.Thread(target=run, daemon=True).start()
         return json.dumps({
             "response_type": "ephemeral",
             "text": ":mag: Gathering cluster state — results in #incidents shortly…",
         }).encode()
-
+    
     # ── Auto Claude diagnosis on alert fire ───────────────────────────────────────
     def post_diagnosis(alert):
         alertname = alert['labels'].get('alertname', 'Unknown')
@@ -399,7 +490,7 @@ data:
         namespace = alert['labels'].get('namespace', 'N/A')
         summary   = alert['annotations'].get('summary', alertname)
         desc      = alert['annotations'].get('description', '')
-
+    
         def run():
             state    = gather_state()
             user_msg = (
@@ -409,24 +500,23 @@ data:
             )
             diagnosis = call_claude(user_msg, state)
             commands  = parse_commands(diagnosis)
-
+    
             token = str(uuid.uuid4())
             pending[token] = {"commands": commands, "response_url": "", "channel": SLACK_INCIDENTS}
-
-            short  = diagnosis[:2800] + '…' if len(diagnosis) > 2800 else diagnosis
+    
+            short = _short_summary(diagnosis)
+            cmd_count = f" · {len(commands)} command(s) ready" if commands else ""
+    
+            # Compact main message — just summary + buttons
             blocks = [
                 {"type": "header",
                  "text": {"type": "plain_text", "text": f":robot_face:  Claude Diagnosis — {alertname}"}},
                 {"type": "section",
                  "text": {"type": "mrkdwn", "text": short}},
             ]
-
+    
             if commands:
-                cmd_text = '\n'.join(f'`{c}`' for c in commands)
                 blocks += [
-                    {"type": "divider"},
-                    {"type": "section",
-                     "text": {"type": "mrkdwn", "text": f"*Suggested commands:*\n{cmd_text}"}},
                     {"type": "actions",
                      "elements": [
                          {"type": "button",
@@ -446,22 +536,38 @@ data:
                     "type": "section",
                     "text": {"type": "mrkdwn", "text": "_No executable commands identified._"},
                 })
-
-            slack_post(SLACK_INCIDENTS, blocks, text=f"Claude diagnosis for {alertname}")
-
+    
+            ts = slack_post(SLACK_INCIDENTS, blocks, text=f"Claude diagnosis for {alertname}")
+    
+            # Full diagnosis + commands in thread
+            if ts:
+                full = diagnosis[:2900] + '…' if len(diagnosis) > 2900 else diagnosis
+                thread_blocks = [
+                    {"type": "section",
+                     "text": {"type": "mrkdwn", "text": full}},
+                ]
+                if commands:
+                    cmd_text = '\n'.join(f'`{c}`' for c in commands)
+                    thread_blocks.append({
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f"*Suggested commands:*\n{cmd_text}"},
+                    })
+                slack_post(SLACK_INCIDENTS, thread_blocks,
+                           text="Full diagnosis", thread_ts=ts)
+    
         threading.Thread(target=run, daemon=True).start()
-
+    
     # ── Slack interactivity handler ───────────────────────────────────────────────
     def handle_action(body_bytes):
         params   = dict(urllib.parse.parse_qsl(body_bytes.decode()))
         payload  = json.loads(params.get('payload', '{}'))
         resp_url = payload.get('response_url', '')
         user     = payload.get('user', {}).get('name', 'unknown')
-
+    
         for action in payload.get('actions', []):
             aid   = action.get('action_id')
             token = action.get('value')
-
+    
             if aid == 'lab_dismiss':
                 entry   = pending.pop(token, None)
                 channel = entry.get('channel', SLACK_INCIDENTS) if entry else SLACK_INCIDENTS
@@ -473,14 +579,14 @@ data:
                                  "text": {"type": "mrkdwn", "text": f":x: Dismissed by *{user}*."}}],
                                text=f"Dismissed by {user}")
                 return b'ok'
-
+    
             if aid == 'lab_approve':
                 entry = pending.pop(token, None)
                 if not entry:
                     if resp_url:
                         slack_respond(resp_url, ":warning: Token expired or already used.")
                     return b'ok'
-
+    
                 commands = entry['commands']
                 channel  = entry.get('channel', SLACK_INCIDENTS)
                 if resp_url:
@@ -488,32 +594,49 @@ data:
                         resp_url,
                         f":hourglass_flowing_sand: Approved by *{user}* — running {len(commands)} command(s)…"
                     )
-
+    
                 def run_cmds(cmds=commands, u=user, ch=channel):
                     results = []
                     for cmd in cmds:
                         out = dispatch_cmd(cmd)
                         results.append(f"$ {cmd}\n{out}")
-
-                    full      = '\n\n'.join(results)
-                    truncated = full[:2700] + '\n…(truncated)' if len(full) > 2700 else full
-                    slack_post(
+    
+                    # Compact main message
+                    status_lines = []
+                    for cmd in cmds:
+                        short_cmd = cmd if len(cmd) <= 60 else cmd[:57] + '…'
+                        status_lines.append(f"`{short_cmd}`")
+                    compact_text = '\n'.join(status_lines)
+    
+                    ts = slack_post(
                         ch,
                         blocks=[
                             {"type": "header",
                              "text": {"type": "plain_text",
-                                      "text": f":terminal:  Commands executed by {u}"}},
+                                      "text": f":white_check_mark:  {len(cmds)} command(s) run by {u}"}},
                             {"type": "section",
-                             "text": {"type": "mrkdwn", "text": f"```{truncated}```"}},
+                             "text": {"type": "mrkdwn", "text": compact_text}},
                         ],
-                        text=f"Command results ({u})",
+                        text=f"Commands run by {u}",
                     )
-
+    
+                    # Full output in thread
+                    if ts:
+                        full      = '\n\n'.join(results)
+                        truncated = full[:2900] + '\n…(truncated)' if len(full) > 2900 else full
+                        slack_post(
+                            ch,
+                            blocks=[{"type": "section",
+                                     "text": {"type": "mrkdwn", "text": f"```{truncated}```"}}],
+                            text="Command output",
+                            thread_ts=ts,
+                        )
+    
                 threading.Thread(target=run_cmds, daemon=True).start()
                 return b'ok'
-
+    
         return b'ok'
-
+    
     # ── Alertmanager helpers ──────────────────────────────────────────────────────
     def run_remediation(alert):
         alertname = alert['labels'].get('alertname', '')
@@ -532,11 +655,11 @@ data:
                 'cmd': rb['cmd'], 'description': rb['description'], 'output': out[:500],
             }
         return None
-
+    
     def inc_number(alert):
         fp = alert.get('fingerprint', alert['labels'].get('alertname', 'unknown'))
         return int(hashlib.md5(fp.encode()).hexdigest()[:5], 16) % 90000 + 10000
-
+    
     def gitlab_request(method, path, data=None):
         url     = f"{GITLAB_URL}/api/v4/projects/{GITLAB_PROJECT_ID}{path}"
         headers = {'PRIVATE-TOKEN': GITLAB_TOKEN, 'Content-Type': 'application/json'}
@@ -548,7 +671,7 @@ data:
         except (urllib.error.HTTPError, urllib.error.URLError) as e:
             log.error(f"GitLab API error: {e}")
             return None
-
+    
     def find_open_issue(inc_num):
         issues = gitlab_request('GET', f'/issues?state=opened&search=INC-{inc_num}&labels=incident')
         if issues:
@@ -556,7 +679,7 @@ data:
                 if f'INC-{inc_num}' in issue['title']:
                     return issue
         return None
-
+    
     def create_issue(alert, inc_num, remediation=None):
         severity  = alert['labels'].get('severity', 'info')
         alertname = alert['labels'].get('alertname', 'Unknown')
@@ -566,12 +689,12 @@ data:
         desc      = alert['annotations'].get('description', '')
         labels    = SEVERITY_LABELS.get(severity, ['incident'])
         title     = f"INC-{inc_num} | {severity.upper()} | {alertname}"
-
+    
         runbook_url    = RUNBOOK_URLS.get(alertname, '')
         postmortem_url = POSTMORTEM_URLS.get(alertname, '')
         rb_section     = f"\n### Runbook\n{runbook_url}\n" if runbook_url else ""
         pm_section     = f"\n### Related Post-Mortem\n{postmortem_url}\n" if postmortem_url else ""
-
+    
         rem_section = ""
         if remediation:
             status = "SUCCESS" if remediation['success'] else "FAILED"
@@ -583,7 +706,7 @@ data:
                 f"- **Action:** {remediation['description']}\n"
                 f"- **Output:**\n```\n{remediation['output']}\n```\n"
             )
-
+    
         body = (
             f"## Incident INC-{inc_num}\n\n"
             f"**Severity:** {severity.upper()}\n"
@@ -602,7 +725,7 @@ data:
         if issue:
             log.info(f"Created issue #{issue['iid']} — {title}")
         return issue
-
+    
     def close_issue(issue, alert, inc_num):
         gitlab_request('POST', f"/issues/{issue['iid']}/notes", {
             'body': (f"RESOLVED — Alert cleared at {alert.get('endsAt', 'N/A')}\n\n"
@@ -610,7 +733,7 @@ data:
         })
         gitlab_request('PUT', f"/issues/{issue['iid']}", {'state_event': 'close'})
         log.info(f"Closed issue #{issue['iid']} — INC-{inc_num}")
-
+    
     def notify_firing(alert, inc_num, issue=None, remediation=None, repeat=False):
         severity   = alert['labels'].get('severity', 'info')
         alertname  = alert['labels'].get('alertname', 'Unknown')
@@ -620,7 +743,7 @@ data:
         started    = alert.get('startsAt', 'N/A')
         runbook    = RUNBOOK_URLS.get(alertname, '')
         postmortem = POSTMORTEM_URLS.get(alertname, '')
-
+    
         if severity == 'critical':
             webhook_url = SLACK_CRITICAL_URL
             channel, color = SLACK_CRITICAL_CHANNEL, 'danger'
@@ -636,7 +759,7 @@ data:
             channel, color = SLACK_INFO_CHANNEL, 'good'
             header     = f"INFO | {alertname}"
             oncall     = ''
-
+    
         if repeat:
             # Compact "still firing" reminder — no diagnosis, no spam
             slack_send(webhook_url, {
@@ -649,7 +772,7 @@ data:
                 }],
             })
             return
-
+    
         lines = [
             f"*Summary:* {summary}",
             f"*Description:* {desc}",
@@ -663,7 +786,7 @@ data:
         if remediation:
             s = "SUCCESS" if remediation['success'] else "FAILED"
             lines.append(f"*Auto-remediation:* {s} — {remediation['description']}")
-
+    
         slack_send(webhook_url, {
             'channel': channel,
             'attachments': [{
@@ -673,11 +796,12 @@ data:
                 'footer': f'Homelab Alertmanager | {ALERTMANAGER_URL}',
             }],
         })
-
+    
+        # Always diagnose critical/warning; also diagnose specific info alerts that need a fix offer
         DIAGNOSE_INFO = {'K3sWorkerNodeDown', 'K3sSnapshotMissing', 'LocalRegistryDown', 'ClusterDrift'}
         if severity in ('critical', 'warning') or alertname in DIAGNOSE_INFO:
             post_diagnosis(alert)
-
+    
     def notify_resolved(alert, inc_num, issue=None):
         severity  = alert['labels'].get('severity', 'info')
         alertname = alert['labels'].get('alertname', 'Unknown')
@@ -685,10 +809,10 @@ data:
         summary   = alert['annotations'].get('summary', alertname)
         started   = alert.get('startsAt', 'N/A')
         ended     = alert.get('endsAt',   'N/A')
-
+    
         webhook_url = SLACK_CRITICAL_URL if severity == 'critical' else (SLACK_WARNING_URL or SLACK_CRITICAL_URL)
         channel     = SLACK_CRITICAL_CHANNEL if severity == 'critical' else SLACK_WARNING_CHANNEL
-
+    
         lines = [
             f"*Summary:* {summary}",
             f"*Namespace:* `{namespace}`",
@@ -697,23 +821,23 @@ data:
         ]
         if issue:
             lines.append(f"*Incident:* {issue.get('web_url', '')} (closed)")
-
+    
         slack_send(webhook_url, {
             'channel': channel,
             'attachments': [{
                 'color': 'good', 'title': f"RESOLVED | {alertname}",
-                'title_link': f'{PROMETHEUS_URL}/alerts',
+                'title_link': 'http://192.168.122.218:30090/alerts',
                 'text': '\n'.join(lines),
-                'footer': f'Homelab Alertmanager | {ALERTMANAGER_URL}',
+                'footer': 'Homelab Alertmanager | http://192.168.122.218:30093',
             }],
         })
-
+    
     # ── HTTP handler ──────────────────────────────────────────────────────────────
     class WebhookHandler(BaseHTTPRequestHandler):
         def do_POST(self):
             length = int(self.headers.get('Content-Length', 0))
             body   = self.rfile.read(length)
-
+    
             # ── Slack slash command: POST /slack/lab ──────────────────────────────
             if self.path == '/slack/lab':
                 if not verify_slack(dict(self.headers), body):
@@ -724,7 +848,7 @@ data:
                 self.end_headers()
                 self.wfile.write(resp)
                 return
-
+    
             # ── Slack interactivity: POST /slack/actions ──────────────────────────
             if self.path == '/slack/actions':
                 if not verify_slack(dict(self.headers), body):
@@ -732,22 +856,22 @@ data:
                 handle_action(body)
                 self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
                 return
-
+    
             # ── Alertmanager webhook: POST / ──────────────────────────────────────
             try:
                 payload = json.loads(body)
             except Exception:
                 self.send_response(400); self.end_headers(); return
-
+    
             status = payload.get('status', '')
             alerts = payload.get('alerts', [])
             log.info(f"Received {status} with {len(alerts)} alerts")
-
+    
             for alert in alerts:
                 inc_num   = inc_number(alert)
                 severity  = alert['labels'].get('severity', 'info')
                 alertname = alert['labels'].get('alertname', 'Unknown')
-
+    
                 if status == 'firing':
                     existing = find_open_issue(inc_num)
                     if not existing:
@@ -760,18 +884,18 @@ data:
                     else:
                         log.info(f"Issue already exists for INC-{inc_num} — sending repeat notification")
                         notify_firing(alert, inc_num, existing, repeat=True)
-
+    
                 elif status == 'resolved':
                     issue = find_open_issue(inc_num) if severity == 'critical' else None
                     if issue:
                         close_issue(issue, alert, inc_num)
                     notify_resolved(alert, inc_num, issue)
-
+    
             self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
-
+    
         def log_message(self, *args):
             pass
-
+    
     if __name__ == '__main__':
         log.info(f"Starting webhook on :8080 | GitLab: {GITLAB_URL} | Project: {GITLAB_PROJECT_ID}")
         log.info(f"Slack /lab endpoint: POST /slack/lab | Actions: POST /slack/actions")
