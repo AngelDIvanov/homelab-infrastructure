@@ -55,7 +55,7 @@ BASE_IP_OCTET  = 221
 SSH_OPTS       = "-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no"
 
 # All VMs we care about
-ALL_VMS = ["k3s-control", "k3s-worker-1", "k3s-worker-2", "k3s-worker-3", "ci-runner", "crc"]
+ALL_VMS = ["k3s-control", "k3s-worker-1", "k3s-worker-2", "ci-runner", "crc"]
 
 # Services to check
 SERVICES = [
