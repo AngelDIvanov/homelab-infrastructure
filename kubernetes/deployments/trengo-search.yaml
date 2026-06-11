@@ -1,0 +1,213 @@
+# Captured from live cluster 2026-06-11 — drift recovery (these ran with no committed source)
+---
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kubernetes.io/change-cause: v1.0.1 -- pipeline 171
+  labels:
+    app: trengo-search
+    version: v1
+  name: trengo-search
+  namespace: default
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: trengo-search
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2026-04-15T12:40:12Z'
+      labels:
+        app: trengo-search
+        version: v1
+    spec:
+      containers:
+      - image: 192.168.122.218:30500/trengo-search:latest
+        # IfNotPresent so CI's import-to-node deploys (k3s ctr images import +
+        # kubectl set image trengo-search:<sha>) use the local image instead of
+        # trying to pull a registry-less tag from Docker Hub (ImagePullBackOff).
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /
+            port: 80
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: trengo-search
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /
+            port: 80
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trengo-search-staging
+  namespace: default
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 0
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: trengo-search-staging
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2026-04-10T11:27:44Z'
+      labels:
+        app: trengo-search-staging
+    spec:
+      containers:
+      - image: 192.168.122.218:30500/trengo-search:latest
+        imagePullPolicy: IfNotPresent
+        name: trengo-search
+        ports:
+        - containerPort: 80
+          protocol: TCP
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: trengo-search
+  name: trengo-search-service
+  namespace: default
+spec:
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: http
+    nodePort: 32504
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: trengo-search
+  sessionAffinity: None
+  type: NodePort
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trengo-search-staging-service
+  namespace: default
+spec:
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - nodePort: 32505
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: trengo-search-staging
+  sessionAffinity: None
+  type: NodePort
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: trengo-health-check
+  namespace: default
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    metadata: {}
+    spec:
+      template:
+        metadata: {}
+        spec:
+          containers:
+          - command:
+            - /bin/sh
+            - -c
+            - "REPLICAS=$(kubectl get deployment trengo-search -n default -o jsonpath='{.status.availableReplicas}')\n\
+              REPLICAS=${REPLICAS:-0}\n\nif [ \"$REPLICAS\" -eq 0 ]; then\n  echo\
+              \ \"TrengoAppDown: trengo-search has 0 available replicas\"\n  TIMESTAMP=$(date\
+              \ +%s%N)\n  curl -s -X POST http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push\
+              \ \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\n   \
+              \   \\\"streams\\\": [{\n        \\\"stream\\\": {\n          \\\"job\\\
+              \": \\\"trengo-health-check\\\",\n          \\\"app\\\": \\\"trengo-search\\\
+              \",\n          \\\"namespace\\\": \\\"default\\\",\n          \\\"severity\\\
+              \": \\\"critical\\\"\n        },\n        \\\"values\\\": [[\n     \
+              \     \\\"${TIMESTAMP}\\\",\n          \\\"level=error msg=TrengoAppDown\
+              \ available_replicas=0 deployment=trengo-search namespace=default\\\"\
+              \n        ]]\n      }]\n    }\"\n  echo \"Log pushed to Loki\"\nelse\n\
+              \  echo \"trengo-search is healthy: ${REPLICAS} replica(s) available\"\
+              \nfi\n"
+            image: bitnami/kubectl:latest
+            imagePullPolicy: Always
+            name: health-check
+            resources: {}
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+          dnsPolicy: ClusterFirst
+          restartPolicy: Never
+          schedulerName: default-scheduler
+          securityContext: {}
+          serviceAccount: trengo-health-check
+          serviceAccountName: trengo-health-check
+          terminationGracePeriodSeconds: 30
+  schedule: '* * * * *'
+  successfulJobsHistoryLimit: 3
+  suspend: false
+
