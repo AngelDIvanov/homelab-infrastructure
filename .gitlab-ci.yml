@@ -111,6 +111,22 @@ security:manifest-scan:
     - changes:
         - "kubernetes/deployments/*.yaml"
 
+security:snyk-iac:
+  stage: security
+  image: snyk/snyk:linux
+  script:
+    - |
+      if [ -z "$SNYK_TOKEN" ]; then
+        echo "SNYK_TOKEN not set — skipping Snyk IaC scan (add it as a masked CI/CD variable to enable)"
+        exit 0
+      fi
+      # Scan Terraform + Kubernetes manifests for IaC misconfigurations.
+      # Fails the job only on high+ severity; allow_failure keeps the pipeline green for now.
+      snyk iac test terraform/ terraform-kubeadm/ kubernetes/ --severity-threshold=high
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+
 # ── Deploy ───────────────────────────────────────────────────────────────────
 
 deploy:kubernetes:
