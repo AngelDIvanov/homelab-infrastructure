@@ -101,7 +101,14 @@ spec:
             - name: image-prune
               image: alpine:3.19
               securityContext:
-                privileged: true
+                # Pruning images talks to the containerd socket over its API. That needs
+                # root (the socket is root-owned) but NOT full privilege — so drop
+                # `privileged` and all Linux capabilities. Verified the prune still works.
+                privileged: false
+                runAsUser: 0
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
               command:
                 - /bin/sh
                 - -c
