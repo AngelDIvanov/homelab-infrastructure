@@ -83,32 +83,9 @@ RUNBOOKS = {
             'description': 'Killed stress-ng and restarted GitLab runner on ci-runner.',
         },
     ],
-    'NodeDiskHigh': [
-        {
-            'instance_contains': '192.168.122.218',
-            'host': '192.168.122.218',
-            'cmd': 'sudo k3s crictl rmi --prune',
-            'description': 'Pruned unused container images on k3s-control.',
-        },
-        {
-            'instance_contains': '192.168.122.219',
-            'host': '192.168.122.219',
-            'cmd': 'sudo k3s crictl rmi --prune',
-            'description': 'Pruned unused container images on k3s-worker-1.',
-        },
-        {
-            'instance_contains': '192.168.122.221',
-            'host': '192.168.122.221',
-            'cmd': 'sudo k3s crictl rmi --prune',
-            'description': 'Pruned unused container images on k3s-worker-2.',
-        },
-        {
-            'instance_contains': '192.168.122.230',
-            'host': '192.168.122.230',
-            'cmd': 'sudo k3s crictl rmi --prune',
-            'description': 'Pruned unused container images on k3s-infra.',
-        },
-    ],
+    # NodeDiskHigh is handled dynamically in run_remediation() — the target node
+    # is taken from the alert and validated against the live cluster, so it covers
+    # every node (including workers added later) with no hardcoded IPs.
 }
 
 # ── Pending /lab approvals (in-memory) ───────────────────────────────────────
@@ -131,6 +108,32 @@ def _ssh(host, cmd, timeout=30):
 
 def ssh_kube(args, timeout=20):
     return _ssh(K3S_CONTROL_IP, f'sudo k3s kubectl {args}', timeout)
+
+_nodes_cache = {'ts': 0.0, 'data': {}}
+def cluster_nodes():
+    """{internal_ip: name} for every node currently in the cluster, discovered
+    live from the k8s API (60s cache). Replaces hardcoded node lists so new
+    workers are covered automatically."""
+    now = time.time()
+    if now - _nodes_cache['ts'] < 60 and _nodes_cache['data']:
+        return _nodes_cache['data']
+    jp = r'{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address} {.metadata.name}{"\n"}{end}'
+    out = ssh_kube(f"get nodes -o jsonpath='{jp}'")
+    data = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].count('.') == 3:
+            data[parts[0]] = parts[1]
+    if data:
+        _nodes_cache.update(ts=now, data=data)
+    return data or _nodes_cache['data']
+
+def cluster_node_summary():
+    """Human-readable 'name (ip)' list of live nodes, for LLM context."""
+    nodes = cluster_nodes()
+    if not nodes:
+        return "k3s-control, k3s-infra, k3s-worker-* (live list unavailable)"
+    return ", ".join(f"{name} ({ip})" for ip, name in sorted(nodes.items(), key=lambda kv: kv[1]))
 
 def dispatch_cmd(cmd, timeout=60):
     """Route an approved command to the correct host."""
@@ -226,9 +229,9 @@ def call_claude(user_msg, state):
 
     system = (
         "You are an SRE assistant for a homelab k3s cluster. "
-        "Nodes: k3s-control (.218), k3s-worker-1 (.219), k3s-worker-2 (.221), "
-        "k3s-infra (.230 — GitLab CE + Prometheus/Grafana/Loki/Alertmanager). "
-        "WORKER NODES: both k3s-worker-1 (.219) AND k3s-worker-2 (.221) run workloads. "
+        f"Nodes (discovered live): {cluster_node_summary()}. "
+        "k3s-infra (.230) also runs GitLab CE + Prometheus/Grafana/Loki/Alertmanager. "
+        "Any node whose name contains 'worker' runs workloads. "
         "When a worker node is down, check BOTH virsh list --all and kubectl get nodes "
         "to identify which one. Use the correct IP when SSHing. "
         "To restart k3s-agent: ssh andy@<correct-ip> sudo systemctl restart k3s-agent. "
@@ -635,6 +638,23 @@ def handle_action(body_bytes):
 def run_remediation(alert):
     alertname = alert['labels'].get('alertname', '')
     instance  = alert['labels'].get('instance', '')
+    # NodeDiskHigh: prune images on whichever node fired. The node is discovered
+    # dynamically and validated against the live cluster, so every worker —
+    # including ones added later — is covered without editing this file.
+    if alertname == 'NodeDiskHigh':
+        ip = instance.split(':')[0].strip()
+        nodes = cluster_nodes()
+        if ip not in nodes:
+            log.info(f"NodeDiskHigh instance {ip!r} is not a known cluster node — skipping")
+            return None
+        name = nodes[ip]
+        cmd  = 'sudo k3s crictl rmi --prune'
+        log.info(f"Auto-remediation: NodeDiskHigh on {name} ({ip})")
+        out = _ssh(ip, cmd, timeout=120)
+        success = 'error' not in out.lower()
+        log.info(f"Remediation {'ok' if success else 'FAILED'} on {name}")
+        return {'success': success, 'host': ip, 'cmd': cmd,
+                'description': f'Pruned unused container images on {name}.', 'output': out[:500]}
     if alertname not in RUNBOOKS:
         return None
     for rb in RUNBOOKS[alertname]:
