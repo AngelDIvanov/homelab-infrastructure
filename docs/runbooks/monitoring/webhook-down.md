@@ -84,7 +84,7 @@ kubectl run tmp --rm -it --image=alpine --restart=Never -- \
   echo '  webhook.py: |'
   sed 's/^/    /' scripts/webhook.py
   echo ''
-  awk '/^---$/{found++} found>=2{print}' scripts/webhook-deployment.yaml
+  awk '/^---$/{found++} found>=2{print}' kubernetes/deployments/alertmanager-webhook.yaml
 } > /tmp/webhook-new.yaml
 
 kubectl apply -f /tmp/webhook-new.yaml
