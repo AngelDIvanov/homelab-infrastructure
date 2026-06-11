@@ -40,7 +40,7 @@ ssh ${K3S_HOST} "sudo k3s ctr images import /tmp/trengo-search-${VERSION}.tar"
 
 echo ""
 echo "Step 6: Deploying to Kubernetes..."
-kubectl apply -f k8s/deployment.yaml
+kubectl apply -f kubernetes/deployments/trengo-search.yaml
 
 echo ""
 echo "Step 7: Waiting for pods to be ready..."
