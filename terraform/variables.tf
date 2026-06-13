@@ -5,7 +5,7 @@ variable "libvirt_uri" {
 }
 
 variable "vm_count" {
-  description = "Number of worker VMs to create"
+  description = "Number of Terraform-managed worker VMs to create (worker-N = count.index + 2, starting at k3s-worker-2). Steady state is 1: k3s-worker-2 only."
   type        = number
   default     = 1
 }
