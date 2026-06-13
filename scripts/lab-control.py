@@ -27,12 +27,7 @@ CI_RUNNER_IP    = "192.168.122.220"
 K3S_WORKER1_IP  = "192.168.122.219"
 K3S_URL         = f"https://{K3S_CONTROL_IP}:6443"
 
-K8S_CONTROL_IP  = "192.168.122.240"
-K8S_WORKER1_IP  = "192.168.122.241"
 
-# VMs that belong to each cluster (k3s-infra excluded — stays always on)
-K3S_VMS  = ["k3s-control", "k3s-worker-1", "ci-runner"]
-K8S_VMS  = ["kubeadm-control", "kubeadm-worker-1"]
 
 def _get_secret(env_var, vault_item):
     value = os.environ.get(env_var, "")
@@ -410,41 +405,30 @@ def main_menu():
     banner()
     print(f"""\
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('K3S CLUSTER')}                                             {c('|')}
-{c('+----------------------------------------------------------+')}
-{c('|')}  {bold('1.')}  Start k3s          boot k3s cluster VMs             {c('|')}
-{c('|')}  {bold('2.')}  Stop k3s           shutdown k3s cluster             {c('|')}
-{c('+----------------------------------------------------------+')}
-{c('|')}  {bold('KUBEADM CLUSTER')}                                         {c('|')}
-{c('+----------------------------------------------------------+')}
-{c('|')}  {bold('3.')}  Start K8s          boot kubeadm cluster VMs         {c('|')}
-{c('|')}  {bold('4.')}  Stop K8s           shutdown kubeadm cluster         {c('|')}
-{c('|')}  {bold('5.')}  K8s Status         kubeadm nodes + pods             {c('|')}
-{c('+----------------------------------------------------------+')}
 {c('|')}  {bold('K3S TOOLS')}                                               {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('6.')}  Health Check       run check-lab                    {c('|')}
-{c('|')}  {bold('7.')}  Scale              add / remove k3s workers         {c('|')}
-{c('|')}  {bold('8.')}  Ansible            run playbooks                    {c('|')}
-{c('|')}  {bold('9.')}  Sync Images        push to all k3s nodes            {c('|')}
-{c('|')}  {bold('10.')} Repair Node        fix agent token/cert (any node)  {c('|')}
-{c('|')}  {bold('11.')} Rejoin Nodes       full reinstall (all agents)      {c('|')}
-{c('|')}  {bold('12.')} k3s Status         nodes + virsh overview           {c('|')}
-{c('|')}  {bold('13.')} Infra Health       GitLab/Prometheus/NFS/Runner     {c('|')}
+{c('|')}  {bold('1.')}  Health Check       run check-lab                    {c('|')}
+{c('|')}  {bold('2.')}  Scale              add / remove k3s workers         {c('|')}
+{c('|')}  {bold('3.')}  Ansible            run playbooks                    {c('|')}
+{c('|')}  {bold('4.')}  Sync Images        push to all k3s nodes            {c('|')}
+{c('|')}  {bold('5.')}  Repair Node        fix agent token/cert (any node)  {c('|')}
+{c('|')}  {bold('6.')}  Rejoin Nodes       full reinstall (all agents)      {c('|')}
+{c('|')}  {bold('7.')}  k3s Status         nodes + virsh overview           {c('|')}
+{c('|')}  {bold('8.')}  Infra Health       GitLab/Prometheus/NFS/Runner     {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('ALERTING')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('14.')} Alerting Tests     app nuke, RAM nuke,              {c('|')}
+{c('|')}  {bold('9.')}  Alerting Tests     app nuke, RAM nuke,              {c('|')}
 {c('|')}       {dim('               auto-remediation demos')}              {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('SERVICES')}                                                {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('15.')} Service Links      all URLs and access info         {c('|')}
+{c('|')}  {bold('10.')} Service Links      all URLs and access info         {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('POWER')}                                                   {c('|')}
 {c('+----------------------------------------------------------+')}
-{c('|')}  {bold('16.')} Safe Shutdown      drain → stop k3s → power off     {c('|')}
-{c('|')}  {bold('17.')} Safe Startup       ordered boot + wait for Ready    {c('|')}
+{c('|')}  {bold('11.')} Safe Shutdown      drain → stop k3s → power off     {c('|')}
+{c('|')}  {bold('12.')} Safe Startup       restore registries + scale up    {c('|')}
 {c('+----------------------------------------------------------+')}
 {c('|')}  {bold('0.')}  Exit                                                {c('|')}
 {c('+----------------------------------------------------------+')}""")
@@ -524,76 +508,6 @@ def ansible_menu():
 # ─────────────────────────────────────────────────────────────
 #  OPERATIONS
 # ─────────────────────────────────────────────────────────────
-def _stop_vms(vms, label):
-    divider(f"STOPPING {label}")
-    print(dim(f"  Note: k3s-infra ({K3S_INFRA_IP}) is excluded — NFS storage stays up."))
-    confirm = input(y(f"  Stop {label}? (y/n): "))
-    if confirm.lower() != 'y':
-        print("  Cancelled."); return
-
-    result = run("virsh list --state-running 2>/dev/null", capture=True)
-    running = []
-    for line in result.stdout.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] not in ["Name", "---", "Base"] and parts[1] in vms:
-            running.append(parts[1])
-
-    if not running:
-        print(dim(f"  No {label} VMs currently running.")); return
-
-    print(c(f"\n  Stopping: {', '.join(running)}"))
-    for vm in running:
-        print(y(f"  shutting down {vm}..."))
-        run(f"virsh shutdown {vm} 2>/dev/null || true", capture=True)
-
-    time.sleep(5)
-
-    result = run("virsh list --state-running 2>/dev/null", capture=True)
-    still_running = []
-    for line in result.stdout.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] in vms:
-            still_running.append(parts[1])
-
-    for vm in still_running:
-        print(r(f"  {vm} still running — force destroying..."))
-        res = run(f"virsh destroy {vm} 2>/dev/null", capture=True)
-        print(g(f"  {vm} force killed") if res.returncode == 0 else r(f"  {vm} failed: {res.stderr.strip()}"))
-
-    print(g(f"\n  {label} stopped."))
-    run("virsh list --all")
-
-def _start_vms(vms, label, note=""):
-    divider(f"STARTING {label}")
-    confirm = input(y(f"  Start {label}? (y/n): "))
-    if confirm.lower() != 'y':
-        print("  Cancelled."); return
-    for vm in vms:
-        print(y(f"  starting {vm}..."))
-        result = run(f"virsh start {vm} 2>/dev/null", capture=True)
-        if result.returncode == 0:
-            print(g(f"  {vm} started"))
-        else:
-            out = result.stderr.strip()
-            if "already active" in out:
-                print(dim(f"  {vm} already running"))
-            else:
-                print(r(f"  {vm} failed: {out}"))
-    print(g(f"\n  {label} started."))
-    if note:
-        print(dim(f"  {note}"))
-
-def do_stop_k3s():
-    _stop_vms(K3S_VMS, "K3S CLUSTER")
-
-def do_start_k3s():
-    _start_vms(K3S_VMS, "K3S CLUSTER", "Allow 30-60s for k3s to come up, then run health check.")
-
-def do_stop_k8s():
-    _stop_vms(K8S_VMS, "KUBEADM CLUSTER")
-
-def do_start_k8s():
-    _start_vms(K8S_VMS, "KUBEADM CLUSTER", "Allow 60s for kubeadm API server to come up.")
 
 def do_health_check():
     divider("HEALTH CHECK")
@@ -851,6 +765,76 @@ def _all_worker_nodes():
         nodes.append((f"k3s-worker-{wnum}", get_worker_ip(wnum)))
     return nodes
 
+REGISTRIES_YAML = """\
+mirrors:
+  "192.168.122.218:30500":
+    endpoint:
+      - "http://192.168.122.218:30500"
+"""
+
+def do_safe_startup():
+    divider("SAFE STARTUP")
+    print(y("  Post-shutdown startup sequence — mirrors safe-shutdown in reverse.\n"))
+
+    # ── 1. Wait for k3s-control ───────────────────────────────────
+    divider("Step 1/3 -- Waiting for k3s-control")
+    if not wait_for_ssh(K3S_CONTROL_IP, timeout=60):
+        print(r("  k3s-control unreachable — is the VM running?")); return
+    print(g("  k3s-control: SSH up"))
+
+    # wait for k3s API to be ready
+    print(y("  Waiting for k3s API..."))
+    for _ in range(24):
+        res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes --no-headers 2>/dev/null"', capture=True)
+        if res.returncode == 0 and res.stdout.strip():
+            break
+        time.sleep(5)
+    else:
+        print(r("  k3s API did not come up in time")); return
+    print(g("  k3s API ready"))
+
+    # ── 2. Check/restore registries.yaml on all worker nodes ──────
+    divider("Step 2/3 -- Checking registries.yaml on worker nodes")
+    workers_needing_restart = []
+    for wname, wip in _all_worker_nodes():
+        if not wait_for_ssh(wip, timeout=10):
+            print(dim(f"  {wname}: SSH unavailable — skipping")); continue
+        existing = run(f'ssh {SSH_OPTS} andy@{wip} "cat /etc/rancher/k3s/registries.yaml 2>/dev/null"', capture=True).stdout.strip()
+        if "192.168.122.218:30500" in existing:
+            print(g(f"  {wname}: registries.yaml OK"))
+        else:
+            run(f'ssh {SSH_OPTS} andy@{wip} "sudo mkdir -p /etc/rancher/k3s && echo \'{REGISTRIES_YAML}\' | sudo tee /etc/rancher/k3s/registries.yaml > /dev/null"', capture=True)
+            print(y(f"  {wname}: registries.yaml restored — will restart k3s-agent"))
+            workers_needing_restart.append((wname, wip))
+
+    if workers_needing_restart:
+        for wname, wip in workers_needing_restart:
+            run(f'ssh {SSH_OPTS} andy@{wip} "sudo systemctl restart k3s-agent"', capture=True)
+            print(g(f"  {wname}: k3s-agent restarted"))
+        print(y("  Waiting 15s for agents to rejoin..."))
+        time.sleep(15)
+    else:
+        print(g("  All worker nodes have correct registries.yaml"))
+
+    # ── 3. Scale apps back up ─────────────────────────────────────
+    divider("Step 3/3 -- Restoring app replicas")
+    apps = [("trengo-search", 1), ("trengo-search-staging", 1)]
+    for deploy, desired in apps:
+        current = run(
+            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+            f'"sudo k3s kubectl get deployment {deploy} -n default --no-headers 2>/dev/null | awk \'{{print $2}}\'"',
+            capture=True).stdout.strip()
+        if current == f"0/{desired}" or current.startswith("0/"):
+            run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment {deploy} --replicas={desired} -n default"', capture=True)
+            print(g(f"  {deploy} → {desired} replica(s)"))
+        elif current:
+            print(g(f"  {deploy}: already at {current} — no change"))
+        else:
+            print(dim(f"  {deploy}: not found — skipping"))
+
+    print(g("\n  Startup complete. Run Health Check (option 1) to verify."))
+
+
 def do_safe_shutdown():
     divider("SAFE SHUTDOWN")
     states  = vm_states()
@@ -953,108 +937,6 @@ def do_safe_shutdown():
     run("virsh list --all")
 
 
-def do_safe_startup():
-    divider("SAFE STARTUP -- Ordered cluster boot")
-    states = vm_states()
-    workers = _all_worker_nodes()
-    expected_nodes = 3 + get_vm_count()   # control + infra + worker-1 + terraform workers
-
-    print(y("  Startup sequence:"))
-    print(  "    1. Boot k3s-control → wait for API server")
-    print(  "    2. Boot k3s-infra   → wait for Ready")
-    print(f"    3. Boot workers ({', '.join(n for n,_ in workers)}) + ci-runner  (parallel)")
-    print(f"    4. Wait for all {expected_nodes} nodes Ready")
-    print(  "    5. Scale app replicas back up")
-    print(  "    6. Show cluster status")
-
-    if input(f"\n{y('  Proceed? (y/n): ')}").lower() != 'y':
-        print("  Cancelled."); return
-
-    # ── 1. k3s-control ───────────────────────────────────────────
-    divider("Step 1/5 -- Starting k3s-control")
-    if states.get("k3s-control", False):
-        print(dim("  k3s-control already running"))
-    else:
-        run("virsh start k3s-control 2>/dev/null")
-        print(y("  waiting for k3s API server to come up..."))
-
-    for tick in range(24):  # up to 2 min
-        res = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
-            f'"sudo k3s kubectl get nodes --no-headers 2>/dev/null | wc -l"',
-            capture=True)
-        if res.returncode == 0 and res.stdout.strip().isdigit() and int(res.stdout.strip()) > 0:
-            print(g("  k3s API server ready")); break
-        print(f"  waiting for API... [{tick*5+5}/120s]")
-        time.sleep(5)
-    else:
-        print(r("  k3s API server did not come up in 2 min — check k3s-control manually"))
-        return
-
-    # ── 2. k3s-infra ─────────────────────────────────────────────
-    divider("Step 2/5 -- Starting k3s-infra")
-    current = vm_states()
-    if current.get("k3s-infra", False):
-        print(dim("  k3s-infra already running"))
-    else:
-        run("virsh start k3s-infra 2>/dev/null")
-
-    print(y("  waiting for k3s-infra to join cluster..."))
-    for tick in range(18):  # up to 3 min
-        res = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
-            f'"sudo k3s kubectl get node k3s-infra --no-headers 2>/dev/null | grep -q Ready"',
-            capture=True)
-        if res.returncode == 0:
-            print(g("  k3s-infra Ready")); break
-        print(f"  waiting for k3s-infra... [{tick*10+10}/180s]")
-        time.sleep(10)
-    else:
-        print(y("  k3s-infra taking longer than expected — continuing anyway"))
-
-    # ── 3. Workers + CI runner ────────────────────────────────────
-    divider("Step 3/5 -- Starting workers + ci-runner")
-    current = vm_states()
-    for wname, _ in workers:
-        if current.get(wname, False):
-            print(dim(f"  {wname} already running"))
-        else:
-            run(f"virsh start {wname} 2>/dev/null")
-            print(g(f"  {wname} starting"))
-    if current.get("ci-runner", False):
-        print(dim("  ci-runner already running"))
-    else:
-        run("virsh start ci-runner 2>/dev/null")
-        print(g("  ci-runner starting"))
-
-    # ── 4. Wait for all nodes ─────────────────────────────────────
-    divider(f"Step 4/5 -- Waiting for all {expected_nodes} nodes Ready")
-    for tick in range(24):  # up to 4 min
-        res = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
-            f'"sudo k3s kubectl get nodes --no-headers 2>/dev/null | grep -c Ready"',
-            capture=True)
-        if res.returncode == 0 and res.stdout.strip().isdigit():
-            ready = int(res.stdout.strip())
-            if ready >= expected_nodes:
-                print(g(f"  All {ready} nodes Ready!")); break
-            print(f"  {ready}/{expected_nodes} nodes Ready... [{tick*10+10}/240s]")
-        time.sleep(10)
-    else:
-        print(y("  Not all nodes Ready after 4 min — check status manually"))
-
-    # ── 5. Scale apps back up ─────────────────────────────────────
-    divider("Step 5/5 -- Scaling app replicas")
-    total_workers = 1 + get_vm_count()   # worker-1 + terraform workers
-    res = run(
-        f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
-        f'"sudo k3s kubectl scale deployment trengo-search --replicas={total_workers} -n default 2>/dev/null"',
-        capture=True)
-    if res.returncode == 0:
-        print(g(f"  trengo-search → {total_workers} replicas"))
-
-    do_status()
-
 
 def do_status():
     divider("CLUSTER STATUS")
@@ -1069,18 +951,6 @@ def do_status():
     print(c("\n  All VMs (virsh)"))
     run("virsh list --all")
 
-def do_k8s_status():
-    divider("KUBEADM CLUSTER STATUS")
-    print(c("\n  K8s Nodes"))
-    run(f'ssh {SSH_OPTS} andy@{K8S_CONTROL_IP} "kubectl get nodes -o wide 2>/dev/null || echo  kubeadm-control not reachable"')
-    print(c("\n  K8s Pods (all namespaces)"))
-    run(f'ssh {SSH_OPTS} andy@{K8S_CONTROL_IP} "kubectl get pods -A 2>/dev/null || true"')
-    print(c("\n  VM States (virsh)"))
-    for vm in K8S_VMS:
-        res = run(f"virsh domstate {vm} 2>/dev/null", capture=True)
-        state = res.stdout.strip() or "not found"
-        icon = g("running") if state == "running" else r(state)
-        print(f"  {vm:<24} {icon}")
 
 # ─────────────────────────────────────────────────────────────
 #  NUKE TEST
@@ -1458,23 +1328,18 @@ def do_service_links():
 # ─────────────────────────────────────────────────────────────
 def main():
     dispatch = {
-        '1':  lambda: (do_start_k3s(),           pause()),
-        '2':  lambda: (do_stop_k3s(),            pause()),
-        '3':  lambda: (do_start_k8s(),           pause()),
-        '4':  lambda: (do_stop_k8s(),            pause()),
-        '5':  lambda: (do_k8s_status(),          pause()),
-        '6':  lambda: (do_health_check(),        pause()),
-        '7':  scale_menu,
-        '8':  ansible_menu,
-        '9':  lambda: (do_sync_all(),            pause()),
-        '10': lambda: (do_repair_node(),         pause()),
-        '11': lambda: (do_rejoin(),              pause()),
-        '12': lambda: (do_status(),              pause()),
-        '13': lambda: (check_infra_services(),   pause()),
-        '14': alerting_menu,
-        '15': lambda: (do_service_links(),       pause()),
-        '16': lambda: (do_safe_shutdown(),        pause()),
-        '17': lambda: (do_safe_startup(),         pause()),
+        '1':  lambda: (do_health_check(),        pause()),
+        '2':  scale_menu,
+        '3':  ansible_menu,
+        '4':  lambda: (do_sync_all(),            pause()),
+        '5':  lambda: (do_repair_node(),         pause()),
+        '6':  lambda: (do_rejoin(),              pause()),
+        '7':  lambda: (do_status(),              pause()),
+        '8':  lambda: (check_infra_services(),   pause()),
+        '9':  alerting_menu,
+        '10': lambda: (do_service_links(),       pause()),
+        '11': lambda: (do_safe_shutdown(),        pause()),
+        '12': lambda: (do_safe_startup(),         pause()),
     }
 
     while True:
