@@ -36,3 +36,19 @@ homelab-summary.html
 monitoring/grafana/files.zip
 scripts/options}
 terraform/env.sh
+
+# ── SECRET-BEARING FILES — NEVER COMMIT (added 2026-06-13 after public-leak incident) ──
+# SSH private keys / any keypair
+gitlab
+gitlab.pub
+*.pem
+id_rsa*
+id_ed25519*
+*.key
+# Alertmanager config holds live Slack webhook URLs
+scripts/alertmanager.yaml
+# Vault init output (unseal keys + root token)
+**/init.json
+# Any file with embedded tokens — keep secrets in env/Vaultwarden via _get_secret()
+*token*.txt
+.secrets
