@@ -52,3 +52,5 @@ scripts/alertmanager.yaml
 # Any file with embedded tokens — keep secrets in env/Vaultwarden via _get_secret()
 *token*.txt
 .secrets
+kubernetes/deployments/grafana-gitlab-secret.yaml
+kubernetes/deployments/alertmanager-config.yaml
