@@ -35,3 +35,4 @@ __pycache__/
 homelab-summary.html
 monitoring/grafana/files.zip
 scripts/options}
+terraform/env.sh
