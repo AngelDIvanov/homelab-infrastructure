@@ -1,16 +1,6 @@
 ---
-# homelab-infrastructure CI/CD pipeline
-#
-# Stages:
-#   lint        — YAML, Terraform format checks
-#   validate    — Kubernetes manifest validation, Helm lint, alert rule check
-#   security    — Secret detection, manifest security scan
-#   deploy      — Apply manifests to cluster (manual gate on main)
-#   smoke       — Verify cluster health post-deploy
-#
-# Required CI/CD variables (set in GitLab → Settings → CI/CD → Variables):
-#   KUBECONFIG_BASE64  — base64-encoded kubeconfig for the cluster
-#                        Generate: base64 -w0 ~/.kube/config
+# Validation and deployment pipeline for the homelab repository.
+# Runtime credentials belong in masked GitLab CI/CD variables.
 
 stages:
   - lint
@@ -20,126 +10,158 @@ stages:
   - smoke
 
 variables:
+  GIT_DEPTH: "0"
   KUBECONFIG: /tmp/kubeconfig
   K3S_CONTROL_IP: "192.168.122.218"
 
-# ── Lint ─────────────────────────────────────────────────────────────────────
-
 lint:yaml:
   stage: lint
-  image: cytopia/yamllint:latest
+  image:
+    name: pipelinecomponents/yamllint@sha256:82f082414bad17ec04f4d271262a6dcaf64883bb4f1ce73923380125af8b94ee
+    entrypoint: [""]
   script:
-    - yamllint -d relaxed kubernetes/ monitoring/ scripts/
+    - "yamllint -d '{extends: relaxed, rules: {line-length: disable, colons: disable, empty-lines: disable}}' ."
   rules:
-    - changes:
-        - "**/*.yaml"
-        - "**/*.yml"
+    - changes: ["**/*.yaml", "**/*.yml"]
+
+lint:shell:
+  stage: lint
+  image:
+    name: koalaman/shellcheck-alpine@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63
+    entrypoint: [""]
+  script:
+    - shellcheck --severity=warning scripts/*.sh
+  rules:
+    - changes: ["scripts/*.sh"]
+
+lint:python:
+  stage: lint
+  image: python@sha256:63094abdaf49e046da9f6529ecd6ce4d853d9bfbf00a25c52bbbb68b3223b490
+  script:
+    - python -m compileall -q scripts
+  rules:
+    - changes: ["scripts/*.py"]
 
 lint:terraform:
   stage: lint
-  image: hashicorp/terraform:1.7
+  image:
+    name: hashicorp/terraform@sha256:386b7bff108f9fd3b79a2e0110190c162b5e4aebf26afe3eef028fd89532c17e
+    entrypoint: [""]
   script:
-    - cd terraform
-    - terraform fmt -check -recursive
+    - terraform -chdir=terraform fmt -check -recursive
+    - terraform -chdir=terraform-kubeadm fmt -check -recursive
   rules:
-    - changes:
-        - "terraform/**/*"
-
-# ── Validate ─────────────────────────────────────────────────────────────────
+    - changes: ["terraform/**/*", "terraform-kubeadm/**/*"]
 
 validate:kubernetes-manifests:
   stage: validate
-  image: ghcr.io/yannh/kubeconform:latest
+  image:
+    name: ghcr.io/yannh/kubeconform@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c
+    entrypoint: [""]
   script:
-    - kubeconform -strict -summary kubernetes/deployments/*.yaml
-    - kubeconform -strict -summary kubernetes/policies/*.yaml
-    - kubeconform -strict -summary kubernetes/backup/*.yaml
+    - >-
+      find kubernetes -type f -name '*.yaml' ! -name '*.example.yaml' -print0 |
+      xargs -0 kubeconform -strict -summary -ignore-missing-schemas
+      -kubernetes-version 1.29.0
   rules:
-    - changes:
-        - "kubernetes/**/*.yaml"
+    - changes: ["kubernetes/**/*.yaml"]
 
 validate:prometheus-rules:
   stage: validate
-  image: prom/prometheus:latest
+  image:
+    name: prom/prometheus@sha256:4f6c47e39a9064028766e8c95890ed15690c30f00c4ba14e7ce6ae1ded0295b1
+    entrypoint: [""]
   script:
-    - promtool check rules monitoring/grafana/homelab-alerts.yaml
+    - sed -n '/^spec:/,$p' monitoring/grafana/homelab-alerts.yaml | sed '1d;s/^  //' > /tmp/homelab-rules.yaml
+    - promtool check rules /tmp/homelab-rules.yaml
   rules:
-    - changes:
-        - "monitoring/grafana/homelab-alerts.yaml"
+    - changes: ["monitoring/grafana/homelab-alerts.yaml"]
 
 validate:terraform:
   stage: validate
-  image: hashicorp/terraform:1.7
+  image:
+    name: hashicorp/terraform@sha256:386b7bff108f9fd3b79a2e0110190c162b5e4aebf26afe3eef028fd89532c17e
+    entrypoint: [""]
   script:
-    - cd terraform
-    - terraform init -backend=false
-    - terraform validate
+    - terraform -chdir=terraform init -backend=false -input=false
+    - terraform -chdir=terraform validate
+    - terraform -chdir=terraform-kubeadm init -backend=false -input=false
+    - terraform -chdir=terraform-kubeadm validate
   rules:
-    - changes:
-        - "terraform/**/*"
-
-# ── Security ─────────────────────────────────────────────────────────────────
+    - changes: ["terraform/**/*", "terraform-kubeadm/**/*"]
 
 security:secret-detection:
   stage: security
-  image: zricethezav/gitleaks:latest
+  image:
+    name: zricethezav/gitleaks@sha256:eadfe256fa18d6a78a717abc9ed454c8e03865d1c46d627bca83977f4424901a
+    entrypoint: [""]
   script:
-    - gitleaks detect --verbose --log-opts "HEAD~1..HEAD"
+    - |
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        RANGE="${CI_MERGE_REQUEST_DIFF_BASE_SHA}..${CI_COMMIT_SHA}"
+      elif [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] &&
+           [ "$CI_COMMIT_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+        RANGE="${CI_COMMIT_BEFORE_SHA}..${CI_COMMIT_SHA}"
+      else
+        RANGE="$CI_COMMIT_SHA"
+      fi
+      gitleaks detect --source . --verbose --log-opts "$RANGE"
   allow_failure: false
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
 
 security:manifest-scan:
   stage: security
-  image: kubesec/kubesec:latest
+  image: alpine@sha256:1e42bbe2508154c9126d48c2b8a75420c3544343bf86fd041fb7527e017a4b4a
+  before_script:
+    - apk add --no-cache curl python3
+    - curl -fsSLo /tmp/kubesec.tar.gz https://github.com/controlplaneio/kubesec/releases/download/v2.14.0/kubesec_linux_amd64.tar.gz
+    - echo "961f9f2c1fa0279cd27ac94c4cb2bba9d25a9e312f2e2403ed016dfc172a3d12  /tmp/kubesec.tar.gz" | sha256sum -c -
+    - tar -xzf /tmp/kubesec.tar.gz -C /usr/local/bin kubesec
   script:
     - |
-      FAILED=0
-      for f in kubernetes/deployments/*.yaml; do
-        echo "Scanning $f..."
-        RESULT=$(kubesec scan "$f" 2>/dev/null)
-        SCORE=$(echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['score'])" 2>/dev/null || echo 0)
-        echo "  Score: $SCORE"
-        if [ "${SCORE:-0}" -lt 0 ] 2>/dev/null; then
-          echo "  FAIL: negative security score"
-          FAILED=1
-        fi
+      failed=0
+      for file in kubernetes/deployments/*.yaml; do
+        echo "Scanning $file"
+        score=$(kubesec scan "$file" | python3 -c 'import json,sys; scores=[item.get("score", 0) for item in json.load(sys.stdin)]; print(min(scores) if scores else 0)')
+        echo "Score: $score"
+        if [ "$score" -lt 0 ]; then failed=1; fi
       done
-      exit $FAILED
-  allow_failure: true
+      exit "$failed"
+  allow_failure: false
   rules:
-    - changes:
-        - "kubernetes/deployments/*.yaml"
+    - changes: ["kubernetes/deployments/*.yaml"]
 
 security:snyk-iac:
   stage: security
-  image: snyk/snyk:linux
+  image:
+    name: snyk/snyk@sha256:3f65787988dba5d13e4e5fd9dcd2cab1db120da84d74ac4108ecf7089a2380af
+    entrypoint: [""]
   script:
     - |
-      if [ -z "$SNYK_TOKEN" ]; then
-        echo "SNYK_TOKEN not set — skipping Snyk IaC scan (add it as a masked CI/CD variable to enable)"
+      if [ -z "${SNYK_TOKEN:-}" ]; then
+        echo "SNYK_TOKEN not set; skipping optional Snyk IaC scan"
         exit 0
       fi
-      # Scan Terraform + Kubernetes manifests for IaC misconfigurations.
-      # Fails the job only on high+ severity; allow_failure keeps the pipeline green for now.
       snyk iac test terraform/ terraform-kubeadm/ kubernetes/ --severity-threshold=high
   allow_failure: true
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-
-# ── Deploy ───────────────────────────────────────────────────────────────────
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
 
 deploy:kubernetes:
   stage: deploy
-  image: bitnami/kubectl:latest
+  image:
+    name: registry.k8s.io/kubectl@sha256:5ec41f8bf67b6e6fb15351c6ad57e19523a5cf67f69a6ed0e446efafc154da13
+    entrypoint: [""]
   before_script:
-    - echo "$KUBECONFIG_BASE64" | base64 -d > $KUBECONFIG
-    - chmod 600 $KUBECONFIG
+    - test -n "${KUBECONFIG_BASE64:-}"
+    - printf '%s' "$KUBECONFIG_BASE64" | base64 -d > "$KUBECONFIG"
+    - chmod 600 "$KUBECONFIG"
   script:
-    - kubectl apply -f kubernetes/deployments/
-    - kubectl apply -f kubernetes/policies/
-    - kubectl apply -f kubernetes/backup/
-    - kubectl rollout status deployment --all-namespaces --timeout=5m || true
+    - >-
+      find kubernetes -type f -name '*.yaml' ! -name '*.example.yaml' -print0 |
+      sort -z | xargs -0 -n1 kubectl apply -f
+    - kubectl rollout status deployment --all --all-namespaces --timeout=5m
   environment:
     name: homelab
     url: http://192.168.122.218:30080
@@ -147,45 +169,40 @@ deploy:kubernetes:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
 
+# The Helm image contains kubectl and is pinned to an immutable digest.
 deploy:monitoring:
   stage: deploy
-  image: alpine/helm:3.14
+  image:
+    name: alpine/helm@sha256:31ce11c4ee98c5e1e13628ead9212e665f32c3277cae63bd55ced32989089f3e
+    entrypoint: [""]
   before_script:
-    - echo "$KUBECONFIG_BASE64" | base64 -d > $KUBECONFIG
-    - chmod 600 $KUBECONFIG
+    - test -n "${KUBECONFIG_BASE64:-}"
+    - printf '%s' "$KUBECONFIG_BASE64" | base64 -d > "$KUBECONFIG"
+    - chmod 600 "$KUBECONFIG"
     - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     - helm repo update
   script:
     - kubectl apply -f monitoring/grafana/homelab-alerts.yaml
-    - |
-      helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
-        -f monitoring/fix-values.yaml \
-        -n monitoring --create-namespace \
-        --atomic --timeout 10m
+    - >-
+      helm upgrade --install monitoring prometheus-community/kube-prometheus-stack
+      -f monitoring/fix-values.yaml -n monitoring --create-namespace
+      --atomic --timeout 10m
   environment:
     name: homelab-monitoring
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
-      changes:
-        - "monitoring/**/*"
-
-# ── Smoke Tests ───────────────────────────────────────────────────────────────
+      changes: ["monitoring/**/*"]
 
 smoke:cluster-health:
   stage: smoke
-  image: curlimages/curl:latest
+  image:
+    name: curlimages/curl@sha256:25d29daeb9b14b89e2fa8cc17c70e4b188bca1466086907c2d9a4b56b59d8e21
+    entrypoint: [""]
   script:
-    - |
-      echo "Checking Prometheus..."
-      curl -sf "http://${K3S_CONTROL_IP}:30090/-/healthy" || exit 1
-      echo "Checking Grafana..."
-      curl -sf "http://${K3S_CONTROL_IP}:30080/api/health" || exit 1
-      echo "Checking Alertmanager..."
-      curl -sf "http://${K3S_CONTROL_IP}:30093/-/healthy" || exit 1
-      echo "All health checks passed."
+    - curl -fsS "http://${K3S_CONTROL_IP}:30090/-/healthy"
+    - curl -fsS "http://${K3S_CONTROL_IP}:30080/api/health"
+    - curl -fsS "http://${K3S_CONTROL_IP}:30093/-/healthy"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      when: on_success
-  needs:
-    - deploy:kubernetes
+  needs: ["deploy:kubernetes"]

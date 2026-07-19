@@ -13,7 +13,7 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 - **Complete incident management pipeline** — alert fires → Slack notification with runbook link → GitLab issue auto-created → auto-closed on resolution
 - **GitOps CI/CD** — lint, validate (kubeconform + promtool), security scan (gitleaks + kubesec), deploy, smoke test stages
 - **Automated backups** — k3s SQLite snapshots every 12h, Vaultwarden SQLite hot-copy daily, GitLab full backup daily; all retained with configurable history
-- **Security hardening** — NetworkPolicy default-deny, RBAC least-privilege ServiceAccounts, image SHA pinning, PodDisruptionBudgets, pod anti-affinity
+- **Security hardening** — NetworkPolicy default-deny, least-privilege ServiceAccounts, immutable CI tool images, PodDisruptionBudgets, and pod anti-affinity
 - **Self-healing automation** — crashloop recovery cronjobs, health check scripts with auto-fix
 - **Claude AI auto-healing** — Alertmanager fires → Claude reads live cluster state → diagnoses root cause → one-click Approve in Slack executes the fix automatically
 - **Runbook library** — 13 runbooks covering control plane, nodes, storage, applications, monitoring, and full disaster recovery with RTO/RPO targets
@@ -79,13 +79,14 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 Host machine (KVM/libvirt, 32GB RAM)
 ├── k3s-control    .218   2 vCPU / 2GB   control plane
 ├── k3s-worker-1   .219   2 vCPU / 2GB   workloads
+├── ci-runner      .220                    GitLab shell runner
 ├── k3s-worker-2   .221   2 vCPU / 2GB   workloads (dynamic, Terraform-managed)
 └── k3s-infra      .230   2 vCPU / 8GB   GitLab CE + monitoring stack + NFS
 ```
 
 All IPs are in the default libvirt NAT range (`192.168.122.0/24`). Set `base_ip_octet` in `terraform.tfvars` if yours is different.
 
-Additional workers (`k3s-worker-3`, ...) are spun up on demand via Terraform. The GitLab runner is embedded in `k3s-infra` rather than a dedicated VM.
+Additional workers (`k3s-worker-3`, ...) are spun up on demand via Terraform. GitLab runs on `k3s-infra`; CI jobs execute on the dedicated `ci-runner` VM.
 
 > **Known limitation:** All VMs run on a single KVM host. This is intentional for a homelab but means the physical host is a single point of failure. Full recovery from host loss is documented in the [disaster recovery runbook](docs/runbooks/disaster-recovery/).
 
@@ -123,7 +124,7 @@ scripts/
   webhook.py        Alertmanager → Claude AI → Slack → GitLab incident bridge
   lab-control.py    main control panel — start/stop VMs, deploy, run scenarios
   lab-tui.py        Textual TUI version of the above
-  check-lab.sh      health check + auto-fix script
+  check-lab.sh      read-only health check with explicit remediation modes
   deploy.sh         build and push the trengo-search app
 
 terraform/          k3s worker VMs (dynamic scale)
@@ -172,6 +173,13 @@ helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
 ```bash
 python3 scripts/lab-control.py   # menu-driven
 python3 scripts/lab-tui.py       # TUI (requires: pip install textual)
+./scripts/check-lab.sh            # read-only health report
+./scripts/check-lab.sh --fix      # apply in-place remediations
+./scripts/check-lab.sh --restart  # graceful VM restart, then remediate
+./scripts/check-lab.sh --reboot   # force VM reboot, then remediate
+./scripts/k3s-start.sh             # start control plane and workers
+./scripts/k3s-stop.sh              # gracefully stop control plane and workers
+./scripts/lab-stop-all.sh          # also stop ci-runner; never stops k3s-infra
 ```
 
 ---
@@ -207,7 +215,7 @@ Restore procedures for each component are documented in the [runbooks](docs/runb
 
 **RBAC** — each workload has a dedicated ServiceAccount with least-privilege roles. `automountServiceAccountToken: false` is set by default; tokens are only mounted where explicitly required. The `webhook.py` ServiceAccount is scoped to read-only pod/node access; command execution is routed via SSH with a dedicated key, not via the Kubernetes API.
 
-**Image pinning** — all third-party images (Vaultwarden, registry) are pinned to SHA256 digests to prevent supply-chain drift from mutable tags.
+**Supply-chain controls** — CI validation and deployment tools use immutable SHA256 image digests. Critical third-party workloads such as Vaultwarden are digest-pinned; locally built application images remain an explicit exception and are tracked as future hardening work.
 
 **PodDisruptionBudgets** — applied to Traefik and pylab to prevent accidental full-cluster downtime during rolling updates.
 
@@ -296,13 +304,13 @@ Each runbook includes: symptoms, immediate triage steps, root cause checklist, r
 
 ## CI/CD
 
-`.gitlab-ci.yml` stages running on the self-hosted GitLab runner embedded in `k3s-infra`:
+`.gitlab-ci.yml` stages run on the self-hosted GitLab runner VM. GitHub pull requests also run `.github/workflows/validate.yml`, giving the public mirror the same core syntax, Terraform, Kubernetes, Prometheus, and secret-leak checks.
 
 | Stage | Tools | What it checks |
 |---|---|---|
-| lint | yamllint, `terraform fmt` | YAML syntax, Terraform formatting |
-| validate | kubeconform, promtool, `terraform validate` | Manifest schema, alert rule syntax, Terraform config |
-| security | gitleaks, kubesec | Secret leaks in diff, Kubernetes security best-practices score |
+| lint | yamllint, ShellCheck, Python compile, `terraform fmt` | YAML/shell/Python syntax and Terraform formatting |
+| validate | kubeconform, promtool, `terraform validate` | All deployable manifest schemas, alert rules, and both Terraform roots |
+| security | gitleaks, kubesec, Snyk IaC | Secret leaks in the full change range and Kubernetes/IaC security findings |
 | deploy | `kubectl apply`, `helm upgrade` | Applied to cluster — manual gate required on `main` |
 | smoke test | curl, `kubectl rollout status` | Endpoint reachability, rollout completion |
 

@@ -3,64 +3,70 @@
 DevOps Home Lab — TUI Control Panel
 =====================================
 A terminal UI with live VM status, keyboard navigation,
-and integrated controls for K3s, CRC, Ansible, and Terraform.
+and integrated controls for K3s, Ansible, and Terraform.
 
 Requirements: pip install textual
 Usage:        python3 lab-tui.py
 """
 
-import subprocess
 import os
+from pathlib import Path
 import re
+import shlex
+import subprocess
 import time
-import threading
-from textual.app import App, ComposeResult
-from textual.widgets import (
-    Header, Footer, Static, Button, Label, Log, ListView, ListItem
-)
-from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
-from textual.reactive import reactive
-from textual.binding import Binding
+
 from textual import work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Container, Horizontal, Vertical
+from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import ProgressBar
+from textual.widgets import Button, Footer, Header, Label, Log, Static
 
 # ─────────────────────────────────────────────────────────────
 #  CONFIGURATION
 # ─────────────────────────────────────────────────────────────
-SCRIPTS_DIR    = os.path.dirname(os.path.abspath(__file__))
-TERRAFORM_DIR  = os.path.expanduser("~/homelab/terraform")
-ANSIBLE_DIR    = os.path.expanduser("~/homelab/ansible")
-ANSIBLE_INV    = os.path.join(ANSIBLE_DIR, "inventory/homelab.ini")
+SCRIPTS_DIR = Path(__file__).resolve().parent
+REPO_DIR = SCRIPTS_DIR.parent
+TERRAFORM_DIR = REPO_DIR / "terraform"
 
 K3S_CONTROL_IP = "192.168.122.218"
-CI_RUNNER_IP   = "192.168.122.220"
-K3S_URL        = f"https://{K3S_CONTROL_IP}:6443"
+CI_RUNNER_IP = "192.168.122.220"
+K3S_INFRA_IP = "192.168.122.230"
+K3S_URL = f"https://{K3S_CONTROL_IP}:6443"
 
 def _get_secret(env_var, vault_item):
-    """Read secret from env, falling back to Bitwarden CLI."""
+    """Read a secret only when an operation needs it."""
     value = os.environ.get(env_var, "")
     if value:
         return value
-    result = subprocess.run(["bw", "get", "password", vault_item],
-                            capture_output=True, text=True)
-    if result.returncode == 0 and result.stdout.strip():
+    try:
+        result = subprocess.run(
+            ["bw", "get", "password", vault_item],
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        result = None
+    if result and result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
-    print(f"Error: {env_var} not set and vault fetch failed.")
-    print("Run: source ~/homelab/scripts/load-secrets.sh")
-    raise SystemExit(1)
+    raise RuntimeError(
+        f"{env_var} is unavailable; run: source {SCRIPTS_DIR}/load-secrets.sh"
+    )
 
-K3S_TOKEN = _get_secret("K3S_TOKEN", "homelab-k3s-token")
-BASE_IP_OCTET  = 221
-SSH_OPTS       = "-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no"
-
-# Static VMs — workers are discovered dynamically from virsh
-STATIC_VMS = ["k3s-control", "ci-runner", "crc"]
+BASE_IP_OCTET = 221
+SSH_ARGS = [
+    "-o", "ConnectTimeout=5",
+    "-o", "BatchMode=yes",
+    "-o", "StrictHostKeyChecking=accept-new",
+]
+SSH_OPTS = " ".join(shlex.quote(arg) for arg in SSH_ARGS)
 
 # Services to check
 SERVICES = [
     ("Grafana",      f"http://{K3S_CONTROL_IP}:30080"),
-    ("GitLab",       f"http://{CI_RUNNER_IP}"),
+    ("GitLab",       f"http://{K3S_INFRA_IP}:8929"),
     ("Trengo App",   f"http://{K3S_CONTROL_IP}:32504"),
     ("Portainer",    f"http://{K3S_CONTROL_IP}:30777"),
     ("K8s Dashboard",f"https://{K3S_CONTROL_IP}:30443"),
@@ -74,26 +80,29 @@ def run_cmd(cmd):
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 
 def vm_states():
-    _, out, _ = run_cmd("virsh list --all 2>/dev/null")
-    running = set()
-    all_defined = []
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[0].lstrip("-").isdigit() or (len(parts) >= 2 and parts[0] == "-"):
-            name = parts[1] if parts[0] == "-" else parts[1]
-            all_defined.append(name)
-            if len(parts) >= 3 and parts[2] == "running":
-                running.add(name)
-    workers = sorted(vm for vm in all_defined if vm.startswith("k3s-worker-"))
-    vms = ["k3s-control"] + workers + ["ci-runner", "crc"]
-    return {vm: vm in running for vm in vms}
+    _, defined_output, _ = run_cmd("virsh list --all --name 2>/dev/null")
+    _, running_output, _ = run_cmd("virsh list --state-running --name 2>/dev/null")
+    defined = {name for name in defined_output.splitlines() if name}
+    running = {name for name in running_output.splitlines() if name}
+    workers = sorted(
+        (vm for vm in defined if re.fullmatch(r"k3s-worker-\d+", vm)),
+        key=lambda vm: int(vm.rsplit("-", 1)[1]),
+    )
+    vms = ["k3s-control", *workers, "k3s-infra", "ci-runner"]
+    return {vm: vm in running for vm in vms if vm in defined}
 
 def service_states():
-    """Return dict of {name: bool} — True = reachable."""
+    """Return whether each configured service is reachable."""
     states = {}
     for name, url in SERVICES:
-        code, _, _ = run_cmd(f"curl -sfk --max-time 3 -o /dev/null {url}")
-        states[name] = (code == 0)
+        try:
+            result = subprocess.run(
+                ["curl", "-sfk", "--max-time", "3", "-o", "/dev/null", url],
+                capture_output=True,
+            )
+            states[name] = result.returncode == 0
+        except FileNotFoundError:
+            states[name] = False
     return states
 
 def k3s_nodes():
@@ -110,36 +119,63 @@ def k3s_nodes():
     return nodes
 
 def get_vm_count():
-    tfvars = os.path.join(TERRAFORM_DIR, "terraform.tfvars")
+    tfvars = TERRAFORM_DIR / "terraform.tfvars"
     try:
-        content = open(tfvars).read()
-        m = re.search(r'vm_count\s*=\s*(\d+)', content)
-        return int(m.group(1)) if m else 0
-    except Exception:
+        content = tfvars.read_text()
+    except OSError:
         return 0
+    match = re.search(r"vm_count\s*=\s*(\d+)", content)
+    return int(match.group(1)) if match else 0
 
 def get_worker_ip(worker_num):
     return f"192.168.122.{BASE_IP_OCTET + worker_num - 2}"
 
 def run_script(name, log_widget):
-    """Run a bash script and stream output to log widget."""
-    path = os.path.join(SCRIPTS_DIR, name)
-    if not os.path.isfile(path):
+    """Run a repository script without invoking an extra shell parser."""
+    path = SCRIPTS_DIR / name
+    if not path.is_file():
         log_widget.write_line(f"[red]FAIL Script not found: {path}[/red]")
         return
     log_widget.write_line(f"[cyan]$ bash {path}[/cyan]")
     proc = subprocess.Popen(
-        f"bash {path}", shell=True,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        ["bash", str(path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
-    for line in proc.stdout:
-        log_widget.write_line(line.rstrip())
-    proc.wait()
-    rc = proc.returncode
+    if proc.stdout:
+        for line in proc.stdout:
+            log_widget.write_line(line.rstrip())
+    rc = proc.wait()
     if rc == 0:
         log_widget.write_line("[green]OK Done[/green]")
     else:
         log_widget.write_line(f"[red]FAIL Exited with code {rc}[/red]")
+
+
+def install_k3s_agent(ip):
+    """Install an agent without placing its join token in process arguments."""
+    try:
+        token = _get_secret("K3S_TOKEN", "homelab-k3s-token")
+    except RuntimeError as exc:
+        return 1, "", str(exc)
+
+    remote_script = "\n".join([
+        "set -eu",
+        (
+            "curl -sfL https://get.k3s.io | "
+            f"K3S_URL={shlex.quote(K3S_URL)} "
+            f"K3S_TOKEN={shlex.quote(token)} sh -s - agent"
+        ),
+        "sudo systemctl restart k3s-agent",
+    ])
+    result = subprocess.run(
+        ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
+        input=remote_script,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 # ─────────────────────────────────────────────────────────────
 #  CONFIRM DIALOG
@@ -345,16 +381,13 @@ class LabTUI(App):
                 yield Label("  K3S CLUSTER")
                 yield Button("▶  Start K3s",    id="k3s-start",   classes="section-btn")
                 yield Button("  Stop K3s",     id="k3s-stop",    classes="section-btn")
-                yield Label("  CRC")
-                yield Button("▶  Start CRC",    id="crc-start",   classes="section-btn")
-                yield Button("  Stop CRC",     id="crc-stop",    classes="section-btn")
                 yield Label("  LAB")
                 yield Button(" Stop ALL",      id="stop-all",    classes="danger-btn")
                 yield Button(" Health Check",  id="health",      classes="section-btn")
                 yield Button(" Refresh Status",id="refresh-btn", classes="section-btn")
                 yield Label("  SCALE")
-                yield Button("Upscale Upscale",       id="upscale",     classes="section-btn")
-                yield Button("Downscale Downscale",     id="downscale",   classes="section-btn")
+                yield Button(" Upscale",       id="upscale",     classes="section-btn")
+                yield Button(" Downscale",     id="downscale",   classes="section-btn")
                 yield Label("  TOOLS")
                 yield Button(" Rejoin Workers",id="rejoin",      classes="section-btn")
                 yield Button(" Sync Images",   id="sync",        classes="section-btn")
@@ -383,9 +416,11 @@ class LabTUI(App):
         self.call_from_thread(setattr, panel, "vm_data", states)
 
         # Services (only if k3s-control is running)
-        if states.get("k3s-control") or states.get("ci-runner"):
+        if any(states.get(vm) for vm in ("k3s-control", "k3s-infra", "ci-runner")):
             svcs = service_states()
             self.call_from_thread(setattr, panel, "service_data", svcs)
+        else:
+            self.call_from_thread(setattr, panel, "service_data", {})
 
         # K3s nodes (only if control plane is up)
         if states.get("k3s-control"):
@@ -415,18 +450,9 @@ class LabTUI(App):
                 lambda ok: self._run_script_async("k3s-stop.sh", " Stopping K3s...") if ok else None
             )
 
-        elif btn == "crc-start":
-            self._run_script_async("crc-start.sh", "▶ Starting CRC (this takes ~60s)...")
-
-        elif btn == "crc-stop":
-            self.push_screen(
-                ConfirmScreen("Stop CRC?"),
-                lambda ok: self._run_script_async("crc-stop.sh", " Stopping CRC...") if ok else None
-            )
-
         elif btn == "stop-all":
             self.push_screen(
-                ConfirmScreen("[WARN] Stop ALL environments?\n(K3s + CRC + CI Runner)"),
+                ConfirmScreen("[WARN] Stop k3s and CI runner?\n(k3s-infra remains running)"),
                 lambda ok: self._run_script_async("lab-stop-all.sh", " Stopping all environments...") if ok else None
             )
 
@@ -437,7 +463,10 @@ class LabTUI(App):
             self._run_upscale()
 
         elif btn == "downscale":
-            self._run_downscale()
+            self.push_screen(
+                ConfirmScreen("Drain and remove the highest-numbered Terraform worker?"),
+                lambda ok: self._run_downscale() if ok else None,
+            )
 
         elif btn == "rejoin":
             self.push_screen(
@@ -474,19 +503,27 @@ class LabTUI(App):
 
         # Terraform
         self.call_from_thread(log.write_line, "[cyan]→ Running terraform apply...[/cyan]")
-        tfvars = os.path.join(TERRAFORM_DIR, "terraform.tfvars")
+        tfvars = TERRAFORM_DIR / "terraform.tfvars"
         try:
-            content = open(tfvars).read()
-            content = re.sub(r'vm_count\s*=\s*\d+', f'vm_count       = {new_count}', content)
-            open(tfvars, 'w').write(content)
-        except Exception as e:
+            original_content = tfvars.read_text()
+            updated_content = re.sub(
+                r'vm_count\s*=\s*\d+', f'vm_count       = {new_count}', original_content
+            )
+            tfvars.write_text(updated_content)
+        except OSError as e:
             self.call_from_thread(log.write_line, f"[red]FAIL Could not update tfvars: {e}[/red]")
             return
 
-        rc, out, err = run_cmd(f"cd {TERRAFORM_DIR} && terraform apply -auto-approve")
+        rc, out, err = run_cmd(
+            f"terraform -chdir={shlex.quote(str(TERRAFORM_DIR))} apply -auto-approve"
+        )
         for line in out.splitlines(): self.call_from_thread(log.write_line, line)
         if rc != 0:
-            self.call_from_thread(log.write_line, "[red]FAIL Terraform failed[/red]")
+            tfvars.write_text(original_content)
+            self.call_from_thread(
+                log.write_line,
+                f"[red]FAIL Terraform failed; restored terraform.tfvars: {err}[/red]",
+            )
             return
 
         # Boot delay
@@ -508,11 +545,13 @@ class LabTUI(App):
 
         # Join k3s
         self.call_from_thread(log.write_line, "[cyan]→ Joining k3s cluster...[/cyan]")
-        rc, _, _ = run_cmd(
-            f'ssh {SSH_OPTS} labadmin@{new_ip} '
-            f'"curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN} sh -"'
-        )
-        run_cmd(f'ssh {SSH_OPTS} labadmin@{new_ip} "sudo systemctl restart k3s-agent"')
+        rc, _, err = install_k3s_agent(new_ip)
+        if rc != 0:
+            self.call_from_thread(
+                log.write_line,
+                f"[red]FAIL Could not join {new_name}: {err or 'unknown error'}[/red]",
+            )
+            return
 
         self.call_from_thread(log.write_line, f"[green]OK {new_name} added![/green]")
         self.call_from_thread(self.refresh_status)
@@ -530,19 +569,47 @@ class LabTUI(App):
         self.call_from_thread(log.write_line, f"\n[bold yellow]Downscale Removing {wname}...[/bold yellow]")
 
         # Drain
-        run_cmd(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl drain {wname} --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true"')
-        run_cmd(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl delete node {wname} 2>/dev/null || true"')
+        drain_rc, _, drain_err = run_cmd(
+            f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
+            f'"sudo k3s kubectl drain {wname} '
+            '--ignore-daemonsets --delete-emptydir-data --force"'
+        )
+        if drain_rc != 0:
+            self.call_from_thread(
+                log.write_line, f"[red]FAIL Could not drain {wname}: {drain_err}[/red]"
+            )
+            return
 
         # Terraform
-        tfvars = os.path.join(TERRAFORM_DIR, "terraform.tfvars")
+        tfvars = TERRAFORM_DIR / "terraform.tfvars"
         try:
-            content = open(tfvars).read()
-            content = re.sub(r'vm_count\s*=\s*\d+', f'vm_count       = {current - 1}', content)
-            open(tfvars, 'w').write(content)
-        except Exception as e:
-            self.call_from_thread(log.write_line, f"[red]FAIL {e}[/red]"); return
+            content = tfvars.read_text()
+            updated = re.sub(
+                r'vm_count\s*=\s*\d+', f'vm_count       = {current - 1}', content
+            )
+            tfvars.write_text(updated)
+        except OSError as e:
+            self.call_from_thread(log.write_line, f"[red]FAIL {e}[/red]")
+            return
 
-        run_cmd(f"cd {TERRAFORM_DIR} && terraform apply -auto-approve")
+        rc, _, err = run_cmd(
+            f"terraform -chdir={shlex.quote(str(TERRAFORM_DIR))} apply -auto-approve"
+        )
+        if rc != 0:
+            tfvars.write_text(content)
+            run_cmd(
+                f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
+                f'"sudo k3s kubectl uncordon {wname}"'
+            )
+            self.call_from_thread(
+                log.write_line,
+                f"[red]FAIL Terraform failed; restored terraform.tfvars and uncordoned {wname}: {err}[/red]",
+            )
+            return
+        run_cmd(
+            f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
+            f'"sudo k3s kubectl delete node {wname} --ignore-not-found"'
+        )
         self.call_from_thread(log.write_line, f"[green]OK {wname} removed![/green]")
         self.call_from_thread(self.refresh_status)
 
@@ -558,11 +625,7 @@ class LabTUI(App):
             self.call_from_thread(log.write_line, f"  Processing [bold]{wname}[/bold] ({wip})...")
             run_cmd(f'ssh {SSH_OPTS} labadmin@{wip} "sudo rm -f /etc/rancher/node/password"')
             run_cmd(f'ssh {SSH_OPTS} labadmin@{wip} "sudo systemctl stop k3s-agent 2>/dev/null || true"')
-            rc, _, _ = run_cmd(
-                f'ssh {SSH_OPTS} labadmin@{wip} '
-                f'"curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN} sh -"'
-            )
-            run_cmd(f'ssh {SSH_OPTS} labadmin@{wip} "sudo systemctl restart k3s-agent"')
+            rc, _, _ = install_k3s_agent(wip)
             icon = "OK" if rc == 0 else "FAIL"
             color = "green" if rc == 0 else "red"
             self.call_from_thread(log.write_line, f"  [{color}]{icon} {wname}[/{color}]")
