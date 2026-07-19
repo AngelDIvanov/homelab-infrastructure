@@ -1,0 +1,90 @@
+---
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        with:
+          fetch-depth: 0
+
+      - name: Check shell syntax
+        run: |
+          for file in scripts/*.sh; do bash -n "$file"; done
+
+      - name: Run ShellCheck
+        run: >-
+          docker run --rm -v "$PWD:/work" -w /work --entrypoint /bin/shellcheck
+          koalaman/shellcheck-alpine@sha256:5921d946dac740cbeec2fb1c898747b6105e585130cc7f0602eec9a10f7ddb63
+          --severity=warning scripts/*.sh
+
+      - name: Compile Python
+        run: python3 -m compileall -q scripts
+
+      - name: Lint YAML
+        run: >-
+          docker run --rm -v "$PWD:/code" -w /code
+          pipelinecomponents/yamllint@sha256:82f082414bad17ec04f4d271262a6dcaf64883bb4f1ce73923380125af8b94ee
+          yamllint -d '{extends: relaxed, rules: {line-length: disable, colons: disable, empty-lines: disable}}' .
+
+      - name: Check Terraform formatting
+        run: |
+          image=hashicorp/terraform@sha256:386b7bff108f9fd3b79a2e0110190c162b5e4aebf26afe3eef028fd89532c17e
+          docker run --rm -v "$PWD:/work" -w /work "$image" -chdir=terraform fmt -check -recursive
+          docker run --rm -v "$PWD:/work" -w /work "$image" -chdir=terraform-kubeadm fmt -check -recursive
+
+      - name: Validate Terraform
+        run: |
+          image=hashicorp/terraform@sha256:386b7bff108f9fd3b79a2e0110190c162b5e4aebf26afe3eef028fd89532c17e
+          for directory in terraform terraform-kubeadm; do
+            docker run --rm -v "$PWD:/work" -w "/work/$directory" "$image" init -backend=false -input=false
+            docker run --rm -v "$PWD:/work" -w "/work/$directory" "$image" validate
+          done
+
+      - name: Validate Kubernetes manifests
+        run: |
+          mapfile -d '' manifests < <(find kubernetes -type f -name '*.yaml' ! -name '*.example.yaml' -print0)
+          docker run --rm -v "$PWD:/work" -w /work \
+            ghcr.io/yannh/kubeconform@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c \
+            -strict -summary -ignore-missing-schemas -kubernetes-version 1.29.0 \
+            "${manifests[@]}"
+
+      - name: Validate Prometheus rules
+        run: |
+          sed -n '/^spec:/,$p' monitoring/grafana/homelab-alerts.yaml | sed '1d;s/^  //' > /tmp/homelab-rules.yaml
+          docker run --rm -v /tmp/homelab-rules.yaml:/tmp/homelab-rules.yaml:ro \
+            --entrypoint /bin/promtool \
+            prom/prometheus@sha256:4f6c47e39a9064028766e8c95890ed15690c30f00c4ba14e7ce6ae1ded0295b1 \
+            check rules /tmp/homelab-rules.yaml
+
+      - name: Scan changes for secrets
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE_REF"
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks@sha256:eadfe256fa18d6a78a717abc9ed454c8e03865d1c46d627bca83977f4424901a \
+            detect --source . --verbose --log-opts "origin/$BASE_REF..HEAD"
+
+      - name: Scan repository for secrets
+        if: github.event_name == 'push'
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo
+          zricethezav/gitleaks@sha256:eadfe256fa18d6a78a717abc9ed454c8e03865d1c46d627bca83977f4424901a
+          detect --source . --verbose

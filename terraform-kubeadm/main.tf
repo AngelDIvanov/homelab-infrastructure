@@ -18,12 +18,12 @@ resource "libvirt_volume" "control" {
   pool             = "default"
   base_volume_pool = "default"
   base_volume_name = "ubuntu-cloud-base.qcow2"
-  size             = 21474836480  # 20GB
+  size             = 21474836480 # 20GB
 }
 
 resource "libvirt_cloudinit_disk" "control" {
-  name  = "kubeadm-control-cloudinit.iso"
-  pool  = "default"
+  name = "kubeadm-control-cloudinit.iso"
+  pool = "default"
   user_data = templatefile("${path.module}/cloud-init/user-data.tpl", {
     hostname       = "kubeadm-control"
     ssh_public_key = var.ssh_public_key
@@ -67,12 +67,12 @@ resource "libvirt_volume" "worker" {
   pool             = "default"
   base_volume_pool = "default"
   base_volume_name = "ubuntu-cloud-base.qcow2"
-  size             = 21474836480  # 20GB
+  size             = 21474836480 # 20GB
 }
 
 resource "libvirt_cloudinit_disk" "worker" {
-  name  = "kubeadm-worker-1-cloudinit.iso"
-  pool  = "default"
+  name = "kubeadm-worker-1-cloudinit.iso"
+  pool = "default"
   user_data = templatefile("${path.module}/cloud-init/user-data.tpl", {
     hostname       = "kubeadm-worker-1"
     ssh_public_key = var.ssh_public_key

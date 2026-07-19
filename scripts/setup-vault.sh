@@ -15,7 +15,6 @@ set -euo pipefail
 
 HOMELAB_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPTS_DIR="$HOMELAB_DIR/scripts"
-ANSIBLE_DIR="$HOMELAB_DIR/ansible"
 SESSION_FILE="$HOME/.config/homelab/.bw_session"
 VAULTWARDEN_URL="https://192.168.122.218:30900"
 
@@ -117,8 +116,11 @@ create_secret() {
         return
     fi
     local json
-    json=$(printf '{"type":1,"name":"%s","login":{"password":"%s"}}' "$name" "$value")
-    echo "$json" | bw encode | bw create item --quiet
+    json=$(
+        { printf '%s\n' "$name"; printf '%s' "$value"; } |
+            python3 -c 'import json, sys; name = sys.stdin.readline().rstrip("\n"); value = sys.stdin.read(); print(json.dumps({"type": 1, "name": name, "login": {"password": value}}))'
+    )
+    printf '%s' "$json" | bw encode | bw create item --quiet
     success "  Stored '$name' in vault"
 }
 
@@ -149,16 +151,20 @@ create_secret "homelab-send-to"      "$EXISTING_SEND_TO"
 # ─── Step 5: Clean ~/.bashrc ─────────────────────────────────────────────────
 step "Step 5/5 — Removing hardcoded secrets from ~/.bashrc"
 
-# Backup first
-cp "$HOME/.bashrc" "$HOME/.bashrc.bak.$(date +%Y%m%d%H%M%S)"
-success "Backed up ~/.bashrc"
+# Back up shell configuration, but sanitize the backup as well.
+BASHRC_BACKUP="$HOME/.bashrc.bak.$(date +%Y%m%d%H%M%S)"
+umask 077
+cp "$HOME/.bashrc" "$BASHRC_BACKUP"
+chmod 600 "$BASHRC_BACKUP"
 
-# Remove secret exports
-sed -i '/^export GITLAB_TOKEN=/d' "$HOME/.bashrc"
-sed -i '/^export GMAIL_APP_PASS=/d' "$HOME/.bashrc"
-sed -i '/^export GMAIL_USER=/d' "$HOME/.bashrc"
-sed -i '/^export SEND_TO=/d' "$HOME/.bashrc"
-success "Removed hardcoded secrets from ~/.bashrc"
+# Remove secret exports from both files so the backup cannot become a leak.
+for file in "$HOME/.bashrc" "$BASHRC_BACKUP"; do
+    sed -i '/^export GITLAB_TOKEN=/d' "$file"
+    sed -i '/^export GMAIL_APP_PASS=/d' "$file"
+    sed -i '/^export GMAIL_USER=/d' "$file"
+    sed -i '/^export SEND_TO=/d' "$file"
+done
+success "Backed up ~/.bashrc and removed hardcoded secrets from both copies"
 
 # Add load-secrets sourcing if not already there
 if ! grep -q "load-secrets.sh" "$HOME/.bashrc"; then

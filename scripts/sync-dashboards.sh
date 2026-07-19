@@ -6,7 +6,6 @@ SSH_OPTS="-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no"
 DASHBOARD_DIR="$(cd "$(dirname "$0")/../monitoring/grafana" && pwd)"
 
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 BOLD='\033[1m'

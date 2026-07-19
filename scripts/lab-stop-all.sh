@@ -1,25 +1,47 @@
-#!/bin/bash
-echo "Shutting down all environment..."
+#!/usr/bin/env bash
+set -uo pipefail
 
-echo "Stopping K3s workers and control plane..."
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SHUTDOWN_TIMEOUT=${SHUTDOWN_TIMEOUT:-120}
 
-# Stop all workers discovered from virsh — no hardcoding
-for vm in $(virsh list --all --name 2>/dev/null | grep -E '^k3s-worker-'); do
-    echo "Stopping $vm..."
-    virsh shutdown "$vm"
-done
+vm_running() {
+    [ "$(virsh domstate "$1" 2>/dev/null)" = "running" ]
+}
 
-virsh shutdown k3s-control
-echo "Waiting for K3s VMs to stop..."
-sleep 15
+stop_vm() {
+    local vm=$1
+    local elapsed=0
 
-echo "Stopping CI Runner..."
-virsh shutdown ci-runner
+    if ! virsh dominfo "$vm" >/dev/null 2>&1; then
+        echo "Skipping undefined VM $vm."
+        return 0
+    fi
+    if ! vm_running "$vm"; then
+        echo "$vm is already stopped."
+        return 0
+    fi
 
-echo "Stopping CRC..."
-virsh shutdown crc
+    echo "Requesting shutdown for $vm..."
+    virsh shutdown "$vm" >/dev/null || return 1
+    while vm_running "$vm"; do
+        if (( elapsed >= SHUTDOWN_TIMEOUT )); then
+            echo "Error: $vm did not stop within ${SHUTDOWN_TIMEOUT}s; refusing to force it off." >&2
+            return 1
+        fi
+        sleep 2
+        ((elapsed += 2))
+    done
+}
 
-echo "Waiting for remaining VMs to stop..."
-sleep 10
+echo "Shutting down the lab (k3s and CI runner; k3s-infra remains running)..."
+failed=0
+"$SCRIPT_DIR/k3s-stop.sh" || failed=1
+stop_vm ci-runner || failed=1
 
 virsh list --all
+if (( failed )); then
+    echo "The lab shutdown completed with errors." >&2
+    exit 1
+fi
+
+echo "Lab shutdown complete."
