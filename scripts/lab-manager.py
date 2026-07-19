@@ -129,6 +129,13 @@ def join_k3s(ip, name):
             f"K3S_URL={shlex.quote(K3S_URL)} "
             f"K3S_TOKEN={shlex.quote(token)} sh -s - agent"
         ),
+        (
+            "printf '%s\\n' "
+            f"{shlex.quote('K3S_TOKEN=' + token)} "
+            f"{shlex.quote('K3S_URL=' + K3S_URL)} | "
+            "sudo tee /etc/systemd/system/k3s-agent.service.env >/dev/null"
+        ),
+        "sudo systemctl daemon-reload",
         "sudo systemctl restart k3s-agent",
     ])
     result = subprocess.run(

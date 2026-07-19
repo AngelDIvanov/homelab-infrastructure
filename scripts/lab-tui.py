@@ -130,15 +130,16 @@ def get_vm_count():
 def get_worker_ip(worker_num):
     return f"192.168.122.{BASE_IP_OCTET + worker_num - 2}"
 
-def run_script(name, log_widget):
+def run_script(name, log_widget, *args):
     """Run a repository script without invoking an extra shell parser."""
     path = SCRIPTS_DIR / name
     if not path.is_file():
         log_widget.write_line(f"[red]FAIL Script not found: {path}[/red]")
         return
-    log_widget.write_line(f"[cyan]$ bash {path}[/cyan]")
+    command = ["bash", str(path), *args]
+    log_widget.write_line(f"[cyan]$ {' '.join(command)}[/cyan]")
     proc = subprocess.Popen(
-        ["bash", str(path)],
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -167,6 +168,13 @@ def install_k3s_agent(ip):
             f"K3S_URL={shlex.quote(K3S_URL)} "
             f"K3S_TOKEN={shlex.quote(token)} sh -s - agent"
         ),
+        (
+            "printf '%s\\n' "
+            f"{shlex.quote('K3S_TOKEN=' + token)} "
+            f"{shlex.quote('K3S_URL=' + K3S_URL)} | "
+            "sudo tee /etc/systemd/system/k3s-agent.service.env >/dev/null"
+        ),
+        "sudo systemctl daemon-reload",
         "sudo systemctl restart k3s-agent",
     ])
     result = subprocess.run(
@@ -381,6 +389,9 @@ class LabTUI(App):
                 yield Label("  K3S CLUSTER")
                 yield Button("▶  Start K3s",    id="k3s-start",   classes="section-btn")
                 yield Button("  Stop K3s",     id="k3s-stop",    classes="section-btn")
+                yield Label("  CI RUNNER")
+                yield Button(" Start CI Runner", id="ci-start", classes="section-btn")
+                yield Button(" Stop CI Runner", id="ci-stop", classes="section-btn")
                 yield Label("  LAB")
                 yield Button(" Stop ALL",      id="stop-all",    classes="danger-btn")
                 yield Button(" Health Check",  id="health",      classes="section-btn")
@@ -450,6 +461,19 @@ class LabTUI(App):
                 lambda ok: self._run_script_async("k3s-stop.sh", " Stopping K3s...") if ok else None
             )
 
+        elif btn == "ci-start":
+            self._run_script_async(
+                "ci-runner.sh", " Starting CI runner...", "start"
+            )
+
+        elif btn == "ci-stop":
+            self.push_screen(
+                ConfirmScreen("Stop the CI runner?"),
+                lambda ok: self._run_script_async(
+                    "ci-runner.sh", " Stopping CI runner...", "stop"
+                ) if ok else None,
+            )
+
         elif btn == "stop-all":
             self.push_screen(
                 ConfirmScreen("[WARN] Stop k3s and CI runner?\n(k3s-infra remains running)"),
@@ -479,12 +503,12 @@ class LabTUI(App):
 
     # ── Async script runner ───────────────────────────────────
     @work(thread=True)
-    def _run_script_async(self, script_name, header):
+    def _run_script_async(self, script_name, header, *args):
         log = self.query_one("#log-panel", Log)
         self.call_from_thread(log.write_line, f"\n[bold cyan]{'─'*50}[/bold cyan]")
         self.call_from_thread(log.write_line, f"[bold yellow]{header}[/bold yellow]")
         self.call_from_thread(log.write_line, f"[bold cyan]{'─'*50}[/bold cyan]")
-        run_script(script_name, log)
+        run_script(script_name, log, *args)
         self.call_from_thread(self.refresh_status)
 
     # ── Scale operations ──────────────────────────────────────

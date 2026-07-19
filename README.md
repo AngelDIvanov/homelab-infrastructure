@@ -179,6 +179,7 @@ python3 scripts/lab-tui.py       # TUI (requires: pip install textual)
 ./scripts/check-lab.sh --reboot   # force VM reboot, then remediate
 ./scripts/k3s-start.sh             # start control plane and workers
 ./scripts/k3s-stop.sh              # gracefully stop control plane and workers
+./scripts/ci-runner.sh start        # manage the CI runner independently
 ./scripts/lab-stop-all.sh          # also stop ci-runner; never stops k3s-infra
 ```
 
