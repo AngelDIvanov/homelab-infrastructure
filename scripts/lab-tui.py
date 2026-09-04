@@ -558,11 +558,18 @@ class LabTUI(App):
         )
         for line in out.splitlines(): self.call_from_thread(log.write_line, line)
         if rc != 0:
-            tfvars.write_text(original_content)
-            self.call_from_thread(
-                log.write_line,
-                f"[red]FAIL Terraform failed; restored terraform.tfvars: {err}[/red]",
-            )
+            try:
+                tfvars.write_text(original_content)
+            except OSError as write_err:
+                self.call_from_thread(
+                    log.write_line,
+                    f"[red]FAIL Terraform failed; terraform.tfvars still has vm_count = {new_count}, fix by hand ({write_err}): {err}[/red]",
+                )
+            else:
+                self.call_from_thread(
+                    log.write_line,
+                    f"[red]FAIL Terraform failed; restored terraform.tfvars: {err}[/red]",
+                )
             return
 
         # Boot delay
@@ -669,21 +676,30 @@ class LabTUI(App):
             f"terraform -chdir={shlex.quote(str(TERRAFORM_DIR))} apply -auto-approve"
         )
         if rc != 0:
-            tfvars.write_text(content)
+            try:
+                tfvars.write_text(content)
+            except OSError as write_err:
+                self.call_from_thread(
+                    log.write_line,
+                    f"[red]FAIL terraform.tfvars still has vm_count = {current - 1}, fix by hand ({write_err})[/red]",
+                )
+                tfvars_restored = False
+            else:
+                tfvars_restored = True
             uc_rc, _, uc_err = run_cmd(
                 f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
                 f'"sudo k3s kubectl uncordon {wname}"'
             )
             if uc_rc == 0:
-                self.call_from_thread(
-                    log.write_line,
-                    f"[red]FAIL Terraform failed; restored terraform.tfvars and uncordoned {wname}: {err}[/red]",
-                )
+                note = (f"restored terraform.tfvars and uncordoned {wname}"
+                        if tfvars_restored else f"uncordoned {wname}")
             else:
-                self.call_from_thread(
-                    log.write_line,
-                    f"[red]FAIL Terraform failed; restored terraform.tfvars; uncordon of {wname} failed, node still cordoned: {uc_err}[/red]",
-                )
+                note = (f"restored terraform.tfvars; uncordon of {wname} failed, node still cordoned: {uc_err}"
+                        if tfvars_restored else f"uncordon of {wname} failed, node still cordoned: {uc_err}")
+            self.call_from_thread(
+                log.write_line,
+                f"[red]FAIL Terraform failed; {note}: {err}[/red]",
+            )
             return
         rc, _, err = run_cmd(
             f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
