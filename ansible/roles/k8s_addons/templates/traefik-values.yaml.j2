@@ -13,7 +13,8 @@ affinity:
         topologyKey: kubernetes.io/hostname
 
 service:
-  type: LoadBalancer
+  spec:
+    type: LoadBalancer
 
 ingressClass:
   enabled: true
