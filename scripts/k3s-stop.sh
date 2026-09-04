@@ -37,9 +37,11 @@ wait_for_shutdown() {
     done
 }
 
-mapfile -t workers < <(
-    virsh list --all --name 2>/dev/null | grep -E '^k3s-worker-[0-9]+$' | sort -Vr
-)
+if ! ALL_VM_NAMES=$(virsh list --all --name 2>/dev/null); then
+    echo "Error: failed to list VMs with virsh." >&2
+    exit 1
+fi
+mapfile -t workers < <(grep -E '^k3s-worker-[0-9]+$' <<< "$ALL_VM_NAMES" | sort -Vr)
 
 for vm in "${workers[@]}"; do
     request_shutdown "$vm"
