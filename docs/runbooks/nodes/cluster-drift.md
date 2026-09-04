@@ -76,7 +76,9 @@ Always restore the env file and restart the agent after an in-place upgrade:
 ```bash
 # Run from the operator host; the whole repair executes on the target node.
 TOKEN=$(ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token)
-ssh labadmin@<node-ip> "K3S_TOKEN_VALUE='${TOKEN}' bash -s" <<'REMOTE'
+{
+  printf '%s\n' "$TOKEN"
+  cat <<'REMOTE'
 set -euo pipefail
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
@@ -86,6 +88,8 @@ sudo install -m 0600 -o root -g root "$tmp" /etc/systemd/system/k3s-agent.servic
 sudo systemctl daemon-reload
 sudo systemctl restart k3s-agent
 REMOTE
+} | ssh labadmin@<node-ip> \
+  'IFS= read -r K3S_TOKEN_VALUE && export K3S_TOKEN_VALUE && bash -s'
 ```
 
 ### Stale certificates (`certificate signed by unknown authority`)
