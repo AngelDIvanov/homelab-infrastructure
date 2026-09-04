@@ -1,0 +1,3 @@
+---
+k8s_addons_kubeconfig: /etc/kubernetes/admin.conf
+k8s_addons_manifest_dir: /etc/kubeadm/addons
