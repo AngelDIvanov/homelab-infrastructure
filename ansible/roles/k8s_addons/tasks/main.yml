@@ -119,3 +119,21 @@
     wait: true
     values_files:
       - "{{ k8s_addons_manifest_dir }}/traefik-values.yaml"
+
+- name: Install the NFS subdir external provisioner
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    release_name: nfs-subdir-external-provisioner
+    chart_ref: nfs-subdir-external-provisioner/nfs-subdir-external-provisioner
+    chart_version: "{{ nfs_provisioner_chart_version }}"
+    release_namespace: "{{ k8s_addons_nfs_provisioner_namespace }}"
+    create_namespace: true
+    wait: true
+    values:
+      nfs:
+        server: "{{ nfs_server }}"
+        path: "{{ nfs_path }}"
+      storageClass:
+        name: nfs
+        defaultClass: true
+        archiveOnDelete: false

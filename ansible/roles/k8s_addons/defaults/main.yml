@@ -7,3 +7,4 @@ k8s_addons_helm_archive_dir: /usr/local/src
 k8s_addons_helm_extract_dir: /usr/local/lib
 k8s_addons_metallb_namespace: metallb-system
 k8s_addons_traefik_namespace: traefik
+k8s_addons_nfs_provisioner_namespace: nfs-provisioner
