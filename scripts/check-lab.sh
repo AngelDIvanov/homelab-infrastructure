@@ -573,35 +573,57 @@ elif [ -n "$LATEST_IMAGE" ]; then
     if [ "${#NEEDS_SYNC[@]}" -gt 0 ]; then
         if [ "$AUTO_FIX" = true ]; then
             echo -e "  ${YELLOW}[WARN]  Syncing image to workers...${NC}"
-            CONTROL_TAR=$($K3S_CMD "mktemp -t trengo-sync.XXXXXX.tar" 2>/dev/null)
-            LOCAL_TAR=$(mktemp -t trengo-sync.XXXXXX.tar)
-            $K3S_CMD "sudo k3s ctr images export $CONTROL_TAR $LATEST_IMAGE" 2>/dev/null
-            scp -q $SSH_OPTS "labadmin@$K3S_CONTROL_IP:$CONTROL_TAR" "$LOCAL_TAR" 2>/dev/null
-
-            sync_failed=false
-            for worker_name in "${!WORKERS[@]}"; do
-                # Skip workers that already have the image
-                if [[ " ${NEEDS_SYNC[*]} " != *" $worker_name "* ]]; then
-                    continue
-                fi
-                worker_ip="${WORKERS[$worker_name]}"
-                WORKER_TAR=$(ssh $SSH_OPTS labadmin@$worker_ip "mktemp -t trengo-sync.XXXXXX.tar" 2>/dev/null)
-                scp -q $SSH_OPTS "$LOCAL_TAR" "labadmin@$worker_ip:$WORKER_TAR" 2>/dev/null
-                if ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import $WORKER_TAR; rc=\$?; rm -f $WORKER_TAR; exit \$rc" 2>/dev/null; then
-                    echo -e "  ${GREEN}OK Image synced to $worker_name${NC}"
-                else
-                    echo -e "  ${RED}FAIL Image sync to $worker_name failed${NC}"
-                    sync_failed=true
-                fi
-            done
-            rm -f "$LOCAL_TAR"
-            $K3S_CMD "rm -f $CONTROL_TAR" 2>/dev/null
-            if [ "$sync_failed" = true ]; then
-                echo -e "  ${RED}FAIL Image sync to one or more workers failed${NC}"
+            CONTROL_TAR=$(mktemp -t trengo-sync.XXXXXX.tar)
+            REMOTE_TAR=$($K3S_CMD "mktemp -t trengo-sync.XXXXXX.tar" 2>/dev/null)
+            if [ -z "$REMOTE_TAR" ]; then
+                echo -e "  ${RED}FAIL Image sync aborted: control-plane mktemp failed${NC}"
                 ((FAIL++))
-                slog FAIL "worker-image-sync" FAIL k3s-control "one or more worker imports failed"
+                slog ERROR "worker-image-sync" FAIL k3s-control "control-plane mktemp returned no path"
+                rm -f "$CONTROL_TAR"
+            elif ! $K3S_CMD "sudo k3s ctr images export '$REMOTE_TAR' '$LATEST_IMAGE'" 2>/dev/null; then
+                echo -e "  ${RED}FAIL Image sync aborted: ctr images export failed on k3s-control${NC}"
+                ((FAIL++))
+                slog ERROR "worker-image-sync" FAIL k3s-control "ctr images export of $LATEST_IMAGE failed"
+                $K3S_CMD "rm -f '$REMOTE_TAR'" 2>/dev/null
+                rm -f "$CONTROL_TAR"
+            elif ! scp -q $SSH_OPTS "labadmin@$K3S_CONTROL_IP:$REMOTE_TAR" "$CONTROL_TAR" 2>/dev/null; then
+                echo -e "  ${RED}FAIL Image sync aborted: copy of exported image from k3s-control failed${NC}"
+                ((FAIL++))
+                slog ERROR "worker-image-sync" FAIL k3s-control "scp of exported image tarball failed"
+                $K3S_CMD "rm -f '$REMOTE_TAR'" 2>/dev/null
+                rm -f "$CONTROL_TAR"
             else
-                ((PASS++))
+                sync_failed=false
+                for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
+                    # Skip workers that already have the image
+                    if [[ " ${NEEDS_SYNC[*]} " != *" $worker_name "* ]]; then
+                        continue
+                    fi
+                    worker_ip="${WORKERS[$worker_name]}"
+                    WORKER_TAR=$(ssh $SSH_OPTS labadmin@$worker_ip "mktemp -t trengo-sync.XXXXXX.tar" 2>/dev/null)
+                    if [ -z "$WORKER_TAR" ]; then
+                        echo -e "  ${RED}FAIL Image sync to $worker_name failed: remote mktemp returned no path${NC}"
+                        ((FAIL++))
+                        slog ERROR "worker-image-sync" FAIL "$worker_name" "mktemp returned no path"
+                        continue
+                    fi
+                    if scp -q $SSH_OPTS "$CONTROL_TAR" "labadmin@$worker_ip:'$WORKER_TAR'" 2>/dev/null \
+                       && ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import '$WORKER_TAR'; rc=\$?; rm -f '$WORKER_TAR'; exit \$rc" 2>/dev/null; then
+                        echo -e "  ${GREEN}OK Image synced to $worker_name${NC}"
+                    else
+                        echo -e "  ${RED}FAIL Image sync to $worker_name failed${NC}"
+                        sync_failed=true
+                    fi
+                done
+                rm -f "$CONTROL_TAR"
+                $K3S_CMD "rm -f '$REMOTE_TAR'" 2>/dev/null
+                if [ "$sync_failed" = true ]; then
+                    echo -e "  ${RED}FAIL Image sync to one or more workers failed${NC}"
+                    ((FAIL++))
+                    slog ERROR "worker-image-sync" FAIL k3s-control "one or more worker imports failed"
+                else
+                    ((PASS++))
+                fi
             fi
         else
             echo -e "  ${YELLOW}[WARN] Images are not synchronized on: ${NEEDS_SYNC[*]}${NC} (use --fix to sync)"
