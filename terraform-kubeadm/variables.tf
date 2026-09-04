@@ -9,6 +9,12 @@ variable "ssh_public_key" {
   type        = string
 }
 
+variable "extra_ssh_public_keys" {
+  description = "Additional SSH public keys injected into labadmin (e.g. CI runner keys)"
+  type        = list(string)
+  default     = []
+}
+
 variable "control_ip" {
   description = "Fixed IP for kubeadm control plane"
   type        = string

@@ -10,4 +10,3 @@ ethernets:
     nameservers:
       addresses:
         - 192.168.122.1
-        - 8.8.8.8
