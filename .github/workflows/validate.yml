@@ -62,9 +62,9 @@ jobs:
           mapfile -d '' manifests < <(find kubernetes -type f -name '*.yaml' ! -name '*.example.yaml' -print0)
           docker run --rm -v "$PWD:/work" -w /work \
             ghcr.io/yannh/kubeconform@sha256:0925177fb05b44ce18574076141b5c3d83235e1904d3f952182ac99ddc45762c \
-            -strict -summary -ignore-missing-schemas -kubernetes-version 1.29.0 \
+            -strict -summary -kubernetes-version 1.29.0 \
             -schema-location default \
-            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/866b2653a5334db9aed20ad74701e20fd464471b/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             "${manifests[@]}"
 
       - name: Validate Prometheus rules
