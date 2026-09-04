@@ -126,6 +126,7 @@ create_secret() {
 
 # Read existing secrets from .bashrc automatically
 EXISTING_GITLAB_TOKEN=$(grep -oP "(?<=export GITLAB_TOKEN=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
+EXISTING_K3S_TOKEN=$(grep -oP "(?<=export K3S_TOKEN=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
 EXISTING_GMAIL_PASS=$(grep -oP "(?<=export GMAIL_APP_PASS=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
 EXISTING_GMAIL_USER=$(grep -oP "(?<=export GMAIL_USER=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
 EXISTING_SEND_TO=$(grep -oP "(?<=export SEND_TO=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
@@ -141,6 +142,11 @@ echo ""
 warn "Enter your K3S_TOKEN (not in .bashrc — check your k3s control node or use the new token after rotation):"
 read -rsp "  K3S_TOKEN: " INPUT_K3S_TOKEN
 echo ""
+
+if [ -z "$INPUT_K3S_TOKEN" ] && [ -n "$EXISTING_K3S_TOKEN" ]; then
+    warn "No token entered — using the existing K3S_TOKEN from ~/.bashrc"
+    INPUT_K3S_TOKEN="$EXISTING_K3S_TOKEN"
+fi
 
 create_secret "homelab-k3s-token"    "$INPUT_K3S_TOKEN"
 create_secret "homelab-gitlab-token" "$EXISTING_GITLAB_TOKEN"
@@ -163,8 +169,13 @@ for file in "$HOME/.bashrc" "$BASHRC_BACKUP"; do
     sed -i '/^export GMAIL_APP_PASS=/d' "$file"
     sed -i '/^export GMAIL_USER=/d' "$file"
     sed -i '/^export SEND_TO=/d' "$file"
-    sed -i '/^export K3S_TOKEN=/d' "$file"
+    if [ -n "$INPUT_K3S_TOKEN" ]; then
+        sed -i '/^export K3S_TOKEN=/d' "$file"
+    fi
 done
+if [ -z "$INPUT_K3S_TOKEN" ]; then
+    warn "K3S_TOKEN empty (no input, none in ~/.bashrc) — keeping any existing export line"
+fi
 success "Backed up ~/.bashrc and removed hardcoded secrets from both copies"
 
 # Add load-secrets sourcing if not already there
