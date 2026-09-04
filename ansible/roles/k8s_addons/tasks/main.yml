@@ -137,3 +137,25 @@
         name: nfs
         defaultClass: true
         archiveOnDelete: false
+
+- name: Install the kubelet CSR approver
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    release_name: kubelet-csr-approver
+    chart_ref: kubelet-csr-approver/kubelet-csr-approver
+    chart_version: "{{ kubelet_csr_approver_chart_version }}"
+    release_namespace: kube-system
+    wait: true
+    values:
+      providerRegex: "^kubeadm-(control|worker-[0-9]+)$"
+      providerIpPrefixes: ["192.168.122.0/24"]
+      bypassDnsResolution: true
+
+- name: Install the metrics server
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    release_name: metrics-server
+    chart_ref: metrics-server/metrics-server
+    chart_version: "{{ metrics_server_chart_version }}"
+    release_namespace: kube-system
+    wait: true
