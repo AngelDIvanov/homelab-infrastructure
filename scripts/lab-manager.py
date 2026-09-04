@@ -158,7 +158,8 @@ def join_k3s(ip, name):
     if result.returncode != 0:
         print(r(f"  failed to install k3s on {name}"))
         if result.stderr.strip():
-            print(r(f"  Remote error: {result.stderr.strip()}"))
+            # The remote script carries the join token; never echo it back
+            print(r(f"  Remote error: {result.stderr.strip().replace(token, '<redacted>')}"))
         return False
     time.sleep(5)
     res = run(f'ssh {SSH_OPTS} labadmin@{ip} "systemctl is-active k3s-agent"', capture=True)
