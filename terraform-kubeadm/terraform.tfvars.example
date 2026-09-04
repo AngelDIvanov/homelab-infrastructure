@@ -1,8 +1,10 @@
 ssh_public_key = "YOUR_SSH_PUBLIC_KEY_HERE"
 
-control_ip     = "192.168.122.240"
-worker_ip      = "192.168.122.241"
-control_memory = 2048
-control_vcpu   = 2
-worker_memory  = 2048
-worker_vcpu    = 2
+control_ip       = "192.168.122.240"
+node_cidr        = "192.168.122.0/24"
+worker_count     = 2
+worker_ip_offset = 241
+control_memory   = 2048
+control_vcpu     = 2
+worker_memory    = 2048
+worker_vcpu      = 2
