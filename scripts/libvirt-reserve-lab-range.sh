@@ -14,7 +14,11 @@ if [ "$current" = "$RANGE_START $RANGE_END" ]; then
     echo "$NETWORK DHCP range already $RANGE_START-$RANGE_END"
     exit 0
 fi
+old_start=${current% *}
 old_end=${current#* }
-virsh net-update "$NETWORK" modify ip-dhcp-range \
-    "<range start='$RANGE_START' end='$RANGE_END'/>" --live --config
+# libvirt cannot modify a DHCP range in place, only delete and add
+virsh net-update "$NETWORK" delete ip-dhcp-range \
+    "<range start='$old_start' end='$old_end'/>" --live --config >/dev/null
+virsh net-update "$NETWORK" add ip-dhcp-range \
+    "<range start='$RANGE_START' end='$RANGE_END'/>" --live --config >/dev/null
 echo "$NETWORK DHCP range changed from ${current% *}-${old_end} to $RANGE_START-$RANGE_END"
