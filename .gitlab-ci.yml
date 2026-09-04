@@ -53,6 +53,17 @@ lint:terraform:
   rules:
     - changes: ["terraform/**/*", "terraform-kubeadm/**/*"]
 
+lint:tflint:
+  stage: lint
+  image:
+    name: ghcr.io/terraform-linters/tflint@sha256:1c595f42d794c32c45a6ea8b58655fd66433d4ca3b1bc631c574a48d120bd19f
+    entrypoint: [""]
+  script:
+    - tflint --chdir=terraform-kubeadm --init
+    - tflint --chdir=terraform-kubeadm
+  rules:
+    - changes: ["terraform-kubeadm/**/*"]
+
 validate:kubernetes-manifests:
   stage: validate
   image:

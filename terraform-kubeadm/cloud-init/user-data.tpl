@@ -10,19 +10,21 @@ users:
 
   - name: labadmin
 
-    sudo: ALL=(ALL) NOPASSWD:ALL
+    sudo: ALL=(ALL) NOPASSWD:ALL  # Ansible requires passwordless sudo; the account is key-only
 
     groups: users, admin, sudo
 
     shell: /bin/bash
 
-    lock_passwd: false
+    lock_passwd: true
 
     ssh_authorized_keys:
 
       - ${ssh_public_key}
+%{ for key in extra_ssh_public_keys ~}
 
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILgMILWmBoGWja3vsjUJ1tcRPJg05IFWVuLdOLM77Dda gitlab-runner@ci-runner
+      - ${key}
+%{ endfor ~}
 
 package_update: true
 
@@ -35,12 +37,6 @@ packages:
   - curl
 
 runcmd:
-
-  - echo 'labadmin:changeme' | chpasswd   # lab default; rotate on first login or switch to ssh keys only
-
-  - sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-
-  - systemctl restart sshd
 
   - systemctl enable qemu-guest-agent
 

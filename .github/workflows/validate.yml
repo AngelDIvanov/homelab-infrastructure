@@ -57,6 +57,12 @@ jobs:
             docker run --rm -v "$PWD:/work" -w "/work/$directory" "$image" validate
           done
 
+      - name: Lint Terraform
+        run: |
+          image=ghcr.io/terraform-linters/tflint@sha256:1c595f42d794c32c45a6ea8b58655fd66433d4ca3b1bc631c574a48d120bd19f
+          docker run --rm -v "$PWD/terraform-kubeadm:/data" -t "$image" --chdir=/data --init
+          docker run --rm -v "$PWD/terraform-kubeadm:/data" -t "$image" --chdir=/data
+
       - name: Validate Kubernetes manifests
         run: |
           mapfile -d '' manifests < <(find kubernetes -type f -name '*.yaml' ! -name '*.example.yaml' -print0)
