@@ -112,7 +112,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Install qlty
+        env:
+          QLTY_VERSION: "0.643.0"
+          QLTY_SHA256: "40500d150001b8389f2eb5dd089d07a9da70292a7c0bca3bdf72fb6c16fa20e5"
+        run: |
+          curl -fsSL -o qlty.tar.xz "https://github.com/qltysh/qlty/releases/download/v${QLTY_VERSION}/qlty-x86_64-unknown-linux-gnu.tar.xz"
+          echo "${QLTY_SHA256}  qlty.tar.xz" | sha256sum -c -
+          tar -xJf qlty.tar.xz
+          sudo install -m 0755 qlty-x86_64-unknown-linux-gnu/qlty /usr/local/bin/qlty
+          rm -rf qlty.tar.xz qlty-x86_64-unknown-linux-gnu
+
       - name: Run qlty on changed files
-        uses: qltysh/qlty-action/check@08a0a862c159eae9b9003081da6663d96efef637
-        with:
-          args: --upstream origin/main
+        run: qlty check --upstream origin/main --no-progress
