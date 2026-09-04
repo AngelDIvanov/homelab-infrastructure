@@ -102,3 +102,17 @@ jobs:
           docker run --rm -v "$PWD:/repo" -w /repo
           zricethezav/gitleaks@sha256:eadfe256fa18d6a78a717abc9ed454c8e03865d1c46d627bca83977f4424901a
           detect --source . --verbose
+
+  qlty:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run qlty on changed files
+        uses: qltysh/qlty-action/check@08a0a862c159eae9b9003081da6663d96efef637
+        with:
+          args: --upstream origin/main
