@@ -603,12 +603,15 @@ elif [ -n "$LATEST_IMAGE" ]; then
                     WORKER_TAR=$(ssh $SSH_OPTS labadmin@$worker_ip "mktemp -t trengo-sync.XXXXXX.tar" 2>/dev/null)
                     if [ -z "$WORKER_TAR" ]; then
                         echo -e "  ${RED}FAIL Image sync to $worker_name failed: remote mktemp returned no path${NC}"
-                        ((FAIL++))
                         slog ERROR "worker-image-sync" FAIL "$worker_name" "mktemp returned no path"
+                        sync_failed=true
                         continue
                     fi
-                    if scp -q $SSH_OPTS "$CONTROL_TAR" "labadmin@$worker_ip:$WORKER_TAR" 2>/dev/null \
-                       && ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import '$WORKER_TAR'; rc=\$?; rm -f '$WORKER_TAR'; exit \$rc" 2>/dev/null; then
+                    if ! scp -q $SSH_OPTS "$CONTROL_TAR" "labadmin@$worker_ip:$WORKER_TAR" 2>/dev/null; then
+                        echo -e "  ${RED}FAIL Image sync to $worker_name failed: copy to worker failed${NC}"
+                        ssh $SSH_OPTS labadmin@$worker_ip "rm -f '$WORKER_TAR'" 2>/dev/null
+                        sync_failed=true
+                    elif ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import '$WORKER_TAR'; rc=\$?; rm -f '$WORKER_TAR'; exit \$rc" 2>/dev/null; then
                         echo -e "  ${GREEN}OK Image synced to $worker_name${NC}"
                     else
                         echo -e "  ${RED}FAIL Image sync to $worker_name failed${NC}"
