@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 VM_NAME=ci-runner
 TIMEOUT=${CI_RUNNER_TIMEOUT:-120}
@@ -18,6 +18,10 @@ vm_running() {
     [ "$(virsh domstate "$VM_NAME" 2>/dev/null)" = "running" ]
 }
 
+vm_stopped() {
+    [ "$(virsh domstate "$VM_NAME" 2>/dev/null)" = "shut off" ]
+}
+
 wait_for_state() {
     local expected=$1
     local elapsed=0
@@ -25,7 +29,7 @@ wait_for_state() {
         if [ "$expected" = running ] && vm_running; then
             return 0
         fi
-        if [ "$expected" = stopped ] && ! vm_running; then
+        if [ "$expected" = stopped ] && vm_stopped; then
             return 0
         fi
         if (( elapsed >= TIMEOUT )); then
@@ -49,7 +53,7 @@ case "$ACTION" in
         fi
         ;;
     stop)
-        if ! vm_running; then
+        if vm_stopped; then
             echo "$VM_NAME is already stopped."
         else
             echo "Requesting graceful shutdown for $VM_NAME..."

@@ -163,6 +163,7 @@ for file in "$HOME/.bashrc" "$BASHRC_BACKUP"; do
     sed -i '/^export GMAIL_APP_PASS=/d' "$file"
     sed -i '/^export GMAIL_USER=/d' "$file"
     sed -i '/^export SEND_TO=/d' "$file"
+    sed -i '/^export K3S_TOKEN=/d' "$file"
 done
 success "Backed up ~/.bashrc and removed hardcoded secrets from both copies"
 
