@@ -1,0 +1,8 @@
+---
+- name: Create the add-on manifest directory
+  ansible.builtin.file:
+    path: "{{ k8s_addons_manifest_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"

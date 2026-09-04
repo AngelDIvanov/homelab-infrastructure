@@ -1,0 +1,7 @@
+---
+- name: Install the cluster add-ons
+  hosts: kubeadm_control
+  become: true
+  tags: [addons]
+  roles:
+    - role: k8s_addons
