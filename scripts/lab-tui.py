@@ -63,6 +63,8 @@ SSH_ARGS = [
 ]
 SSH_OPTS = " ".join(shlex.quote(arg) for arg in SSH_ARGS)
 
+K3S_INSTALL_TIMEOUT = 600
+
 # Services to check
 SERVICES = [
     ("Grafana",      f"http://{K3S_CONTROL_IP}:30080"),
@@ -162,27 +164,34 @@ def install_k3s_agent(ip):
         return 1, "", str(exc)
 
     remote_script = "\n".join([
-        "set -eu",
+        "set -euo pipefail",
         (
             "curl -sfL https://get.k3s.io | "
             f"K3S_URL={shlex.quote(K3S_URL)} "
             f"K3S_TOKEN={shlex.quote(token)} sh -s - agent"
         ),
+        "tmp=$(mktemp)",
+        "chmod 0600 \"$tmp\"",
         (
             "printf '%s\\n' "
             f"{shlex.quote('K3S_TOKEN=' + token)} "
-            f"{shlex.quote('K3S_URL=' + K3S_URL)} | "
-            "sudo tee /etc/systemd/system/k3s-agent.service.env >/dev/null"
+            f"{shlex.quote('K3S_URL=' + K3S_URL)} > \"$tmp\""
         ),
+        "sudo install -m 0600 -o root -g root \"$tmp\" /etc/systemd/system/k3s-agent.service.env",
+        "rm -f \"$tmp\"",
         "sudo systemctl daemon-reload",
         "sudo systemctl restart k3s-agent",
     ])
-    result = subprocess.run(
-        ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
-        input=remote_script,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
+            input=remote_script,
+            capture_output=True,
+            text=True,
+            timeout=K3S_INSTALL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return 1, "", f"k3s install on {ip} timed out after {K3S_INSTALL_TIMEOUT}s"
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 # ─────────────────────────────────────────────────────────────
@@ -533,6 +542,12 @@ class LabTUI(App):
             updated_content = re.sub(
                 r'vm_count\s*=\s*\d+', f'vm_count       = {new_count}', original_content
             )
+            if updated_content == original_content:
+                self.call_from_thread(
+                    log.write_line,
+                    "[red]FAIL tfvars vm_count was not updated, aborting before terraform apply[/red]",
+                )
+                return
             tfvars.write_text(updated_content)
         except OSError as e:
             self.call_from_thread(log.write_line, f"[red]FAIL Could not update tfvars: {e}[/red]")
@@ -575,6 +590,11 @@ class LabTUI(App):
                 log.write_line,
                 f"[red]FAIL Could not join {new_name}: {err or 'unknown error'}[/red]",
             )
+            self.call_from_thread(
+                log.write_line,
+                f"[red] The VM {new_name} exists outside the cluster and tfvars vm_count is already committed;"
+                " the operator can complete the join later via Rejoin Workers.[/red]",
+            )
             return
 
         self.call_from_thread(log.write_line, f"[green]OK {new_name} added![/green]")
@@ -611,9 +631,38 @@ class LabTUI(App):
             updated = re.sub(
                 r'vm_count\s*=\s*\d+', f'vm_count       = {current - 1}', content
             )
+            if updated == content:
+                uc_rc, _, uc_err = run_cmd(
+                    f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
+                    f'"sudo k3s kubectl uncordon {wname}"'
+                )
+                if uc_rc == 0:
+                    self.call_from_thread(
+                        log.write_line,
+                        f"[red]FAIL tfvars vm_count was not updated, aborting before terraform apply; uncordoned {wname}[/red]",
+                    )
+                else:
+                    self.call_from_thread(
+                        log.write_line,
+                        f"[red]FAIL tfvars vm_count was not updated, aborting before terraform apply; uncordon of {wname} failed, node still cordoned: {uc_err}[/red]",
+                    )
+                return
             tfvars.write_text(updated)
         except OSError as e:
-            self.call_from_thread(log.write_line, f"[red]FAIL {e}[/red]")
+            uc_rc, _, uc_err = run_cmd(
+                f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
+                f'"sudo k3s kubectl uncordon {wname}"'
+            )
+            if uc_rc == 0:
+                self.call_from_thread(
+                    log.write_line,
+                    f"[red]FAIL tfvars I/O failed ({e}), aborting before terraform apply; uncordoned {wname}[/red]",
+                )
+            else:
+                self.call_from_thread(
+                    log.write_line,
+                    f"[red]FAIL tfvars I/O failed ({e}), aborting before terraform apply; uncordon of {wname} failed, node still cordoned: {uc_err}[/red]",
+                )
             return
 
         rc, _, err = run_cmd(
@@ -621,19 +670,35 @@ class LabTUI(App):
         )
         if rc != 0:
             tfvars.write_text(content)
-            run_cmd(
+            uc_rc, _, uc_err = run_cmd(
                 f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
                 f'"sudo k3s kubectl uncordon {wname}"'
             )
-            self.call_from_thread(
-                log.write_line,
-                f"[red]FAIL Terraform failed; restored terraform.tfvars and uncordoned {wname}: {err}[/red]",
-            )
+            if uc_rc == 0:
+                self.call_from_thread(
+                    log.write_line,
+                    f"[red]FAIL Terraform failed; restored terraform.tfvars and uncordoned {wname}: {err}[/red]",
+                )
+            else:
+                self.call_from_thread(
+                    log.write_line,
+                    f"[red]FAIL Terraform failed; restored terraform.tfvars; uncordon of {wname} failed, node still cordoned: {uc_err}[/red]",
+                )
             return
-        run_cmd(
+        rc, _, err = run_cmd(
             f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
             f'"sudo k3s kubectl delete node {wname} --ignore-not-found"'
         )
+        if rc != 0:
+            self.call_from_thread(
+                log.write_line,
+                f"[red]FAIL Could not delete node {wname}: {err or 'unknown error'}[/red]",
+            )
+            self.call_from_thread(
+                log.write_line,
+                f"[red] Retry on the control node: sudo k3s kubectl delete node {wname} --ignore-not-found[/red]",
+            )
+            return
         self.call_from_thread(log.write_line, f"[green]OK {wname} removed![/green]")
         self.call_from_thread(self.refresh_status)
 

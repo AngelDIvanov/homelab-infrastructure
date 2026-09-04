@@ -46,6 +46,9 @@ SSH_ARGS = [
     "-o", "StrictHostKeyChecking=accept-new",
 ]
 SSH_OPTS = " ".join(shlex.quote(arg) for arg in SSH_ARGS)
+
+K3S_INSTALL_TIMEOUT = 600
+
 os.environ['ANSIBLE_CONFIG'] = os.path.expanduser('~/homelab/ansible/ansible.cfg')
 
 # ─────────────────────────────────────────────────────────────
@@ -92,12 +95,20 @@ def run_script(name):
 
 def run_remote_script(ip, script):
     """Send a script over stdin so sensitive values never enter argv."""
-    return subprocess.run(
-        ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
-        input=script,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        return subprocess.run(
+            ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
+            input=script,
+            capture_output=True,
+            text=True,
+            timeout=K3S_INSTALL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
+            returncode=124,
+            stderr=f"k3s install on {ip} timed out after {K3S_INSTALL_TIMEOUT}s",
+        )
 
 def pause():
     input(f"\n{c('Press Enter to continue...')}")
@@ -174,18 +185,21 @@ def join_k3s(ip, name):
     # Install and configure via stdin so the token cannot appear in process arguments.
     print(y("  installing and configuring k3s-agent..."))
     remote_script = "\n".join([
-        "set -eu",
+        "set -euo pipefail",
         (
             "curl -sfL https://get.k3s.io | "
             f"K3S_URL={shlex.quote(K3S_URL)} "
             f"K3S_TOKEN={shlex.quote(full_token)} sh -s - agent"
         ),
+        "tmp=$(mktemp)",
+        "chmod 0600 \"$tmp\"",
         (
             "printf '%s\\n' "
             f"{shlex.quote('K3S_TOKEN=' + full_token)} "
-            f"{shlex.quote('K3S_URL=' + K3S_URL)} | "
-            "sudo tee /etc/systemd/system/k3s-agent.service.env >/dev/null"
+            f"{shlex.quote('K3S_URL=' + K3S_URL)} > \"$tmp\""
         ),
+        "sudo install -m 0600 -o root -g root \"$tmp\" /etc/systemd/system/k3s-agent.service.env",
+        "rm -f \"$tmp\"",
         "sudo systemctl daemon-reload",
         "sudo systemctl restart k3s-agent",
     ])
@@ -238,19 +252,24 @@ def repair_agent(ip, name):
     print(f"  Agent environment file: {'present' if env_present else 'missing'}")
 
     remote_script = "\n".join([
-        "set -eu",
+        "set -euo pipefail",
+        "tmp=$(mktemp)",
+        "chmod 0600 \"$tmp\"",
         (
             "printf '%s\\n' "
             f"{shlex.quote('K3S_TOKEN=' + full_token)} "
-            f"{shlex.quote('K3S_URL=' + K3S_URL)} | "
-            "sudo tee /etc/systemd/system/k3s-agent.service.env >/dev/null"
+            f"{shlex.quote('K3S_URL=' + K3S_URL)} > \"$tmp\""
         ),
+        "sudo install -m 0600 -o root -g root \"$tmp\" /etc/systemd/system/k3s-agent.service.env",
+        "rm -f \"$tmp\"",
         "sudo systemctl daemon-reload",
         "sudo systemctl restart k3s-agent",
     ])
     repair_result = run_remote_script(ip, remote_script)
     if repair_result.returncode != 0:
         print(r(f"  failed to update k3s-agent on {name}"))
+        if repair_result.stderr.strip():
+            print(r(f"  Remote error: {repair_result.stderr.strip()}"))
         return False
 
     time.sleep(6)
