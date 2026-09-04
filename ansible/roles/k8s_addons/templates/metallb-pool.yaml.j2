@@ -1,0 +1,8 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lab-pool
+  namespace: "{{ k8s_addons_metallb_namespace }}"
+spec:
+  addresses:
+    - "{{ metallb_pool_range }}"
