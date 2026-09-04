@@ -70,10 +70,12 @@ lint:qlty:
   variables:
     GIT_DEPTH: 0
     QLTY_VERSION: "0.643.0"
+    QLTY_SHA256: "40500d150001b8389f2eb5dd089d07a9da70292a7c0bca3bdf72fb6c16fa20e5"
   before_script:
-    - apt-get update -qq && apt-get install -y -qq curl git ca-certificates >/dev/null
-    - curl -fsSL https://qlty.sh | bash
-    - export PATH="$HOME/.qlty/bin:$PATH"
+    - apt-get update -qq && apt-get install -y -qq curl git ca-certificates xz-utils >/dev/null
+    - curl -fsSL -o qlty.tar.xz "https://github.com/qltysh/qlty/releases/download/v${QLTY_VERSION}/qlty-x86_64-unknown-linux-gnu.tar.xz"
+    - echo "${QLTY_SHA256}  qlty.tar.xz" | sha256sum -c -
+    - tar -xJf qlty.tar.xz && install -m 0755 qlty-x86_64-unknown-linux-gnu/qlty /usr/local/bin/qlty
     - git fetch origin main
   script:
     - qlty check --upstream origin/main --no-progress
