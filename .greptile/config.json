@@ -1,0 +1,12 @@
+{
+  "strictness": 1,
+  "commentTypes": ["logic", "syntax", "style", "info"],
+  "triggerOnUpdates": true,
+  "triggerOnDrafts": false,
+  "statusCheck": true,
+  "statusCommentsEnabled": true,
+  "includeIssuesTable": true,
+  "includeConfidenceScore": true,
+  "includeSequenceDiagram": false,
+  "ignorePatterns": "docs/images/**\n**/*.png\n**/.terraform/**\n**/*.tfstate*\nhomelab-summary.html"
+}

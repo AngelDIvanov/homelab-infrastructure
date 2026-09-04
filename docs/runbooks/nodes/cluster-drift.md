@@ -74,10 +74,23 @@ the `::server:` suffix was missing. Token must be copied in full from
 Always restore the env file and restart the agent after an in-place upgrade:
 
 ```bash
-TOKEN=$(ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token)
-printf 'K3S_TOKEN=%s\nK3S_URL=https://192.168.122.218:6443\n' "$TOKEN" \
-  | sudo tee /etc/systemd/system/k3s-agent.service.env
-sudo systemctl daemon-reload && sudo systemctl restart k3s-agent
+# Run from the operator host; the whole repair executes on the target node.
+TOKEN=$(ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token) || exit 1
+[[ "$TOKEN" =~ ^K10[0-9a-f]{64}::server:[0-9a-f]+$ ]] || { echo "node-token is empty or malformed, aborting" >&2; exit 1; }
+{
+  printf '%s\n' "$TOKEN"
+  cat <<'REMOTE'
+set -euo pipefail
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+chmod 0600 "$tmp"
+printf 'K3S_TOKEN=%s\nK3S_URL=https://192.168.122.218:6443\n' "$K3S_TOKEN_VALUE" > "$tmp"
+sudo install -m 0600 -o root -g root "$tmp" /etc/systemd/system/k3s-agent.service.env
+sudo systemctl daemon-reload
+sudo systemctl restart k3s-agent
+REMOTE
+} | ssh labadmin@<node-ip> \
+  'IFS= read -r K3S_TOKEN_VALUE && export K3S_TOKEN_VALUE && bash -s'
 ```
 
 ### Stale certificates (`certificate signed by unknown authority`)

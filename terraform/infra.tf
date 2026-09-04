@@ -34,7 +34,7 @@ resource "libvirt_volume" "infra" {
   pool             = "default"
   base_volume_pool = "default"
   base_volume_name = "ubuntu-cloud-base.qcow2"
-  size             = 32212254720  # 30GB — more space for logs/metrics
+  size             = 32212254720 # 30GB — more space for logs/metrics
 }
 
 resource "libvirt_cloudinit_disk" "infra" {

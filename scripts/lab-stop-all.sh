@@ -1,25 +1,17 @@
-#!/bin/bash
-echo "Shutting down all environment..."
+#!/usr/bin/env bash
+set -uo pipefail
 
-echo "Stopping K3s workers and control plane..."
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# Stop all workers discovered from virsh — no hardcoding
-for vm in $(virsh list --all --name 2>/dev/null | grep -E '^k3s-worker-'); do
-    echo "Stopping $vm..."
-    virsh shutdown "$vm"
-done
-
-virsh shutdown k3s-control
-echo "Waiting for K3s VMs to stop..."
-sleep 15
-
-echo "Stopping CI Runner..."
-virsh shutdown ci-runner
-
-echo "Stopping CRC..."
-virsh shutdown crc
-
-echo "Waiting for remaining VMs to stop..."
-sleep 10
+echo "Shutting down the lab (k3s and CI runner; k3s-infra remains running)..."
+failed=0
+"$SCRIPT_DIR/k3s-stop.sh" || failed=1
+"$SCRIPT_DIR/ci-runner.sh" stop || failed=1
 
 virsh list --all
+if (( failed )); then
+    echo "The lab shutdown completed with errors." >&2
+    exit 1
+fi
+
+echo "Lab shutdown complete."
