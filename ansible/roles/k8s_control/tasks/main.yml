@@ -23,13 +23,13 @@
 
 - name: Determine the installed kubeadm version
   ansible.builtin.command:
-    cmd: kubeadm version -o json
+    cmd: kubeadm version -o short
   register: k8s_control_kubeadm_version
   changed_when: false
 
 - name: Expose the kubeadm version to the init configuration
   ansible.builtin.set_fact:
-    k8s_control_kubernetes_version: "{{ (k8s_control_kubeadm_version.stdout | from_json).gitVersion }}"
+    k8s_control_kubernetes_version: "{{ k8s_control_kubeadm_version.stdout | trim }}"
 
 - name: Render the kubeadm init configuration
   ansible.builtin.template:
@@ -83,6 +83,22 @@
     state: present
     apply: true
     src: "{{ k8s_control_config_dir }}/tigera-operator.yaml"
+
+- name: Wait for the Calico operator to register the Installation CRD
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_control_kubeconfig }}"
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: installations.operator.tigera.io
+  register: k8s_control_calico_crd
+  until:
+    - k8s_control_calico_crd.resources | length > 0
+    - >-
+      k8s_control_calico_crd.resources[0].status.conditions | default([], true)
+      | selectattr('type', 'equalto', 'Established')
+      | map(attribute='status') | list | join == 'True'
+  retries: 30
+  delay: 5
 
 - name: Apply the Calico custom resources
   kubernetes.core.k8s:
