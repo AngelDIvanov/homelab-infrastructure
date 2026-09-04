@@ -14,4 +14,4 @@ kubeadm_workers
 [kubeadm_all:vars]
 ansible_user=labadmin
 ansible_ssh_private_key_file=~/.ssh/id_rsa
-ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+ansible_ssh_common_args='-o StrictHostKeyChecking=yes -o UserKnownHostsFile={{ inventory_dir }}/known_hosts'
