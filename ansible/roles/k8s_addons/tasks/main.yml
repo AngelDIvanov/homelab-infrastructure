@@ -16,6 +16,14 @@
     group: root
     mode: "0644"
 
+- name: Create the helm extraction directory
+  ansible.builtin.file:
+    path: "{{ k8s_addons_helm_extract_dir }}/helm-{{ k8s_addons_helm_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Unpack the helm release archive
   ansible.builtin.unarchive:
     src: "{{ k8s_addons_helm_archive_dir }}/helm-v{{ k8s_addons_helm_version }}-linux-amd64.tar.gz"
