@@ -1,1 +1,128 @@
 ---
+- name: Disable swap for the current boot
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+  changed_when: true
+
+- name: Comment out swap entries in /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\s+swap\s+.*)$'
+    replace: '# \1'
+
+- name: Load the kernel modules required by Kubernetes
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Persist the kernel modules across reboots
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      overlay
+      br_netfilter
+
+- name: Set the sysctls required by Kubernetes networking
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    sysctl_file: /etc/sysctl.d/99-kubernetes.conf
+    reload: true
+  loop:
+    - name: net.bridge.bridge-nf-call-iptables
+      value: "1"
+    - name: net.bridge.bridge-nf-call-ip6tables
+      value: "1"
+    - name: net.ipv4.ip_forward
+      value: "1"
+
+- name: Install apt prerequisites
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gpg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Add the Docker apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_distribution_release }}"
+    components:
+      - "{{ containerd_channel }}"
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Install containerd
+  ansible.builtin.apt:
+    name: containerd.io
+    state: present
+    update_cache: true
+
+- name: Configure containerd
+  ansible.builtin.template:
+    src: containerd-config.toml.j2
+    dest: "{{ k8s_common_containerd_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart containerd
+
+- name: Enable and start containerd
+  ansible.builtin.systemd:
+    name: containerd
+    state: started
+    enabled: true
+
+- name: Apply the containerd configuration now
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the containerd socket
+  ansible.builtin.wait_for:
+    path: /var/run/containerd/containerd.sock
+    state: present
+    timeout: 60
+
+- name: Add the Kubernetes apt repository
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: deb
+    uris: https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/
+    suites: /
+    signed_by: https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key
+    state: present
+
+- name: Install kubelet, kubeadm and kubectl
+  ansible.builtin.apt:
+    name:
+      - "kubelet={{ k8s_package_version }}"
+      - "kubeadm={{ k8s_package_version }}"
+      - "kubectl={{ k8s_package_version }}"
+    state: present
+    update_cache: true
+
+- name: Hold the Kubernetes packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+
+- name: Enable the kubelet service
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true
