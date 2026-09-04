@@ -64,6 +64,20 @@ lint:tflint:
   rules:
     - changes: ["terraform-kubeadm/**/*"]
 
+lint:qlty:
+  stage: lint
+  image: ubuntu:24.04
+  variables:
+    GIT_DEPTH: 0
+    QLTY_VERSION: "0.643.0"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq curl git ca-certificates >/dev/null
+    - curl -fsSL https://qlty.sh | bash
+    - export PATH="$HOME/.qlty/bin:$PATH"
+    - git fetch origin main
+  script:
+    - qlty check --upstream origin/main --no-progress
+
 lint:ansible:
   stage: lint
   image:
