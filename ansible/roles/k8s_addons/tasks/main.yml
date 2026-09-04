@@ -6,3 +6,48 @@
     owner: root
     group: root
     mode: "0755"
+
+- name: Download the pinned helm release archive
+  ansible.builtin.get_url:
+    url: "https://get.helm.sh/helm-v{{ k8s_addons_helm_version }}-linux-amd64.tar.gz"
+    dest: "{{ k8s_addons_helm_archive_dir }}/helm-v{{ k8s_addons_helm_version }}-linux-amd64.tar.gz"
+    checksum: "sha256:{{ k8s_addons_helm_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unpack the helm release archive
+  ansible.builtin.unarchive:
+    src: "{{ k8s_addons_helm_archive_dir }}/helm-v{{ k8s_addons_helm_version }}-linux-amd64.tar.gz"
+    dest: "{{ k8s_addons_helm_extract_dir }}/helm-{{ k8s_addons_helm_version }}"
+    creates: "{{ k8s_addons_helm_extract_dir }}/helm-{{ k8s_addons_helm_version }}/linux-amd64/helm"
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+
+- name: Install the helm binary
+  ansible.builtin.copy:
+    src: "{{ k8s_addons_helm_extract_dir }}/helm-{{ k8s_addons_helm_version }}/linux-amd64/helm"
+    dest: /usr/local/bin/helm
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+
+- name: Add the helm chart repositories
+  kubernetes.core.helm_repository:
+    name: "{{ item.name }}"
+    repo_url: "{{ item.url }}"
+    state: present
+  loop:
+    - name: metallb
+      url: https://metallb.github.io/metallb
+    - name: traefik
+      url: https://traefik.github.io/charts
+    - name: nfs-subdir-external-provisioner
+      url: https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
+    - name: metrics-server
+      url: https://kubernetes-sigs.github.io/metrics-server
+    - name: kubelet-csr-approver
+      url: https://postfinance.github.io/kubelet-csr-approver
