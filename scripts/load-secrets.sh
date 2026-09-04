@@ -49,6 +49,7 @@ load_cache() {
         case "$name" in
             K3S_TOKEN|GITLAB_TOKEN|GMAIL_APP_PASS|GMAIL_USER|SEND_TO)
                 value=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || return 1
+                [ -n "$value" ] || return 1
                 printf -v "$name" '%s' "$value"
                 ;;
         esac
@@ -69,14 +70,18 @@ if ! load_cache; then
     GMAIL_USER=$(bw get password "homelab-gmail-user" 2>/dev/null || echo "")
     SEND_TO=$(bw get password "homelab-send-to" 2>/dev/null || echo "")
 
-    umask 077
-    {
-        echo "CACHE_VERSION=2"
-        write_cache_value K3S_TOKEN "$K3S_TOKEN"
-        write_cache_value GITLAB_TOKEN "$GITLAB_TOKEN"
-        write_cache_value GMAIL_APP_PASS "$GMAIL_APP_PASS"
-        write_cache_value GMAIL_USER "$GMAIL_USER"
-        write_cache_value SEND_TO "$SEND_TO"
-    } > "$SECRETS_CACHE"
-    chmod 600 "$SECRETS_CACHE"
+    if [ -n "$K3S_TOKEN" ] && [ -n "$GITLAB_TOKEN" ] && [ -n "$GMAIL_APP_PASS" ] && [ -n "$GMAIL_USER" ] && [ -n "$SEND_TO" ]; then
+        (
+            umask 077
+            {
+                echo "CACHE_VERSION=2"
+                write_cache_value K3S_TOKEN "$K3S_TOKEN"
+                write_cache_value GITLAB_TOKEN "$GITLAB_TOKEN"
+                write_cache_value GMAIL_APP_PASS "$GMAIL_APP_PASS"
+                write_cache_value GMAIL_USER "$GMAIL_USER"
+                write_cache_value SEND_TO "$SEND_TO"
+            } > "$SECRETS_CACHE"
+            chmod 600 "$SECRETS_CACHE"
+        )
+    fi
 fi
