@@ -1,1 +1,119 @@
 ---
+- name: Install the Python client for the kubernetes.core modules
+  ansible.builtin.apt:
+    name:
+      - python3-kubernetes
+      - python3-yaml
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the kubeadm configuration directory
+  ansible.builtin.file:
+    path: "{{ k8s_control_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Determine the installed kubeadm version
+  ansible.builtin.command:
+    cmd: kubeadm version -o json
+  register: k8s_control_kubeadm_version
+  changed_when: false
+
+- name: Expose the kubeadm version to the init configuration
+  ansible.builtin.set_fact:
+    k8s_control_kubernetes_version: "{{ (k8s_control_kubeadm_version.stdout | from_json).gitVersion }}"
+
+- name: Render the kubeadm init configuration
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: "{{ k8s_control_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Initialise the control plane
+  ansible.builtin.command:
+    cmd: kubeadm init --config {{ k8s_control_config_path }}
+    creates: /etc/kubernetes/admin.conf
+
+- name: Create the kubeconfig directory for the ansible user
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0700"
+
+- name: Install the admin kubeconfig for the ansible user
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+
+- name: Download the Calico operator manifest
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
+    dest: "{{ k8s_control_config_dir }}/tigera-operator.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render the Calico custom resources
+  ansible.builtin.template:
+    src: calico-custom-resources.yaml.j2
+    dest: "{{ k8s_control_config_dir }}/calico-custom-resources.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the Calico operator
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_control_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_control_config_dir }}/tigera-operator.yaml"
+
+- name: Apply the Calico custom resources
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_control_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_control_config_dir }}/calico-custom-resources.yaml"
+  register: k8s_control_calico_resources
+  until: not k8s_control_calico_resources.failed
+  retries: 12
+  delay: 10
+
+- name: Wait for the control-plane node to report Ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_control_kubeconfig }}"
+    kind: Node
+    name: "{{ inventory_hostname }}"
+  register: k8s_control_node
+  until:
+    - k8s_control_node.resources is defined
+    - k8s_control_node.resources | length > 0
+    - >-
+      k8s_control_node.resources[0].status.conditions | default([], true)
+      | selectattr('type', 'equalto', 'Ready')
+      | map(attribute='status') | list | join == 'True'
+  retries: "{{ k8s_control_node_ready_retries }}"
+  delay: "{{ k8s_control_node_ready_delay }}"
+
+- name: Create a short-lived join command for the workers
+  ansible.builtin.command:
+    cmd: kubeadm token create --print-join-command --ttl {{ k8s_control_join_token_ttl }}
+  register: k8s_control_join
+  changed_when: true
+  no_log: true
+
+- name: Expose the join command to the worker plays
+  ansible.builtin.set_fact:
+    kubeadm_join_command: "{{ k8s_control_join.stdout }}"  # noqa: var-naming[no-role-prefix]
+  no_log: true
