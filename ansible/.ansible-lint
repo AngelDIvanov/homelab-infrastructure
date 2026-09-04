@@ -8,4 +8,3 @@ exclude_paths:
   - playbooks/install-apps.yml
   - playbooks/remove-apps.yml
   - playbooks/revert-hardening.yml
-  - playbooks/kubeadm-bootstrap.yml
