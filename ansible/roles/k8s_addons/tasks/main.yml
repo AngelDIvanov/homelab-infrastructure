@@ -156,7 +156,12 @@
     wait: true
     values:
       providerRegex: "^kubeadm-(control|worker-[0-9]+)$"
-      providerIpPrefixes: ["192.168.122.0/24"]
+      # only the node addresses from the inventory may appear as IP SANs
+      providerIpPrefixes: >-
+        {{ groups['kubeadm_all'] | map('extract', hostvars, 'ansible_host')
+           | map('regex_replace', '$', '/32') | list }}
+      # node names have no DNS records on the lab network, so the DNS SAN
+      # check cannot be satisfied; identity is enforced by the regex and IP list
       bypassDnsResolution: true
 
 - name: Install the metrics server
