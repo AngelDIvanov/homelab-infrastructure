@@ -168,6 +168,14 @@
     release_namespace: kube-system
     wait: true
 
+- name: Create the registry namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    state: present
+    api_version: v1
+    kind: Namespace
+    name: "{{ k8s_addons_registry_namespace }}"
+
 - name: Render the registry storage manifest
   ansible.builtin.template:
     src: registry-storage.yaml.j2
