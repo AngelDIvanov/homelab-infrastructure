@@ -50,7 +50,7 @@ declare -A VMS=(
 
 # SSH helper for control plane
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-K3S_CMD="ssh $SSH_OPTS andy@$K3S_CONTROL_IP"
+K3S_CMD="ssh $SSH_OPTS labadmin@$K3S_CONTROL_IP"
 
 # Dynamic worker discovery from k3s
 declare -A WORKERS
@@ -80,7 +80,7 @@ discover_workers() {
 # Helper function to get SSH command for any node
 ssh_cmd() {
     local ip=$1
-    echo "ssh $SSH_OPTS andy@$ip"
+    echo "ssh $SSH_OPTS labadmin@$ip"
 }
 
 # Command-line flags
@@ -487,12 +487,12 @@ if [ -n "$LATEST_IMAGE" ]; then
         if [ "$WORKER_HAS" == "no" ]; then
             echo -e "  ${YELLOW}[WARN]  Syncing image to workers...${NC}"
             $K3S_CMD "sudo k3s ctr images export /tmp/trengo-sync.tar $LATEST_IMAGE" 2>/dev/null
-            scp -q $SSH_OPTS andy@$K3S_CONTROL_IP:/tmp/trengo-sync.tar /tmp/ 2>/dev/null
+            scp -q $SSH_OPTS labadmin@$K3S_CONTROL_IP:/tmp/trengo-sync.tar /tmp/ 2>/dev/null
             
             for worker_name in "${!WORKERS[@]}"; do
                 worker_ip="${WORKERS[$worker_name]}"
-                scp -q $SSH_OPTS /tmp/trengo-sync.tar andy@$worker_ip:/tmp/ 2>/dev/null
-                ssh $SSH_OPTS andy@$worker_ip "sudo k3s ctr images import /tmp/trengo-sync.tar" 2>/dev/null
+                scp -q $SSH_OPTS /tmp/trengo-sync.tar labadmin@$worker_ip:/tmp/ 2>/dev/null
+                ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import /tmp/trengo-sync.tar" 2>/dev/null
                 echo -e "  ${GREEN}OK Image synced to $worker_name${NC}"
             done
             ((PASS++))
@@ -601,9 +601,9 @@ fi
 section "  SECURITY TOOLS"
 
 printf "  %-55s" "Trivy installed on ci-runner"
-TRIVY_CHECK=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo test -f /home/gitlab-runner/bin/trivy && echo yes || echo no" 2>/dev/null)
+TRIVY_CHECK=$(ssh $SSH_OPTS labadmin@$CI_RUNNER_IP "sudo test -f /home/gitlab-runner/bin/trivy && echo yes || echo no" 2>/dev/null)
 if [ "$TRIVY_CHECK" == "yes" ]; then
-    TRIVY_VER=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo /home/gitlab-runner/bin/trivy --version 2>/dev/null | head -1" 2>/dev/null)
+    TRIVY_VER=$(ssh $SSH_OPTS labadmin@$CI_RUNNER_IP "sudo /home/gitlab-runner/bin/trivy --version 2>/dev/null | head -1" 2>/dev/null)
     echo -e "${GREEN}OK PASS${NC}  ${DIM}${TRIVY_VER}${NC}"
     ((PASS++))
 else
@@ -612,9 +612,9 @@ else
 fi
 
 printf "  %-55s" "Gitleaks installed on ci-runner"
-GITLEAKS_CHECK=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo test -f /home/gitlab-runner/bin/gitleaks && echo yes || echo no" 2>/dev/null)
+GITLEAKS_CHECK=$(ssh $SSH_OPTS labadmin@$CI_RUNNER_IP "sudo test -f /home/gitlab-runner/bin/gitleaks && echo yes || echo no" 2>/dev/null)
 if [ "$GITLEAKS_CHECK" == "yes" ]; then
-    GITLEAKS_VER=$(ssh $SSH_OPTS andy@$CI_RUNNER_IP "sudo /home/gitlab-runner/bin/gitleaks version 2>/dev/null" 2>/dev/null)
+    GITLEAKS_VER=$(ssh $SSH_OPTS labadmin@$CI_RUNNER_IP "sudo /home/gitlab-runner/bin/gitleaks version 2>/dev/null" 2>/dev/null)
     echo -e "${GREEN}OK PASS${NC}  ${DIM}${GITLEAKS_VER}${NC}"
     ((PASS++))
 else

@@ -13,7 +13,7 @@ GITLAB_URL        = os.environ.get('GITLAB_URL',        'http://192.168.122.230:
 GITLAB_TOKEN      = os.environ.get('GITLAB_TOKEN',      '')
 GITLAB_PROJECT_ID = os.environ.get('GITLAB_PROJECT_ID', '1')
 SSH_KEY           = os.environ.get('SSH_KEY',           '/root/.ssh/id_rsa')
-SSH_USER          = os.environ.get('SSH_USER',          'andy')
+SSH_USER          = os.environ.get('SSH_USER',          'labadmin')
 K3S_CONTROL_IP    = os.environ.get('K3S_CONTROL_IP',    '192.168.122.218')
 HYPERVISOR_IP     = os.environ.get('HYPERVISOR_IP',     '192.168.122.1')
 REGISTRY_URL      = os.environ.get('REGISTRY_URL',      'http://192.168.122.218:30500')
@@ -142,7 +142,7 @@ def dispatch_cmd(cmd, timeout=60):
         # virsh lives on the hypervisor host, not inside any VM
         return _ssh(HYPERVISOR_IP, c, timeout=timeout)
     if re.match(r'^(sudo\s+)?kubectl\b', c):
-        # kubectl as andy on k3s-control can't read k3s.yaml — use sudo k3s kubectl
+        # kubectl as labadmin on k3s-control can't read k3s.yaml — use sudo k3s kubectl
         kubectl_args = re.sub(r'^(sudo\s+)?kubectl\s+', '', c)
         return _ssh(K3S_CONTROL_IP, f'sudo k3s kubectl {kubectl_args}', timeout=timeout)
     if re.match(r'^docker\b', c):
@@ -151,7 +151,7 @@ def dispatch_cmd(cmd, timeout=60):
     if re.match(r'^ssh\b', c):
         # Run SSH directly from the webhook pod — it has the homelab@ansible key
         # that is authorized on all nodes. Routing through k3s-control would use
-        # andy's key there, which may not match.
+        # labadmin's key there, which may not match.
         c_fixed = re.sub(
             r'^ssh\b',
             f'ssh -i {SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null',
@@ -234,11 +234,11 @@ def call_claude(user_msg, state):
         "Any node whose name contains 'worker' runs workloads. "
         "When a worker node is down, check BOTH virsh list --all and kubectl get nodes "
         "to identify which one. Use the correct IP when SSHing. "
-        "To restart k3s-agent: ssh andy@<correct-ip> sudo systemctl restart k3s-agent. "
+        "To restart k3s-agent: ssh labadmin@<correct-ip> sudo systemctl restart k3s-agent. "
         "CLUSTER DRIFT: if a VM is running but not in the cluster, common causes are: "
         "1) invalid token — check /etc/systemd/system/k3s-agent.service.env on the node, "
-        "compare K3S_TOKEN with: ssh andy@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token "
-        "2) stale certs — fix with: ssh andy@<ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt && sudo systemctl restart k3s-agent "
+        "compare K3S_TOKEN with: ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token "
+        "2) stale certs — fix with: ssh labadmin@<ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt && sudo systemctl restart k3s-agent "
         "COMMAND ROUTING (handled automatically — just write the command): "
         "- virsh commands → hypervisor host (192.168.122.1). "
         "- docker commands → hypervisor host (192.168.122.1) where source code lives. "
@@ -246,10 +246,10 @@ def call_claude(user_msg, state):
         "- ssh commands → direct from webhook pod with key injected. "
         "LOCAL REGISTRY: 192.168.122.218:30500 (unauthenticated, NFS-backed PVC — images persist across pod restarts). "
         "APP SOURCE PATHS ON HYPERVISOR (192.168.122.1): "
-        "  pylab       → /home/andy/pylab/       → 192.168.122.218:30500/pylab:latest "
-        "  trengo-search → /home/andy/trengo-search/ → 192.168.122.218:30500/trengo-search:latest "
+        "  pylab       → /home/labadmin/pylab/       → 192.168.122.218:30500/pylab:latest "
+        "  trengo-search → /home/labadmin/trengo-search/ → 192.168.122.218:30500/trengo-search:latest "
         "If the registry is empty or an image is missing, rebuild with: "
-        "  docker build -t 192.168.122.218:30500/<app>:latest /home/andy/<app>/ "
+        "  docker build -t 192.168.122.218:30500/<app>:latest /home/labadmin/<app>/ "
         "  docker push 192.168.122.218:30500/<app>:latest "
         "Analyze the cluster state, then respond with: "
         "1) Brief diagnosis (2-3 sentences). "
@@ -271,7 +271,7 @@ def call_claude(user_msg, state):
         "does NOT require rebuilding images. "
         "Do NOT delete jobs or pods unless they are the direct cause of the alert. "
         "To start a down VM: virsh start <node-name> "
-        "To restart k3s agent: ssh andy@<ip> sudo systemctl restart k3s-agent "
+        "To restart k3s agent: ssh labadmin@<ip> sudo systemctl restart k3s-agent "
         "For cluster drift (VM running but not in cluster): check agent logs, restart agent first. "
     )
 

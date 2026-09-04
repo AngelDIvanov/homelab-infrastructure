@@ -11,7 +11,7 @@
 
 ## Rollback plan
 ```bash
-ssh andy@192.168.122.218 "sudo k3s kubectl rollout undo deployment/trengo-search -n default"
+ssh labadmin@192.168.122.218 "sudo k3s kubectl rollout undo deployment/trengo-search -n default"
 ```
 
 ## Version bump

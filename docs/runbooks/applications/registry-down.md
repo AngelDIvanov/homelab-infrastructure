@@ -23,7 +23,7 @@
   ```
 - [ ] Is the NFS server up?
   ```bash
-  ssh andy@192.168.122.230 sudo systemctl status nfs-server
+  ssh labadmin@192.168.122.230 sudo systemctl status nfs-server
   ```
 
 ## Recovery Steps
@@ -49,9 +49,9 @@ curl http://192.168.122.218:30500/v2/_catalog
 ### Images lost (registry was using emptyDir previously)
 If the registry lost its images, rebuild and push:
 ```bash
-docker build -t 192.168.122.218:30500/pylab:latest /home/andy/pylab/
+docker build -t 192.168.122.218:30500/pylab:latest /home/labadmin/pylab/
 docker push 192.168.122.218:30500/pylab:latest
-docker build -t 192.168.122.218:30500/trengo-search:latest /home/andy/trengo-search/
+docker build -t 192.168.122.218:30500/trengo-search:latest /home/labadmin/trengo-search/
 docker push 192.168.122.218:30500/trengo-search:latest
 ```
 

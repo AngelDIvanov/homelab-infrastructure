@@ -14,7 +14,7 @@
   ```
 - [ ] Is the NFS server reachable?
   ```bash
-  ssh andy@192.168.122.218 sudo showmount -e 192.168.122.230
+  ssh labadmin@192.168.122.218 sudo showmount -e 192.168.122.230
   ```
 - [ ] What do provisioner logs say?
   ```bash

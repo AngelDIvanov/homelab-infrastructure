@@ -99,7 +99,7 @@ def service_states():
 def k3s_nodes():
     """Return list of (name, status) from kubectl."""
     _, out, _ = run_cmd(
-        f"ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "
+        f"ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "
         f"'sudo k3s kubectl get nodes --no-headers 2>/dev/null'"
     )
     nodes = []
@@ -499,7 +499,7 @@ class LabTUI(App):
         self.call_from_thread(log.write_line, "[cyan]→ Waiting for SSH...[/cyan]")
         ready = False
         for _ in range(12):
-            rc, _, _ = run_cmd(f"ssh {SSH_OPTS} andy@{new_ip} 'echo ok' 2>/dev/null")
+            rc, _, _ = run_cmd(f"ssh {SSH_OPTS} labadmin@{new_ip} 'echo ok' 2>/dev/null")
             if rc == 0:
                 ready = True; break
             time.sleep(10)
@@ -509,10 +509,10 @@ class LabTUI(App):
         # Join k3s
         self.call_from_thread(log.write_line, "[cyan]→ Joining k3s cluster...[/cyan]")
         rc, _, _ = run_cmd(
-            f'ssh {SSH_OPTS} andy@{new_ip} '
+            f'ssh {SSH_OPTS} labadmin@{new_ip} '
             f'"curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN} sh -"'
         )
-        run_cmd(f'ssh {SSH_OPTS} andy@{new_ip} "sudo systemctl restart k3s-agent"')
+        run_cmd(f'ssh {SSH_OPTS} labadmin@{new_ip} "sudo systemctl restart k3s-agent"')
 
         self.call_from_thread(log.write_line, f"[green]OK {new_name} added![/green]")
         self.call_from_thread(self.refresh_status)
@@ -530,8 +530,8 @@ class LabTUI(App):
         self.call_from_thread(log.write_line, f"\n[bold yellow]Downscale Removing {wname}...[/bold yellow]")
 
         # Drain
-        run_cmd(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl drain {wname} --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true"')
-        run_cmd(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl delete node {wname} 2>/dev/null || true"')
+        run_cmd(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl drain {wname} --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true"')
+        run_cmd(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl delete node {wname} 2>/dev/null || true"')
 
         # Terraform
         tfvars = os.path.join(TERRAFORM_DIR, "terraform.tfvars")
@@ -556,13 +556,13 @@ class LabTUI(App):
             wname = f"k3s-worker-{wnum}"
             wip   = get_worker_ip(wnum)
             self.call_from_thread(log.write_line, f"  Processing [bold]{wname}[/bold] ({wip})...")
-            run_cmd(f'ssh {SSH_OPTS} andy@{wip} "sudo rm -f /etc/rancher/node/password"')
-            run_cmd(f'ssh {SSH_OPTS} andy@{wip} "sudo systemctl stop k3s-agent 2>/dev/null || true"')
+            run_cmd(f'ssh {SSH_OPTS} labadmin@{wip} "sudo rm -f /etc/rancher/node/password"')
+            run_cmd(f'ssh {SSH_OPTS} labadmin@{wip} "sudo systemctl stop k3s-agent 2>/dev/null || true"')
             rc, _, _ = run_cmd(
-                f'ssh {SSH_OPTS} andy@{wip} '
+                f'ssh {SSH_OPTS} labadmin@{wip} '
                 f'"curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN} sh -"'
             )
-            run_cmd(f'ssh {SSH_OPTS} andy@{wip} "sudo systemctl restart k3s-agent"')
+            run_cmd(f'ssh {SSH_OPTS} labadmin@{wip} "sudo systemctl restart k3s-agent"')
             icon = "OK" if rc == 0 else "FAIL"
             color = "green" if rc == 0 else "red"
             self.call_from_thread(log.write_line, f"  [{color}]{icon} {wname}[/{color}]")
@@ -580,14 +580,14 @@ class LabTUI(App):
         for name, ip in sorted(workers.items()):
             self.call_from_thread(log.write_line, f"  Syncing to [bold]{name}[/bold]...")
             _, img, _ = run_cmd(
-                f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+                f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
                 f'"sudo k3s ctr images list | grep trengo-search | head -1 | awk \'{{print $1}}\'"'
             )
             if img:
-                run_cmd(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s ctr images export /tmp/sync.tar {img}"')
-                run_cmd(f'scp {SSH_OPTS} andy@{K3S_CONTROL_IP}:/tmp/sync.tar /tmp/')
-                run_cmd(f'scp {SSH_OPTS} /tmp/sync.tar andy@{ip}:/tmp/')
-                run_cmd(f'ssh {SSH_OPTS} andy@{ip} "sudo k3s ctr images import /tmp/sync.tar"')
+                run_cmd(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s ctr images export /tmp/sync.tar {img}"')
+                run_cmd(f'scp {SSH_OPTS} labadmin@{K3S_CONTROL_IP}:/tmp/sync.tar /tmp/')
+                run_cmd(f'scp {SSH_OPTS} /tmp/sync.tar labadmin@{ip}:/tmp/')
+                run_cmd(f'ssh {SSH_OPTS} labadmin@{ip} "sudo k3s ctr images import /tmp/sync.tar"')
                 self.call_from_thread(log.write_line, f"  [green]OK {name} synced[/green]")
             else:
                 self.call_from_thread(log.write_line, f"  [yellow][WARN] No image found for {name}[/yellow]")

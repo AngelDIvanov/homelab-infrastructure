@@ -32,12 +32,12 @@ kubectl logs -n monitoring -l job-name=drift-manual -f
 
 - [ ] Is k3s-agent running on the node?
   ```bash
-  ssh andy@<ip> sudo systemctl status k3s-agent
+  ssh labadmin@<ip> sudo systemctl status k3s-agent
   ```
 
 - [ ] What is the agent error?
   ```bash
-  ssh andy@<ip> sudo journalctl -u k3s-agent -n 20 --no-pager
+  ssh labadmin@<ip> sudo journalctl -u k3s-agent -n 20 --no-pager
   ```
 
 ## Recovery Steps
@@ -51,18 +51,18 @@ fully written).
 
 ```bash
 # Get the correct token from control plane
-ssh andy@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token
+ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token
 # Expected format: K10<hash>::server:<secret>
 
 # Check what token the agent is using — compare carefully
-ssh andy@<node-ip> sudo cat /etc/systemd/system/k3s-agent.service.env
+ssh labadmin@<node-ip> sudo cat /etc/systemd/system/k3s-agent.service.env
 # If it's missing ::server:<secret> that's the problem
 
 # Update the token on the node
 CORRECT_TOKEN="<full token including ::server: suffix>"
-ssh andy@<node-ip> "sudo sed -i \"s|K3S_TOKEN=.*|K3S_TOKEN='${CORRECT_TOKEN}'|\" /etc/systemd/system/k3s-agent.service.env"
-ssh andy@<node-ip> sudo systemctl daemon-reload
-ssh andy@<node-ip> sudo systemctl restart k3s-agent
+ssh labadmin@<node-ip> "sudo sed -i \"s|K3S_TOKEN=.*|K3S_TOKEN='${CORRECT_TOKEN}'|\" /etc/systemd/system/k3s-agent.service.env"
+ssh labadmin@<node-ip> sudo systemctl daemon-reload
+ssh labadmin@<node-ip> sudo systemctl restart k3s-agent
 ```
 
 **Root cause (2026-04-11):** k3s-worker-2 was provisioned with a truncated token —
@@ -74,7 +74,7 @@ the `::server:` suffix was missing. Token must be copied in full from
 Always restore the env file and restart the agent after an in-place upgrade:
 
 ```bash
-TOKEN=$(ssh andy@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token)
+TOKEN=$(ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token)
 printf 'K3S_TOKEN=%s\nK3S_URL=https://192.168.122.218:6443\n' "$TOKEN" \
   | sudo tee /etc/systemd/system/k3s-agent.service.env
 sudo systemctl daemon-reload && sudo systemctl restart k3s-agent
@@ -83,17 +83,17 @@ sudo systemctl daemon-reload && sudo systemctl restart k3s-agent
 ### Stale certificates (`certificate signed by unknown authority`)
 
 ```bash
-ssh andy@<node-ip> sudo systemctl stop k3s-agent
-ssh andy@<node-ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt
-ssh andy@<node-ip> sudo rm -f /var/lib/rancher/k3s/agent/server-ca.crt
-ssh andy@<node-ip> sudo systemctl start k3s-agent
+ssh labadmin@<node-ip> sudo systemctl stop k3s-agent
+ssh labadmin@<node-ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt
+ssh labadmin@<node-ip> sudo rm -f /var/lib/rancher/k3s/agent/server-ca.crt
+ssh labadmin@<node-ip> sudo systemctl start k3s-agent
 ```
 
 ### Agent crash / never started
 
 ```bash
-ssh andy@<node-ip> sudo systemctl restart k3s-agent
-ssh andy@<node-ip> sudo journalctl -u k3s-agent -f --no-pager
+ssh labadmin@<node-ip> sudo systemctl restart k3s-agent
+ssh labadmin@<node-ip> sudo journalctl -u k3s-agent -f --no-pager
 ```
 
 ## Verify Recovery

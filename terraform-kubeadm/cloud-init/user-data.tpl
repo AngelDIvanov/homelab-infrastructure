@@ -8,7 +8,7 @@ manage_etc_hosts: true
 
 users:
 
-  - name: andy
+  - name: labadmin
 
     sudo: ALL=(ALL) NOPASSWD:ALL
 
@@ -36,7 +36,7 @@ packages:
 
 runcmd:
 
-  - echo 'andy:ubuntu123' | chpasswd
+  - echo 'labadmin:changeme' | chpasswd   # lab default; rotate on first login or switch to ssh keys only
 
   - sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
 

@@ -12,19 +12,19 @@
 ## Root Cause Checklist
 - [ ] Is k3s service running on k3s-control (.218)?
   ```bash
-  ssh andy@192.168.122.218 sudo systemctl status k3s
+  ssh labadmin@192.168.122.218 sudo systemctl status k3s
   ```
 - [ ] Is the API server listening on port 6443?
   ```bash
-  ssh andy@192.168.122.218 sudo ss -tlnp | grep 6443
+  ssh labadmin@192.168.122.218 sudo ss -tlnp | grep 6443
   ```
 - [ ] Are there errors in the k3s journal?
   ```bash
-  ssh andy@192.168.122.218 sudo journalctl -u k3s -n 50 --no-pager
+  ssh labadmin@192.168.122.218 sudo journalctl -u k3s -n 50 --no-pager
   ```
 - [ ] Is the disk full on k3s-control?
   ```bash
-  ssh andy@192.168.122.218 df -h /var/lib/rancher/k3s/
+  ssh labadmin@192.168.122.218 df -h /var/lib/rancher/k3s/
   ```
 - [ ] Is the VM itself running on the hypervisor?
   ```bash
@@ -43,27 +43,27 @@ virsh start k3s-control
 
 ### Step 2 — Restart k3s service
 ```bash
-ssh andy@192.168.122.218 sudo systemctl restart k3s
+ssh labadmin@192.168.122.218 sudo systemctl restart k3s
 # Wait 30s then check
-ssh andy@192.168.122.218 sudo systemctl status k3s
+ssh labadmin@192.168.122.218 sudo systemctl status k3s
 ```
 
 ### Step 3 — If disk is full, clear space
 ```bash
-ssh andy@192.168.122.218 sudo k3s crictl rmi --prune
-ssh andy@192.168.122.218 sudo journalctl --vacuum-size=200M
+ssh labadmin@192.168.122.218 sudo k3s crictl rmi --prune
+ssh labadmin@192.168.122.218 sudo journalctl --vacuum-size=200M
 ```
 
 ### Step 4 — If SQLite database is corrupted
 ```bash
 # Check for corruption
-ssh andy@192.168.122.218 sudo sqlite3 /var/lib/rancher/k3s/server/db/state.db "PRAGMA integrity_check;"
+ssh labadmin@192.168.122.218 sudo sqlite3 /var/lib/rancher/k3s/server/db/state.db "PRAGMA integrity_check;"
 
 # If corrupted, restore from latest snapshot (on k3s-infra)
 ls -lt /var/lib/k3s-snapshots/
 # Copy latest snapshot back to k3s-control:
-scp /var/lib/k3s-snapshots/k3s-state-<LATEST>.db andy@192.168.122.218:/tmp/
-ssh andy@192.168.122.218 "sudo systemctl stop k3s && sudo cp /tmp/k3s-state-<LATEST>.db /var/lib/rancher/k3s/server/db/state.db && sudo systemctl start k3s"
+scp /var/lib/k3s-snapshots/k3s-state-<LATEST>.db labadmin@192.168.122.218:/tmp/
+ssh labadmin@192.168.122.218 "sudo systemctl stop k3s && sudo cp /tmp/k3s-state-<LATEST>.db /var/lib/rancher/k3s/server/db/state.db && sudo systemctl start k3s"
 ```
 
 ## Verify Recovery

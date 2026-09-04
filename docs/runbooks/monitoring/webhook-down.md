@@ -35,7 +35,7 @@ Known variables that must be defined in `webhook.py` (check `scripts/webhook.py`
 | `GITLAB_TOKEN` | `''` |
 | `GITLAB_PROJECT_ID` | `'1'` |
 | `SSH_KEY` | `/root/.ssh/id_rsa` |
-| `SSH_USER` | `andy` |
+| `SSH_USER` | `labadmin` |
 | `K3S_CONTROL_IP` | `192.168.122.218` |
 | `HYPERVISOR_IP` | `192.168.122.1` |
 | `REGISTRY_URL` | `http://192.168.122.218:30500` |

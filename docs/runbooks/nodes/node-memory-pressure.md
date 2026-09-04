@@ -15,15 +15,15 @@
 ## Root Cause Checklist
 - [ ] Which process is consuming memory?
   ```bash
-  ssh andy@192.168.122.<ip> ps aux --sort=-%mem | head -15
+  ssh labadmin@192.168.122.<ip> ps aux --sort=-%mem | head -15
   ```
 - [ ] Is GitLab (on k3s-infra .230) consuming too much?
   ```bash
-  ssh andy@192.168.122.230 sudo gitlab-ctl status
+  ssh labadmin@192.168.122.230 sudo gitlab-ctl status
   ```
 - [ ] Is Sidekiq bloated?
   ```bash
-  ssh andy@192.168.122.230 sudo gitlab-ctl tail sidekiq 2>/dev/null | tail -5
+  ssh labadmin@192.168.122.230 sudo gitlab-ctl tail sidekiq 2>/dev/null | tail -5
   ```
 - [ ] Is Prometheus retention eating RAM?
   ```bash
@@ -35,7 +35,7 @@
 ### k3s-infra (.230) — GitLab host
 ```bash
 # Restart Sidekiq (often the biggest consumer after long uptime)
-ssh andy@192.168.122.230 sudo gitlab-ctl restart sidekiq
+ssh labadmin@192.168.122.230 sudo gitlab-ctl restart sidekiq
 
 # Reduce Prometheus retention if still high
 kubectl patch prometheus monitoring-kube-prometheus-prometheus -n monitoring \
@@ -44,12 +44,12 @@ kubectl patch prometheus monitoring-kube-prometheus-prometheus -n monitoring \
 
 ### Any node — clear caches
 ```bash
-ssh andy@192.168.122.<ip> sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
+ssh labadmin@192.168.122.<ip> sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
 ```
 
 ### Any node — prune container images
 ```bash
-ssh andy@192.168.122.<ip> sudo k3s crictl rmi --prune
+ssh labadmin@192.168.122.<ip> sudo k3s crictl rmi --prune
 ```
 
 ## Long-Term Fix
@@ -63,7 +63,7 @@ If a node is consistently above 80%, increase VM memory via Terraform:
 ## Verify Recovery
 ```bash
 kubectl top nodes
-ssh andy@192.168.122.<ip> free -h
+ssh labadmin@192.168.122.<ip> free -h
 ```
 
 ## Related Alerts

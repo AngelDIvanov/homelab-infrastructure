@@ -31,7 +31,7 @@ NEW_API_KEY=$(openssl rand -hex 32)
 NEW_DB_PASS=$(openssl rand -base64 20 | tr -dc 'a-zA-Z0-9' | head -c 20)
 
 # 2. Update database password (if rotating DB_URL)
-ssh andy@192.168.122.230 "sudo -u postgres psql -c \
+ssh labadmin@192.168.122.230 "sudo -u postgres psql -c \
   \"ALTER USER pylab WITH PASSWORD '$NEW_DB_PASS';\""
 
 # 3. Update Kubernetes secret
@@ -95,7 +95,7 @@ ssh-keygen -t ed25519 -f /tmp/webhook-new-key -N "" -C "homelab@ansible-$(date +
 
 # 2. Add new public key to authorized_keys on all nodes BEFORE removing old key
 for HOST in 192.168.122.218 192.168.122.219 192.168.122.221 192.168.122.230; do
-  ssh-copy-id -i /tmp/webhook-new-key.pub andy@$HOST
+  ssh-copy-id -i /tmp/webhook-new-key.pub labadmin@$HOST
 done
 # Also add to hypervisor itself (for virsh/docker commands)
 cat /tmp/webhook-new-key.pub >> ~/.ssh/authorized_keys
@@ -143,7 +143,7 @@ kubectl rollout restart deployment/registry -n registry
 # 4. Update /etc/rancher/k3s/registries.yaml on ALL nodes with new credentials
 # See: kubernetes/deployments/local-registry.yaml for the format
 for HOST in 192.168.122.218 192.168.122.219 192.168.122.221; do
-  ssh andy@$HOST "sudo sed -i 's/password: .*/password: \"$NEW_PASS\"/' \
+  ssh labadmin@$HOST "sudo sed -i 's/password: .*/password: \"$NEW_PASS\"/' \
     /etc/rancher/k3s/registries.yaml && sudo systemctl restart k3s"
 done
 ```

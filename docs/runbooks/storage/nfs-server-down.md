@@ -11,28 +11,28 @@ No dedicated alert — triggered by pods stuck in `ContainerCreating` with `moun
 ## Root Cause Checklist
 - [ ] Is the NFS server process running on k3s-infra (.230)?
   ```bash
-  ssh andy@192.168.122.230 sudo systemctl status nfs-server
+  ssh labadmin@192.168.122.230 sudo systemctl status nfs-server
   ```
 - [ ] Are exports visible?
   ```bash
-  ssh andy@192.168.122.230 sudo exportfs -v
+  ssh labadmin@192.168.122.230 sudo exportfs -v
   ```
 - [ ] Can k3s-control mount the NFS share?
   ```bash
-  ssh andy@192.168.122.218 sudo showmount -e 192.168.122.230
+  ssh labadmin@192.168.122.218 sudo showmount -e 192.168.122.230
   ```
 
 ## Recovery Steps
 
 ### Step 1 — Restart NFS server
 ```bash
-ssh andy@192.168.122.230 sudo systemctl restart nfs-server
-ssh andy@192.168.122.230 sudo exportfs -ra
+ssh labadmin@192.168.122.230 sudo systemctl restart nfs-server
+ssh labadmin@192.168.122.230 sudo exportfs -ra
 ```
 
 ### Step 2 — Verify exports
 ```bash
-ssh andy@192.168.122.230 sudo exportfs -v
+ssh labadmin@192.168.122.230 sudo exportfs -v
 # Should show: /data  192.168.122.0/24(rw,sync,no_root_squash,...)
 ```
 
@@ -46,9 +46,9 @@ kubectl rollout restart deployment -n vaultwarden
 ### Step 4 — If NFS exports are missing (server was rebuilt)
 ```bash
 # Re-export manually on k3s-infra:
-ssh andy@192.168.122.230 "echo '/data 192.168.122.0/24(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports"
-ssh andy@192.168.122.230 sudo exportfs -ra
-ssh andy@192.168.122.230 sudo systemctl enable --now nfs-server
+ssh labadmin@192.168.122.230 "echo '/data 192.168.122.0/24(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports"
+ssh labadmin@192.168.122.230 sudo exportfs -ra
+ssh labadmin@192.168.122.230 sudo systemctl enable --now nfs-server
 ```
 
 ## Verify Recovery

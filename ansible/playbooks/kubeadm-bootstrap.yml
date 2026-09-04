@@ -140,28 +140,28 @@
       when: not kubeconfig.stat.exists
       register: kubeadm_init
 
-    - name: Create .kube dir for andy
+    - name: Create .kube dir for labadmin
       file:
-        path: /home/andy/.kube
+        path: /home/labadmin/.kube
         state: directory
-        owner: andy
-        group: andy
+        owner: labadmin
+        group: labadmin
         mode: "0755"
 
-    - name: Copy admin.conf for andy
+    - name: Copy admin.conf for labadmin
       copy:
         src: /etc/kubernetes/admin.conf
-        dest: /home/andy/.kube/config
+        dest: /home/labadmin/.kube/config
         remote_src: true
-        owner: andy
-        group: andy
+        owner: labadmin
+        group: labadmin
         mode: "0600"
 
     - name: Install Flannel CNI
       become: false
       shell: kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
       environment:
-        KUBECONFIG: /home/andy/.kube/config
+        KUBECONFIG: /home/labadmin/.kube/config
 
     - name: Get join command
       shell: kubeadm token create --print-join-command
