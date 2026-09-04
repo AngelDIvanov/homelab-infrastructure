@@ -44,19 +44,20 @@ load_cache() {
     [ -f "$SECRETS_CACHE" ] || return 1
     [ "$(head -n 1 "$SECRETS_CACHE")" = "CACHE_VERSION=2" ] || return 1
 
-    local name encoded value loaded=0
+    local name encoded value
     while IFS='=' read -r name encoded; do
         case "$name" in
             K3S_TOKEN|GITLAB_TOKEN|GMAIL_APP_PASS|GMAIL_USER|SEND_TO)
                 value=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || return 1
                 [ -n "$value" ] || return 1
                 printf -v "$name" '%s' "$value"
-                loaded=$((loaded + 1))
                 ;;
         esac
     done < "$SECRETS_CACHE"
-    # A truncated cache must not count as a hit
-    [ "$loaded" -eq 5 ]
+    # A truncated or partial cache must not count as a hit
+    for name in K3S_TOKEN GITLAB_TOKEN GMAIL_APP_PASS GMAIL_USER SEND_TO; do
+        [ -n "${!name}" ] || return 1
+    done
 }
 
 write_cache_value() {
