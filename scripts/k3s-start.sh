@@ -41,9 +41,11 @@ start_vm() {
     done
 }
 
-mapfile -t workers < <(
-    virsh list --all --name 2>/dev/null | grep -E '^k3s-worker-[0-9]+$' | sort -V
-)
+if ! ALL_VM_NAMES=$(virsh list --all --name 2>/dev/null); then
+    echo "Error: failed to list VMs with virsh." >&2
+    exit 1
+fi
+mapfile -t workers < <(grep -E '^k3s-worker-[0-9]+$' <<< "$ALL_VM_NAMES" | sort -V)
 
 failed=0
 start_vm k3s-control || failed=1
