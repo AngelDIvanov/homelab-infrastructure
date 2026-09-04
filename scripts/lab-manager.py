@@ -4,10 +4,11 @@ Lab Manager — scale workers, run Ansible, sync images
 Usage: python3 lab-manager.py
 """
 
-import subprocess
-import sys
 import os
 import re
+import shlex
+import subprocess
+import sys
 import time
 
 TERRAFORM_DIR     = os.path.expanduser("~/homelab/terraform")
@@ -39,8 +40,15 @@ def _get_secret(env_var, vault_item):
     print("Run: source ~/homelab/scripts/load-secrets.sh")
     sys.exit(1)
 
-K3S_TOKEN = _get_secret("K3S_TOKEN", "homelab-k3s-token")
-SSH_OPTS  = "-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no"
+K3S_TOKEN = lambda: _get_secret("K3S_TOKEN", "homelab-k3s-token")
+SSH_ARGS = [
+    "-o", "ConnectTimeout=10",
+    "-o", "BatchMode=yes",
+    "-o", "StrictHostKeyChecking=accept-new",
+]
+SSH_OPTS = " ".join(shlex.quote(arg) for arg in SSH_ARGS)
+
+K3S_INSTALL_TIMEOUT = 600
 
 def get_worker_ip(n):
     return f"192.168.122.{BASE_IP_OCTET + n - 2}"
@@ -115,12 +123,44 @@ def wait_for_ssh(ip, timeout=120):
 
 def join_k3s(ip, name):
     print(y(f"  joining {name}..."))
-    cmd = (f'ssh {SSH_OPTS} labadmin@{ip} '
-           f'"curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN} sh -"')
-    if run(cmd).returncode != 0:
+    token = K3S_TOKEN()
+    remote_script = "\n".join([
+        "set -euo pipefail",
+        (
+            "curl -sfL https://get.k3s.io | "
+            f"K3S_URL={shlex.quote(K3S_URL)} "
+            f"K3S_TOKEN={shlex.quote(token)} sh -s - agent"
+        ),
+        "tmp=$(mktemp)",
+        "chmod 0600 \"$tmp\"",
+        (
+            "printf '%s\\n' "
+            f"{shlex.quote('K3S_TOKEN=' + token)} "
+            f"{shlex.quote('K3S_URL=' + K3S_URL)} > \"$tmp\""
+        ),
+        "sudo install -m 0600 -o root -g root \"$tmp\" /etc/systemd/system/k3s-agent.service.env",
+        "rm -f \"$tmp\"",
+        "sudo systemctl daemon-reload",
+        "sudo systemctl restart k3s-agent",
+    ])
+    try:
+        result = subprocess.run(
+            ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
+            input=remote_script,
+            capture_output=True,
+            text=True,
+            timeout=K3S_INSTALL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
         print(r(f"  failed to install k3s on {name}"))
+        print(r(f"  k3s install on {ip} timed out after {K3S_INSTALL_TIMEOUT}s"))
         return False
-    run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo systemctl restart k3s-agent"', capture=True)
+    if result.returncode != 0:
+        print(r(f"  failed to install k3s on {name}"))
+        if result.stderr.strip():
+            # The remote script carries the join token; never echo it back
+            print(r(f"  Remote error: {result.stderr.strip().replace(token, '<redacted>')}"))
+        return False
     time.sleep(5)
     res = run(f'ssh {SSH_OPTS} labadmin@{ip} "systemctl is-active k3s-agent"', capture=True)
     if res.stdout.strip() == "active":

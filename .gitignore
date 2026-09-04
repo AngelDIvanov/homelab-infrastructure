@@ -2,9 +2,8 @@
 *.tfstate
 *.tfstate.backup
 
-# Terraform working files
+# Terraform working files (dependency lock files remain tracked)
 **/.terraform/
-**/.terraform.lock.hcl
 
 # terraform.tfvars contains your SSH key and IPs — use terraform.tfvars.example as a template
 terraform/terraform.tfvars
@@ -34,7 +33,6 @@ __pycache__/
 # Generated / binary / internal files
 homelab-summary.html
 monitoring/grafana/files.zip
-scripts/options}
 terraform/env.sh
 
 # ── SECRET-BEARING FILES — NEVER COMMIT (added 2026-06-13 after public-leak incident) ──

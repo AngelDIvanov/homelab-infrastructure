@@ -6,10 +6,11 @@ Author: Angel
 Usage:  python3 lab-control.py
 """
 
-import subprocess
-import sys
 import os
 import re
+import shlex
+import subprocess
+import sys
 import time
 
 # ─────────────────────────────────────────────────────────────
@@ -29,27 +30,7 @@ K3S_URL         = f"https://{K3S_CONTROL_IP}:6443"
 
 
 
-def _get_secret(env_var, vault_item):
-    value = os.environ.get(env_var, "")
-    if value:
-        return value
-    try:
-        result = subprocess.run(["bw", "get", "password", vault_item],
-                                capture_output=True, text=True)
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except FileNotFoundError:
-        pass
-    print(f"Error: {env_var} not set. Vault not available yet.")
-    print("Until Vaultwarden is set up, export it manually:")
-    print(f"  export {env_var}=<your-token>")
-    print("Or run setup: bash ~/homelab/scripts/setup-vault.sh")
-    sys.exit(1)
-
-# Secrets are fetched on demand — script starts without requiring them.
-K3S_TOKEN    = lambda: _get_secret("K3S_TOKEN",    "homelab-k3s-token")
-GITLAB_TOKEN = lambda: _get_secret("GITLAB_TOKEN", "homelab-gitlab-token")
-BASE_IP_OCTET  = 221   # k3s-worker-2 = .221, worker-3 = .222 ...
+BASE_IP_OCTET = 221  # k3s-worker-2 = .221, worker-3 = .222 ...
 
 ALERTMANAGER_URL = f"http://{K3S_CONTROL_IP}:30093"
 
@@ -59,7 +40,15 @@ def get_permanent_vms():
     all_vms = [v.strip() for v in result.stdout.splitlines() if v.strip() and v.strip() != "Base"]
     return all_vms
 
-SSH_OPTS = "-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no"
+SSH_ARGS = [
+    "-o", "ConnectTimeout=10",
+    "-o", "BatchMode=yes",
+    "-o", "StrictHostKeyChecking=accept-new",
+]
+SSH_OPTS = " ".join(shlex.quote(arg) for arg in SSH_ARGS)
+
+K3S_INSTALL_TIMEOUT = 600
+
 os.environ['ANSIBLE_CONFIG'] = os.path.expanduser('~/homelab/ansible/ansible.cfg')
 
 # ─────────────────────────────────────────────────────────────
@@ -100,7 +89,26 @@ def run_script(name):
         print(r(f"  Script not found: {path}"))
         print(y(f"  Make sure {name} is in the same directory as lab-control.py"))
         return
-    run(f"bash {path}")
+    print(dim(f"$ bash {path}"))
+    subprocess.run(["bash", path], check=False)
+
+
+def run_remote_script(ip, script):
+    """Send a script over stdin so sensitive values never enter argv."""
+    try:
+        return subprocess.run(
+            ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
+            input=script,
+            capture_output=True,
+            text=True,
+            timeout=K3S_INSTALL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
+            returncode=124,
+            stderr=f"k3s install on {ip} timed out after {K3S_INSTALL_TIMEOUT}s",
+        )
 
 def pause():
     input(f"\n{c('Press Enter to continue...')}")
@@ -170,21 +178,37 @@ def join_k3s(ip, name):
     token_result = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo cat /var/lib/rancher/k3s/server/node-token"', capture=True)
     full_token = token_result.stdout.strip()
     if not full_token or '::server:' not in full_token:
-        print(r(f"  ABORT: node-token from control plane looks wrong: '{full_token[:40]}...'"))
-        print(r("  Expected format: K10<hash>::server:<secret>"))
+        print(r("  ABORT: node-token from control plane has an invalid format"))
         return False
-    print(g(f"  token validated (format OK)"))
+    print(g("  token validated (format OK)"))
 
-    # Install k3s agent
-    cmd = f'ssh {SSH_OPTS} labadmin@{ip} "curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={full_token} sh -s - agent"'
-    if run(cmd).returncode != 0:
+    # Install and configure via stdin so the token cannot appear in process arguments.
+    print(y("  installing and configuring k3s-agent..."))
+    remote_script = "\n".join([
+        "set -euo pipefail",
+        (
+            "curl -sfL https://get.k3s.io | "
+            f"K3S_URL={shlex.quote(K3S_URL)} "
+            f"K3S_TOKEN={shlex.quote(full_token)} sh -s - agent"
+        ),
+        "tmp=$(mktemp)",
+        "chmod 0600 \"$tmp\"",
+        (
+            "printf '%s\\n' "
+            f"{shlex.quote('K3S_TOKEN=' + full_token)} "
+            f"{shlex.quote('K3S_URL=' + K3S_URL)} > \"$tmp\""
+        ),
+        "sudo install -m 0600 -o root -g root \"$tmp\" /etc/systemd/system/k3s-agent.service.env",
+        "rm -f \"$tmp\"",
+        "sudo systemctl daemon-reload",
+        "sudo systemctl restart k3s-agent",
+    ])
+    install_result = run_remote_script(ip, remote_script)
+    if install_result.returncode != 0:
         print(r(f"  failed to install k3s on {name}"))
+        if install_result.stderr.strip():
+            print(r(f"  Remote error: {install_result.stderr.strip()}"))
         return False
-
-    # The install script wipes the env file — explicitly write the full token back
-    print(y("  writing token to agent env file (install script wipes it)..."))
-    run(f'ssh {SSH_OPTS} labadmin@{ip} "printf \'K3S_TOKEN=%s\\nK3S_URL=%s\\n\' \'{full_token}\' \'{K3S_URL}\' | sudo tee /etc/systemd/system/k3s-agent.service.env > /dev/null"', capture=True)
-    run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo systemctl daemon-reload && sudo systemctl restart k3s-agent"', capture=True)
 
     # Verify agent is active
     time.sleep(5)
@@ -218,14 +242,35 @@ def repair_agent(ip, name):
     token_result = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo cat /var/lib/rancher/k3s/server/node-token"', capture=True)
     full_token = token_result.stdout.strip()
     if not full_token or '::server:' not in full_token:
-        print(r(f"  ABORT: could not fetch valid token from control plane: '{full_token[:40]}'"))
+        print(r("  ABORT: node-token from control plane has an invalid format"))
         return False
 
-    current = run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo cat /etc/systemd/system/k3s-agent.service.env 2>/dev/null"', capture=True).stdout.strip()
-    print(f"  Current env: {current[:80] or '(empty)'}")
+    env_present = run(
+        f'ssh {SSH_OPTS} labadmin@{ip} "sudo test -s /etc/systemd/system/k3s-agent.service.env"',
+        capture=True,
+    ).returncode == 0
+    print(f"  Agent environment file: {'present' if env_present else 'missing'}")
 
-    run(f'ssh {SSH_OPTS} labadmin@{ip} "printf \'K3S_TOKEN=%s\\nK3S_URL=%s\\n\' \'{full_token}\' \'{K3S_URL}\' | sudo tee /etc/systemd/system/k3s-agent.service.env > /dev/null"', capture=True)
-    run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo systemctl daemon-reload && sudo systemctl restart k3s-agent"', capture=True)
+    remote_script = "\n".join([
+        "set -euo pipefail",
+        "tmp=$(mktemp)",
+        "chmod 0600 \"$tmp\"",
+        (
+            "printf '%s\\n' "
+            f"{shlex.quote('K3S_TOKEN=' + full_token)} "
+            f"{shlex.quote('K3S_URL=' + K3S_URL)} > \"$tmp\""
+        ),
+        "sudo install -m 0600 -o root -g root \"$tmp\" /etc/systemd/system/k3s-agent.service.env",
+        "rm -f \"$tmp\"",
+        "sudo systemctl daemon-reload",
+        "sudo systemctl restart k3s-agent",
+    ])
+    repair_result = run_remote_script(ip, remote_script)
+    if repair_result.returncode != 0:
+        print(r(f"  failed to update k3s-agent on {name}"))
+        if repair_result.stderr.strip():
+            print(r(f"  Remote error: {repair_result.stderr.strip()}"))
+        return False
 
     time.sleep(6)
     status = run(f'ssh {SSH_OPTS} labadmin@{ip} "systemctl is-active k3s-agent"', capture=True).stdout.strip()
@@ -513,19 +558,21 @@ def do_health_check():
     divider("HEALTH CHECK")
     print(f"""
   {bold('Run mode:')}
-  {c('1.')} Normal check (auto-start if needed)
-  {c('2.')} Force restart  (--restart)
-  {c('3.')} Force hard reboot  (--reboot)
+  {c('1.')} Read-only check
+  {c('2.')} Apply in-place fixes  (--fix)
+  {c('3.')} Graceful restart and fix  (--restart)
+  {c('4.')} Force reboot and fix  (--reboot)
   {c('0.')} Cancel
 """)
     mode = input(y("  Select: "))
+    flags = {'1': [], '2': ['--fix'], '3': ['--restart'], '4': ['--reboot']}
+    if mode not in flags:
+        return
+
     script = os.path.join(SCRIPTS_DIR, "check-lab.sh")
-    if mode == '1':
-        run(f"GITLAB_TOKEN={GITLAB_TOKEN()} bash {script}")
-    elif mode == '2':
-        run(f"GITLAB_TOKEN={GITLAB_TOKEN()} bash {script} --restart")
-    elif mode == '3':
-        run(f"GITLAB_TOKEN={GITLAB_TOKEN()} bash {script} --reboot")
+    command = ["bash", script, *flags[mode]]
+    print(dim(f"$ {' '.join(command)}"))
+    subprocess.run(command, check=False)
 
 def do_upscale():
     divider("UPSCALE -- Adding new worker")

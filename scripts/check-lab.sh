@@ -1,19 +1,20 @@
-#!/bin/bash
-# Health check + auto-fix for the homelab.
-# Usage: ./check-lab.sh [--restart|--reboot]
+#!/usr/bin/env bash
+# Read-only health check by default; remediation requires an explicit flag.
+# Usage: ./check-lab.sh [--fix|--restart|--reboot]
+
+set -uo pipefail
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
 # Suppress ANSI when not running in a terminal (CronJob / log capture)
-[ ! -t 1 ] && { GREEN=''; RED=''; YELLOW=''; CYAN=''; BLUE=''; MAGENTA=''; BOLD=''; DIM=''; NC=''; }
+[ ! -t 1 ] && { GREEN=''; RED=''; YELLOW=''; CYAN=''; BLUE=''; BOLD=''; DIM=''; NC=''; }
 
 SECTION="general"
 
@@ -36,7 +37,8 @@ WARN=0
 # Static infrastructure (these don't scale)
 K3S_CONTROL_IP="192.168.122.218"
 CI_RUNNER_IP="192.168.122.220"
-GITLAB_IP="192.168.122.230"
+K3S_INFRA_IP="192.168.122.230"
+GITLAB_IP="$K3S_INFRA_IP"
 GITLAB_PORT="8929"
 
 # SSH options
@@ -53,7 +55,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 K3S_CMD="ssh $SSH_OPTS labadmin@$K3S_CONTROL_IP"
 
 # Dynamic worker discovery from k3s
-declare -A WORKERS
+declare -A WORKERS=()
 discover_workers() {
     echo -e "${DIM}Discovering workers from k3s cluster...${NC}"
     
@@ -67,7 +69,7 @@ discover_workers() {
     fi
     
     while IFS=' ' read -r name ip; do
-        if [ -n "$name" ] && [ -n "$ip" ]; then
+        if [[ "$name" =~ ^k3s-worker-[0-9]+$ ]] && [ -n "$ip" ]; then
             WORKERS["$name"]="$ip"
             VMS["$name"]="$ip"
         fi
@@ -84,16 +86,31 @@ ssh_cmd() {
 }
 
 # Command-line flags
+AUTO_FIX=false
 FORCE_RESTART=false
 FORCE_REBOOT=false
-if [[ "$1" == "--restart" ]]; then
-    FORCE_RESTART=true
-elif [[ "$1" == "--reboot" ]]; then
-    FORCE_REBOOT=true
-fi
+case "${1:-}" in
+    "") ;;
+    --fix) AUTO_FIX=true ;;
+    --restart) AUTO_FIX=true; FORCE_RESTART=true ;;
+    --reboot) AUTO_FIX=true; FORCE_RESTART=true; FORCE_REBOOT=true ;;
+    -h|--help)
+        echo "Usage: $0 [--fix|--restart|--reboot]"
+        echo "  no flag    report health without changing the lab"
+        echo "  --fix      apply in-place remediations"
+        echo "  --restart  gracefully restart VMs, then remediate"
+        echo "  --reboot   force-stop VMs, restart them, then remediate"
+        exit 0
+        ;;
+    *)
+        echo "Unknown option: $1" >&2
+        echo "Usage: $0 [--fix|--restart|--reboot]" >&2
+        exit 2
+        ;;
+esac
 
 # Banner
-clear
+[ -t 1 ] && clear
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════════════════╗"
 echo "║                                                                       ║"
@@ -113,7 +130,7 @@ spinner() {
     local pid=$1
     local delay=0.1
     local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
+    while kill -0 "$pid" 2>/dev/null; do
         for (( i=0; i<${#frames}; i++ )); do
             printf "\r  ${CYAN}[${frames:$i:1}]${NC} "
             sleep $delay
@@ -136,10 +153,10 @@ check() {
     local cmd="$2"
     local node="${3:-homelab}"
     printf "  %-55s" "$desc"
-    eval "$cmd" &>/dev/null &
+    bash -o pipefail -c "$cmd" &>/dev/null &
     local pid=$!
-    spinner $pid
-    wait $pid
+    spinner "$pid"
+    wait "$pid"
     local result=$?
     printf "\r  %-55s" "$desc"
     if [ $result -eq 0 ]; then
@@ -161,7 +178,7 @@ check_warn() {
     local cmd="$2"
     local node="${3:-homelab}"
     printf "  %-55s" "$desc"
-    eval "$cmd" &>/dev/null &
+    bash -o pipefail -c "$cmd" &>/dev/null &
     local pid=$!
     spinner $pid
     wait $pid
@@ -183,7 +200,7 @@ check_warn() {
 # VM helper functions
 check_vm_running() {
     local vm_name=$1
-    virsh list --state-running 2>/dev/null | grep -q "$vm_name"
+    [ "$(virsh domstate "$vm_name" 2>/dev/null)" = "running" ]
 }
 
 start_vm() {
@@ -282,21 +299,47 @@ if [ "$FORCE_RESTART" = true ]; then
     fi
 fi
 
-# Check and start VMs if needed
+# Check VM state. Starting stopped VMs requires an explicit remediation mode.
 STARTUP_NEEDED=false
 for vm_name in "${!VMS[@]}"; do
     if ! check_vm_running "$vm_name"; then
-        echo -e "  ${YELLOW}[WARN]  $vm_name is not running${NC}"
-        if start_vm "$vm_name"; then
-            STARTUP_NEEDED=true
+        if [ "$AUTO_FIX" = true ]; then
+            echo -e "  ${YELLOW}[WARN]  $vm_name is not running; starting it${NC}"
+            if start_vm "$vm_name"; then
+                STARTUP_NEEDED=true
+            else
+                echo -e "  ${RED}FAIL Critical: Unable to start $vm_name${NC}"
+                ((FAIL++))
+            fi
         else
-            echo -e "  ${RED}FAIL Critical: Unable to start $vm_name${NC}"
+            echo -e "  ${RED}FAIL${NC} $vm_name is not running (use --fix to start it)"
             ((FAIL++))
+            slog ERROR "vm-$vm_name-running" FAIL "$vm_name" "stopped; remediation disabled"
         fi
     else
         echo -e "  ${GREEN}OK${NC} $vm_name already running"
     fi
 done
+
+# k3s-infra is persistent: start it when explicitly fixing, but never include it
+# in restart, reboot, or shutdown loops.
+if ! check_vm_running k3s-infra; then
+    if [ "$AUTO_FIX" = true ]; then
+        echo -e "  ${YELLOW}[WARN]  k3s-infra is not running; starting it${NC}"
+        if start_vm k3s-infra; then
+            STARTUP_NEEDED=true
+        else
+            echo -e "  ${RED}FAIL Critical: Unable to start k3s-infra${NC}"
+            ((FAIL++))
+        fi
+    else
+        echo -e "  ${RED}FAIL${NC} k3s-infra is not running (use --fix to start it)"
+        ((FAIL++))
+        slog ERROR "vm-k3s-infra-running" FAIL k3s-infra "stopped; remediation disabled"
+    fi
+else
+    echo -e "  ${GREEN}OK${NC} k3s-infra already running (persistent)"
+fi
 
 # Wait for VMs to boot and services to initialize
 if [ "$STARTUP_NEEDED" = true ] || [ "$FORCE_RESTART" = true ]; then
@@ -328,6 +371,7 @@ fi
 section "  VIRTUAL MACHINE CONNECTIVITY"
 check "ci-runner ($CI_RUNNER_IP)" "ping -c 1 -W 2 $CI_RUNNER_IP" "ci-runner"
 check "k3s-control ($K3S_CONTROL_IP)" "ping -c 1 -W 2 $K3S_CONTROL_IP" "k3s-control"
+check "k3s-infra ($K3S_INFRA_IP)" "ping -c 1 -W 2 $K3S_INFRA_IP" "k3s-infra"
 
 # Dynamic worker connectivity checks
 for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
@@ -345,7 +389,10 @@ check_warn "K8s Dashboard (port 30443)" "curl -sfk --max-time 5 -o /dev/null htt
 check_warn "Portainer (port 30777)" "curl -sf --max-time 5 -o /dev/null http://$K3S_CONTROL_IP:30777"
 
 section "K8s   KUBERNETES CLUSTER"
-check "K3s API responding" "$K3S_CMD 'sudo k3s kubectl cluster-info' 2>/dev/null | grep -q running"
+K3S_AVAILABLE=false
+if check "K3s API responding" "$K3S_CMD 'sudo k3s kubectl cluster-info' 2>/dev/null | grep -q running"; then
+    K3S_AVAILABLE=true
+fi
 check "Control plane Ready" "$K3S_CMD 'sudo k3s kubectl get nodes' 2>/dev/null | grep -q 'k3s-control.*Ready'"
 
 # Dynamic worker Ready checks
@@ -362,11 +409,17 @@ section "  MONITORING STACK"
 STUCK_PODS=$($K3S_CMD "sudo k3s kubectl get pods -n monitoring --field-selector=status.phase=Terminating -o custom-columns=NAME:.metadata.name --no-headers" 2>/dev/null)
 
 if [ -n "$STUCK_PODS" ]; then
-    echo -e "  ${YELLOW}[WARN]  Stuck pods detected, cleaning up...${NC}"
-    while read -r pod; do
-        $K3S_CMD "sudo k3s kubectl delete pod $pod -n monitoring --grace-period=30 --force" 2>/dev/null
-    done <<< "$STUCK_PODS"
-    sleep 10
+    if [ "$AUTO_FIX" = true ]; then
+        echo -e "  ${YELLOW}[WARN]  Stuck pods detected, cleaning up...${NC}"
+        while read -r pod; do
+            $K3S_CMD "sudo k3s kubectl delete pod $pod -n monitoring --grace-period=30 --force" 2>/dev/null
+        done <<< "$STUCK_PODS"
+        sleep 10
+    else
+        echo -e "  ${YELLOW}[WARN]  Stuck monitoring pods detected (use --fix to remove them)${NC}"
+        ((WARN++))
+        slog WARN "monitoring-stuck-pods" WARN k3s-control "remediation disabled"
+    fi
 fi
 
 check "Prometheus running" "$K3S_CMD 'sudo k3s kubectl get pods -n monitoring' 2>/dev/null | grep -q 'prometheus.*Running'"
@@ -390,26 +443,44 @@ for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
         echo -e "${GREEN}OK PASS${NC}"
         ((PASS++))
     else
-        echo -e "${YELLOW}[WARN] INACTIVE - restarting...${NC}"
-        $WORKER_CMD "sudo systemctl start k3s-agent" 2>/dev/null
-        sleep 5
-        ACTIVE=$($WORKER_CMD "systemctl is-active k3s-agent" 2>/dev/null)
-        if [ "$ACTIVE" == "active" ] || [ "$ACTIVE" == "activating" ]; then
-            echo -e "  ${GREEN}OK Agent restarted successfully${NC}"
-            ((PASS++))
+        if [ "$AUTO_FIX" = true ]; then
+            echo -e "${YELLOW}[WARN] INACTIVE - restarting...${NC}"
+            $WORKER_CMD "sudo systemctl start k3s-agent" 2>/dev/null
+            sleep 5
+            ACTIVE=$($WORKER_CMD "systemctl is-active k3s-agent" 2>/dev/null)
+            if [ "$ACTIVE" == "active" ] || [ "$ACTIVE" == "activating" ]; then
+                echo -e "  ${GREEN}OK Agent restarted successfully${NC}"
+                ((PASS++))
+            else
+                echo -e "  ${RED}FAIL Agent failed to start${NC}"
+                ((FAIL++))
+            fi
         else
-            echo -e "  ${RED}FAIL Agent failed to start${NC}"
+            echo -e "${RED}FAIL INACTIVE${NC} (use --fix to restart)"
             ((FAIL++))
+            slog ERROR "k3s-agent-$worker_name" FAIL "$worker_name" "inactive; remediation disabled"
         fi
     fi
 done
 
-section "  AUTO-FIX: POD HEALTH"
+section "  POD HEALTH"
 
-STUCK_APP_PODS=$($K3S_CMD "sudo k3s kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null | grep -v Running | awk '{print \$1}'" 2>/dev/null)
+if [ "$K3S_AVAILABLE" = true ]; then
+    STUCK_APP_PODS=$($K3S_CMD "sudo k3s kubectl get pods -n default -l app=trengo-search --no-headers 2>/dev/null | grep -v Running | awk '{print \$1}'" 2>/dev/null)
+else
+    STUCK_APP_PODS="__cluster_unreachable__"
+fi
 
-if [ -n "$STUCK_APP_PODS" ]; then
-    echo -e "  ${YELLOW}[WARN]  Found stuck pods, attempting rollback...${NC}"
+if [ "$STUCK_APP_PODS" = "__cluster_unreachable__" ]; then
+    echo -e "  ${YELLOW}[WARN] Pod remediation checks skipped because the API is unavailable${NC}"
+    ((WARN++))
+elif [ -n "$STUCK_APP_PODS" ]; then
+    if [ "$AUTO_FIX" != true ]; then
+        echo -e "  ${RED}FAIL Stuck application pods detected${NC} (use --fix to remediate)"
+        ((FAIL++))
+        slog ERROR "application-pod-health" FAIL k3s-control "stuck pods; remediation disabled"
+    else
+        echo -e "  ${YELLOW}[WARN]  Found stuck pods, attempting rollback...${NC}"
 
     CURRENT_IMAGE=$($K3S_CMD "sudo k3s kubectl get deployment trengo-search -n default -o jsonpath='{.spec.template.spec.containers[0].image}'" 2>/dev/null)
     echo -e "  ${DIM}Current image: ${CURRENT_IMAGE}${NC}"
@@ -468,40 +539,105 @@ if [ -n "$STUCK_APP_PODS" ]; then
             ((PASS++))
         fi
     fi
+    fi
 else
     echo -e "  ${GREEN}OK All pods healthy${NC}"
     ((PASS++))
 fi
 
-section "  AUTO-FIX: IMAGE SYNC"
+section "  IMAGE SYNC"
 
-LATEST_IMAGE=$($K3S_CMD "sudo k3s ctr images list 2>/dev/null | grep trengo-search | head -1 | awk '{print \$1}'" 2>/dev/null)
+if [ "$K3S_AVAILABLE" = true ]; then
+    LATEST_IMAGE=$($K3S_CMD "sudo k3s ctr images list 2>/dev/null | grep trengo-search | head -1 | awk '{print \$1}'" 2>/dev/null)
+else
+    LATEST_IMAGE="__cluster_unreachable__"
+fi
 
-if [ -n "$LATEST_IMAGE" ]; then
-    # Check first worker only for sync status
-    FIRST_WORKER_IP=$(echo "${WORKERS[@]}" | awk '{print $1}')
-    if [ -n "$FIRST_WORKER_IP" ]; then
-        WORKER_CMD=$(ssh_cmd "$FIRST_WORKER_IP")
-        WORKER_HAS=$($WORKER_CMD "sudo k3s ctr images list 2>/dev/null | grep -q '$LATEST_IMAGE' && echo yes || echo no" 2>/dev/null)
-        
-        if [ "$WORKER_HAS" == "no" ]; then
+if [ "$LATEST_IMAGE" = "__cluster_unreachable__" ]; then
+    echo -e "  ${YELLOW}[WARN] Image sync check skipped because the API is unavailable${NC}"
+    ((WARN++))
+elif [ -n "$LATEST_IMAGE" ]; then
+    # Check every worker and record which ones lack the image
+    NEEDS_SYNC=()
+    if [ "${#WORKERS[@]}" -gt 0 ]; then
+        for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
+            worker_ip="${WORKERS[$worker_name]}"
+            WORKER_CMD=$(ssh_cmd "$worker_ip")
+            WORKER_HAS=$($WORKER_CMD "sudo k3s ctr images list 2>/dev/null | grep -q '$LATEST_IMAGE' && echo yes || echo no" 2>/dev/null)
+            if [ "$WORKER_HAS" != "yes" ]; then
+                NEEDS_SYNC+=("$worker_name")
+            fi
+        done
+    fi
+
+    if [ "${#NEEDS_SYNC[@]}" -gt 0 ]; then
+        if [ "$AUTO_FIX" = true ]; then
             echo -e "  ${YELLOW}[WARN]  Syncing image to workers...${NC}"
-            $K3S_CMD "sudo k3s ctr images export /tmp/trengo-sync.tar $LATEST_IMAGE" 2>/dev/null
-            scp -q $SSH_OPTS labadmin@$K3S_CONTROL_IP:/tmp/trengo-sync.tar /tmp/ 2>/dev/null
-            
-            for worker_name in "${!WORKERS[@]}"; do
-                worker_ip="${WORKERS[$worker_name]}"
-                scp -q $SSH_OPTS /tmp/trengo-sync.tar labadmin@$worker_ip:/tmp/ 2>/dev/null
-                ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import /tmp/trengo-sync.tar" 2>/dev/null
-                echo -e "  ${GREEN}OK Image synced to $worker_name${NC}"
-            done
-            ((PASS++))
+            CONTROL_TAR=$(mktemp -t trengo-sync.XXXXXX.tar)
+            REMOTE_TAR=$($K3S_CMD "mktemp -t trengo-sync.XXXXXX.tar" 2>/dev/null)
+            if [ -z "$REMOTE_TAR" ]; then
+                echo -e "  ${RED}FAIL Image sync aborted: control-plane mktemp failed${NC}"
+                ((FAIL++))
+                slog ERROR "worker-image-sync" FAIL k3s-control "control-plane mktemp returned no path"
+                rm -f "$CONTROL_TAR"
+            elif ! $K3S_CMD "sudo k3s ctr images export '$REMOTE_TAR' '$LATEST_IMAGE'" 2>/dev/null; then
+                echo -e "  ${RED}FAIL Image sync aborted: ctr images export failed on k3s-control${NC}"
+                ((FAIL++))
+                slog ERROR "worker-image-sync" FAIL k3s-control "ctr images export of $LATEST_IMAGE failed"
+                $K3S_CMD "rm -f '$REMOTE_TAR'" 2>/dev/null
+                rm -f "$CONTROL_TAR"
+            elif ! scp -q $SSH_OPTS "labadmin@$K3S_CONTROL_IP:$REMOTE_TAR" "$CONTROL_TAR" 2>/dev/null; then
+                echo -e "  ${RED}FAIL Image sync aborted: copy of exported image from k3s-control failed${NC}"
+                ((FAIL++))
+                slog ERROR "worker-image-sync" FAIL k3s-control "scp of exported image tarball failed"
+                $K3S_CMD "rm -f '$REMOTE_TAR'" 2>/dev/null
+                rm -f "$CONTROL_TAR"
+            else
+                sync_failed=false
+                for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
+                    # Skip workers that already have the image
+                    if [[ " ${NEEDS_SYNC[*]} " != *" $worker_name "* ]]; then
+                        continue
+                    fi
+                    worker_ip="${WORKERS[$worker_name]}"
+                    WORKER_TAR=$(ssh $SSH_OPTS labadmin@$worker_ip "mktemp -t trengo-sync.XXXXXX.tar" 2>/dev/null)
+                    if [ -z "$WORKER_TAR" ]; then
+                        echo -e "  ${RED}FAIL Image sync to $worker_name failed: remote mktemp returned no path${NC}"
+                        slog ERROR "worker-image-sync" FAIL "$worker_name" "mktemp returned no path"
+                        sync_failed=true
+                        continue
+                    fi
+                    if ! scp -q $SSH_OPTS "$CONTROL_TAR" "labadmin@$worker_ip:$WORKER_TAR" 2>/dev/null; then
+                        echo -e "  ${RED}FAIL Image sync to $worker_name failed: copy to worker failed${NC}"
+                        ssh $SSH_OPTS labadmin@$worker_ip "rm -f '$WORKER_TAR'" 2>/dev/null
+                        sync_failed=true
+                    elif ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import '$WORKER_TAR'; rc=\$?; rm -f '$WORKER_TAR'; exit \$rc" 2>/dev/null; then
+                        echo -e "  ${GREEN}OK Image synced to $worker_name${NC}"
+                    else
+                        echo -e "  ${RED}FAIL Image sync to $worker_name failed${NC}"
+                        sync_failed=true
+                    fi
+                done
+                rm -f "$CONTROL_TAR"
+                $K3S_CMD "rm -f '$REMOTE_TAR'" 2>/dev/null
+                if [ "$sync_failed" = true ]; then
+                    echo -e "  ${RED}FAIL Image sync to one or more workers failed${NC}"
+                    ((FAIL++))
+                    slog ERROR "worker-image-sync" FAIL k3s-control "one or more worker imports failed"
+                else
+                    ((PASS++))
+                fi
+            fi
         else
-            echo -e "  ${GREEN}OK Images in sync${NC}"
-            ((PASS++))
+            echo -e "  ${YELLOW}[WARN] Images are not synchronized on: ${NEEDS_SYNC[*]}${NC} (use --fix to sync)"
+            ((WARN++))
+            slog WARN "worker-image-sync" WARN k3s-control "out of sync on ${#NEEDS_SYNC[@]} worker(s); remediation disabled"
         fi
-    else
+    elif [ "${#WORKERS[@]}" -eq 0 ]; then
         echo -e "  ${DIM}No workers to sync${NC}"
+    else
+        echo -e "  ${GREEN}OK Images in sync${NC}"
+        ((PASS++))
     fi
 else
     echo -e "  ${DIM}No trengo-search image found${NC}"
@@ -530,8 +666,12 @@ elif [ "$DISK_PCT" -lt "$DISK_THRESHOLD" ]; then
     slog INFO "disk-$NODE" PASS "$NODE" "${DISK_PCT}% used ${DISK_AVAIL} free"
 else
     printf "  %-45s" "$NODE"
-    echo -e "${YELLOW}[WARN] ${DISK_PCT}% used - pruning...${NC}"
-    if [ -f "$PRUNE_SCRIPT" ]; then
+    if [ "$AUTO_FIX" != true ]; then
+        echo -e "${YELLOW}[WARN] ${DISK_PCT}% used${NC} (use --fix to prune)"
+        ((WARN++))
+        slog WARN "disk-$NODE" WARN "$NODE" "${DISK_PCT}% used; remediation disabled"
+    elif [ -f "$PRUNE_SCRIPT" ]; then
+        echo -e "${YELLOW}[WARN] ${DISK_PCT}% used - pruning...${NC}"
         PRUNE_OUT=$(cat "$PRUNE_SCRIPT" | $CMD "sudo DISK_THRESHOLD=$DISK_THRESHOLD bash -s" 2>&1)
         echo "$PRUNE_OUT" | sed 's/^/    /'
         AFTER_PCT=$($CMD "df / | awk 'NR==2{gsub(/%/,\"\");print \$5}'" 2>/dev/null)
@@ -570,8 +710,12 @@ for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
         ((PASS++))
     else
         printf "  %-45s" "$worker_name"
-        echo -e "${YELLOW}[WARN] ${DISK_PCT}% used - pruning...${NC}"
-        if [ -f "$PRUNE_SCRIPT" ]; then
+        if [ "$AUTO_FIX" != true ]; then
+            echo -e "${YELLOW}[WARN] ${DISK_PCT}% used${NC} (use --fix to prune)"
+            ((WARN++))
+            slog WARN "disk-$worker_name" WARN "$worker_name" "${DISK_PCT}% used; remediation disabled"
+        elif [ -f "$PRUNE_SCRIPT" ]; then
+            echo -e "${YELLOW}[WARN] ${DISK_PCT}% used - pruning...${NC}"
             PRUNE_OUT=$(cat "$PRUNE_SCRIPT" | $WORKER_CMD "sudo DISK_THRESHOLD=$DISK_THRESHOLD bash -s" 2>&1)
             echo "$PRUNE_OUT" | sed 's/^/    /'
             AFTER_PCT=$($WORKER_CMD "df / | awk 'NR==2{gsub(/%/,\"\");print \$5}'" 2>/dev/null)
@@ -593,9 +737,15 @@ done
 # Clean up stuck svclb pods
 STUCK_SVCLB=$($K3S_CMD "sudo k3s kubectl get pods -n kube-system --no-headers 2>/dev/null | grep 'svclb-trengo.*Pending' | wc -l" 2>/dev/null)
 if [ "$STUCK_SVCLB" -gt 0 ]; then
-    echo -e "  ${DIM}Cleaning ${STUCK_SVCLB} stuck svclb-trengo pods (port 80 conflict with traefik)...${NC}"
-    $K3S_CMD "sudo k3s kubectl delete pods -n kube-system -l app=svclb-trengo-search-service-0af1958e --force --grace-period=0" 2>/dev/null
-    echo -e "  ${DIM}Done - trengo accessible via NodePort 32504${NC}"
+    if [ "$AUTO_FIX" = true ]; then
+        echo -e "  ${DIM}Cleaning ${STUCK_SVCLB} stuck svclb-trengo pods (port 80 conflict with traefik)...${NC}"
+        $K3S_CMD "sudo k3s kubectl delete pods -n kube-system -l app=svclb-trengo-search-service-0af1958e --force --grace-period=0" 2>/dev/null
+        echo -e "  ${DIM}Done - trengo accessible via NodePort 32504${NC}"
+    else
+        echo -e "  ${YELLOW}[WARN] ${STUCK_SVCLB} stuck svclb pods detected${NC} (use --fix to remove)"
+        ((WARN++))
+        slog WARN "stuck-svclb-pods" WARN k3s-control "remediation disabled"
+    fi
 fi
 
 section "  SECURITY TOOLS"
@@ -670,31 +820,14 @@ if [ $FAIL -eq 0 ]; then
     echo -e "  ${CYAN} Trengo App (staging):${NC} http://$K3S_CONTROL_IP:32505"
     echo -e "  ${CYAN} Grafana:${NC}              http://$K3S_CONTROL_IP:30080"
     echo -e "  ${CYAN} Alertmanager:${NC}         http://$K3S_CONTROL_IP:30093"
-    echo -e "  ${CYAN} GitLab:${NC}               http://$CI_RUNNER_IP"
-    echo -e "  ${CYAN} Pipelines:${NC}            http://$CI_RUNNER_IP/root/trengo-search/-/pipelines"
-    echo -e "  ${CYAN} Wiki:${NC}                 http://$CI_RUNNER_IP/root/trengo-search/-/wikis"
-    echo -e "  ${CYAN} K8s  K8s Dashboard:${NC}        https://$K3S_CONTROL_IP:30443"
-    echo -e "  ${CYAN} Portainer:${NC}            http://$K3S_CONTROL_IP:30777"
-    
-    echo -e "\n${BOLD}   K8s Dashboard Token:${NC}"
-    echo -e "  ────────────────────────────────────────────────────────"
-    DASH_TOKEN=$($K3S_CMD "sudo k3s kubectl create token dashboard-admin -n kubernetes-dashboard --duration=24h 2>/dev/null")
-    if [ -n "$DASH_TOKEN" ]; then
-        echo -e "  ${DIM}${DASH_TOKEN}${NC}"
-        echo -e "  ${DIM}(Valid for 24 hours)${NC}"
-    else
-        echo -e "  ${YELLOW}Token not available - dashboard may not be installed${NC}"
-    fi
-    
-    echo -e "\n${BOLD}   Grafana Credentials:${NC}"
-    echo -e "  ────────────────────────────────────────────────────────"
-    echo -e "  ${DIM}Username: admin${NC}"
-    GRAFANA_PASS=$($K3S_CMD "sudo k3s kubectl get secret -n monitoring monitoring-grafana -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d")
-    if [ -n "$GRAFANA_PASS" ]; then
-        echo -e "  ${DIM}Password: ${GRAFANA_PASS}${NC}"
-    else
-        echo -e "  ${DIM}Password: prom-operator (default)${NC}"
-    fi
+    echo -e "  ${CYAN} GitLab:${NC}               http://$GITLAB_IP:$GITLAB_PORT"
+    echo -e "  ${CYAN} Pipelines:${NC}            http://$GITLAB_IP:$GITLAB_PORT/root/trengo-search/-/pipelines"
+    echo -e "  ${CYAN} Wiki:${NC}                 http://$GITLAB_IP:$GITLAB_PORT/root/trengo-search/-/wikis"
+    echo -e "  ${CYAN} K8s Dashboard:${NC}         https://$K3S_CONTROL_IP:30443"
+    echo -e "  ${CYAN} Portainer:${NC}             http://$K3S_CONTROL_IP:30777"
+
+    echo -e "\n  ${DIM}Credentials are intentionally never printed by health checks.${NC}"
+    echo -e "  ${DIM}Retrieve credentials directly from Vaultwarden when needed.${NC}"
 else
     echo -e "\n${RED}${BOLD}╔═══════════════════════════════════════════════════════╗${NC}"
     echo -e "${RED}${BOLD}  ║       [WARN]  SOME CHECKS FAILED - REVIEW             ║${NC}"
