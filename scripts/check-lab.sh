@@ -607,7 +607,7 @@ elif [ -n "$LATEST_IMAGE" ]; then
                         slog ERROR "worker-image-sync" FAIL "$worker_name" "mktemp returned no path"
                         continue
                     fi
-                    if scp -q $SSH_OPTS "$CONTROL_TAR" "labadmin@$worker_ip:'$WORKER_TAR'" 2>/dev/null \
+                    if scp -q $SSH_OPTS "$CONTROL_TAR" "labadmin@$worker_ip:$WORKER_TAR" 2>/dev/null \
                        && ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import '$WORKER_TAR'; rc=\$?; rm -f '$WORKER_TAR'; exit \$rc" 2>/dev/null; then
                         echo -e "  ${GREEN}OK Image synced to $worker_name${NC}"
                     else
