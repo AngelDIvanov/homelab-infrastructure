@@ -159,3 +159,42 @@
     chart_version: "{{ metrics_server_chart_version }}"
     release_namespace: kube-system
     wait: true
+
+- name: Render the registry storage manifest
+  ansible.builtin.template:
+    src: registry-storage.yaml.j2
+    dest: "{{ k8s_addons_manifest_dir }}/registry-storage.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply the registry NFS volume and claim
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_addons_manifest_dir }}/registry-storage.yaml"
+
+- name: Apply the local registry
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ playbook_dir }}/../../kubernetes/deployments/local-registry.yaml"
+
+- name: Wait for the local registry to become available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: registry
+    namespace: "{{ k8s_addons_registry_namespace }}"
+  register: k8s_addons_registry
+  until:
+    - k8s_addons_registry.resources | length > 0
+    - >-
+      k8s_addons_registry.resources[0].status.conditions | default([], true)
+      | selectattr('type', 'equalto', 'Available')
+      | map(attribute='status') | list | join == 'True'
+  retries: 30
+  delay: 10

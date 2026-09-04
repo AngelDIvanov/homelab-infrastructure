@@ -81,6 +81,23 @@
     mode: "0644"
   notify: Restart containerd
 
+- name: Create the containerd registry configuration directory
+  ansible.builtin.file:
+    path: "/etc/containerd/certs.d/{{ k8s_common_registry_mirror }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure the in-cluster registry as plain HTTP for containerd
+  ansible.builtin.template:
+    src: registry-hosts.toml.j2
+    dest: "/etc/containerd/certs.d/{{ k8s_common_registry_mirror }}/hosts.toml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart containerd
+
 - name: Enable and start containerd
   ansible.builtin.systemd:
     name: containerd

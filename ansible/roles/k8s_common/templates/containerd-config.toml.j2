@@ -8,6 +8,9 @@ state = "/run/containerd"
 [plugins.'io.containerd.cri.v1.images']
   snapshotter = "overlayfs"
 
+  [plugins.'io.containerd.cri.v1.images'.registry]
+    config_path = "/etc/containerd/certs.d"
+
   [plugins.'io.containerd.cri.v1.images'.pinned_images]
     # keep in sync with the pause image kubeadm pre-pulls for this Kubernetes minor
     sandbox = "{{ k8s_common_pause_image }}"
