@@ -1,1 +1,23 @@
 ---
+- name: Join the node to the cluster
+  ansible.builtin.command:
+    cmd: "{{ hostvars[groups['kubeadm_control'][0]].kubeadm_join_command }} --node-name {{ inventory_hostname }}"
+    creates: /etc/kubernetes/kubelet.conf
+  no_log: true
+
+- name: Wait for the worker node to report Ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_worker_kubeconfig }}"
+    kind: Node
+    name: "{{ inventory_hostname }}"
+  delegate_to: "{{ groups['kubeadm_control'][0] }}"
+  register: k8s_worker_node
+  until:
+    - k8s_worker_node.resources is defined
+    - k8s_worker_node.resources | length > 0
+    - >-
+      k8s_worker_node.resources[0].status.conditions | default([], true)
+      | selectattr('type', 'equalto', 'Ready')
+      | map(attribute='status') | list | join == 'True'
+  retries: "{{ k8s_worker_ready_retries }}"
+  delay: "{{ k8s_worker_ready_delay }}"

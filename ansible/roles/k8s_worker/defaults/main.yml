@@ -1,1 +1,4 @@
 ---
+k8s_worker_kubeconfig: /etc/kubernetes/admin.conf
+k8s_worker_ready_retries: 60
+k8s_worker_ready_delay: 5
