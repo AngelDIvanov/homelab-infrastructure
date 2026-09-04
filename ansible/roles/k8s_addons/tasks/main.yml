@@ -99,3 +99,23 @@
   until: not k8s_addons_metallb_l2.failed
   retries: 12
   delay: 10
+
+- name: Render the Traefik values
+  ansible.builtin.template:
+    src: traefik-values.yaml.j2
+    dest: "{{ k8s_addons_manifest_dir }}/traefik-values.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the Traefik ingress controller
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    release_name: traefik
+    chart_ref: traefik/traefik
+    chart_version: "{{ traefik_chart_version }}"
+    release_namespace: "{{ k8s_addons_traefik_namespace }}"
+    create_namespace: true
+    wait: true
+    values_files:
+      - "{{ k8s_addons_manifest_dir }}/traefik-values.yaml"
