@@ -557,36 +557,62 @@ if [ "$LATEST_IMAGE" = "__cluster_unreachable__" ]; then
     echo -e "  ${YELLOW}[WARN] Image sync check skipped because the API is unavailable${NC}"
     ((WARN++))
 elif [ -n "$LATEST_IMAGE" ]; then
-    # Check first worker only for sync status
-    FIRST_WORKER_IP=$(echo "${WORKERS[@]}" | awk '{print $1}')
-    if [ -n "$FIRST_WORKER_IP" ]; then
-        WORKER_CMD=$(ssh_cmd "$FIRST_WORKER_IP")
-        WORKER_HAS=$($WORKER_CMD "sudo k3s ctr images list 2>/dev/null | grep -q '$LATEST_IMAGE' && echo yes || echo no" 2>/dev/null)
-        
-        if [ "$WORKER_HAS" == "no" ]; then
-            if [ "$AUTO_FIX" = true ]; then
-                echo -e "  ${YELLOW}[WARN]  Syncing image to workers...${NC}"
-                $K3S_CMD "sudo k3s ctr images export /tmp/trengo-sync.tar $LATEST_IMAGE" 2>/dev/null
-                scp -q $SSH_OPTS labadmin@$K3S_CONTROL_IP:/tmp/trengo-sync.tar /tmp/ 2>/dev/null
+    # Check every worker and record which ones lack the image
+    NEEDS_SYNC=()
+    if [ "${#WORKERS[@]}" -gt 0 ]; then
+        for worker_name in $(echo "${!WORKERS[@]}" | tr ' ' '\n' | sort); do
+            worker_ip="${WORKERS[$worker_name]}"
+            WORKER_CMD=$(ssh_cmd "$worker_ip")
+            WORKER_HAS=$($WORKER_CMD "sudo k3s ctr images list 2>/dev/null | grep -q '$LATEST_IMAGE' && echo yes || echo no" 2>/dev/null)
+            if [ "$WORKER_HAS" != "yes" ]; then
+                NEEDS_SYNC+=("$worker_name")
+            fi
+        done
+    fi
 
-                for worker_name in "${!WORKERS[@]}"; do
-                    worker_ip="${WORKERS[$worker_name]}"
-                    scp -q $SSH_OPTS /tmp/trengo-sync.tar labadmin@$worker_ip:/tmp/ 2>/dev/null
-                    ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import /tmp/trengo-sync.tar" 2>/dev/null
+    if [ "${#NEEDS_SYNC[@]}" -gt 0 ]; then
+        if [ "$AUTO_FIX" = true ]; then
+            echo -e "  ${YELLOW}[WARN]  Syncing image to workers...${NC}"
+            CONTROL_TAR=$($K3S_CMD "mktemp -t trengo-sync.XXXXXX.tar" 2>/dev/null)
+            LOCAL_TAR=$(mktemp -t trengo-sync.XXXXXX.tar)
+            $K3S_CMD "sudo k3s ctr images export $CONTROL_TAR $LATEST_IMAGE" 2>/dev/null
+            scp -q $SSH_OPTS "labadmin@$K3S_CONTROL_IP:$CONTROL_TAR" "$LOCAL_TAR" 2>/dev/null
+
+            sync_failed=false
+            for worker_name in "${!WORKERS[@]}"; do
+                # Skip workers that already have the image
+                if [[ " ${NEEDS_SYNC[*]} " != *" $worker_name "* ]]; then
+                    continue
+                fi
+                worker_ip="${WORKERS[$worker_name]}"
+                WORKER_TAR=$(ssh $SSH_OPTS labadmin@$worker_ip "mktemp -t trengo-sync.XXXXXX.tar" 2>/dev/null)
+                scp -q $SSH_OPTS "$LOCAL_TAR" "labadmin@$worker_ip:$WORKER_TAR" 2>/dev/null
+                if ssh $SSH_OPTS labadmin@$worker_ip "sudo k3s ctr images import $WORKER_TAR; rc=\$?; rm -f $WORKER_TAR; exit \$rc" 2>/dev/null; then
                     echo -e "  ${GREEN}OK Image synced to $worker_name${NC}"
-                done
-                ((PASS++))
+                else
+                    echo -e "  ${RED}FAIL Image sync to $worker_name failed${NC}"
+                    sync_failed=true
+                fi
+            done
+            rm -f "$LOCAL_TAR"
+            $K3S_CMD "rm -f $CONTROL_TAR" 2>/dev/null
+            if [ "$sync_failed" = true ]; then
+                echo -e "  ${RED}FAIL Image sync to one or more workers failed${NC}"
+                ((FAIL++))
+                slog FAIL "worker-image-sync" FAIL k3s-control "one or more worker imports failed"
             else
-                echo -e "  ${YELLOW}[WARN] Images are not synchronized${NC} (use --fix to sync)"
-                ((WARN++))
-                slog WARN "worker-image-sync" WARN k3s-control "out of sync; remediation disabled"
+                ((PASS++))
             fi
         else
-            echo -e "  ${GREEN}OK Images in sync${NC}"
-            ((PASS++))
+            echo -e "  ${YELLOW}[WARN] Images are not synchronized on: ${NEEDS_SYNC[*]}${NC} (use --fix to sync)"
+            ((WARN++))
+            slog WARN "worker-image-sync" WARN k3s-control "out of sync on ${#NEEDS_SYNC[@]} worker(s); remediation disabled"
         fi
-    else
+    elif [ "${#WORKERS[@]}" -eq 0 ]; then
         echo -e "  ${DIM}No workers to sync${NC}"
+    else
+        echo -e "  ${GREEN}OK Images in sync${NC}"
+        ((PASS++))
     fi
 else
     echo -e "  ${DIM}No trengo-search image found${NC}"
