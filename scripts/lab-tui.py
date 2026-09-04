@@ -723,6 +723,7 @@ class LabTUI(App):
         log = self.query_one("#log-panel", Log)
         self.call_from_thread(log.write_line, "\n[bold yellow] Rejoining workers...[/bold yellow]")
         vm_count = get_vm_count()
+        failed_workers = []
         for i in range(vm_count):
             wnum = i + 2
             wname = f"k3s-worker-{wnum}"
@@ -734,7 +735,15 @@ class LabTUI(App):
             icon = "OK" if rc == 0 else "FAIL"
             color = "green" if rc == 0 else "red"
             self.call_from_thread(log.write_line, f"  [{color}]{icon} {wname}[/{color}]")
-        self.call_from_thread(log.write_line, "[green]OK Rejoin complete![/green]")
+            if rc != 0:
+                failed_workers.append(wname)
+        if failed_workers:
+            self.call_from_thread(
+                log.write_line,
+                f"[red]FAIL Rejoin incomplete: {', '.join(failed_workers)} did not rejoin[/red]",
+            )
+        else:
+            self.call_from_thread(log.write_line, "[green]OK Rejoin complete![/green]")
         self.call_from_thread(self.refresh_status)
 
     @work(thread=True)
