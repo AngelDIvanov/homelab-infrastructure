@@ -28,8 +28,9 @@ resource "libvirt_cloudinit_disk" "node" {
   name = "kubeadm-${each.key}-cloudinit.iso"
   pool = "default"
   user_data = templatefile("${path.module}/cloud-init/user-data.tpl", {
-    hostname       = "kubeadm-${each.key}"
-    ssh_public_key = var.ssh_public_key
+    hostname              = "kubeadm-${each.key}"
+    ssh_public_key        = var.ssh_public_key
+    extra_ssh_public_keys = var.extra_ssh_public_keys
   })
   network_config = templatefile("${path.module}/cloud-init/network-config.tpl", {
     ip_address = each.value.ip
