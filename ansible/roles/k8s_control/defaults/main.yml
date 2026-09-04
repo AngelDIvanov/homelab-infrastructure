@@ -1,0 +1,7 @@
+---
+k8s_control_config_dir: /etc/kubeadm
+k8s_control_config_path: "{{ k8s_control_config_dir }}/kubeadm-config.yaml"
+k8s_control_kubeconfig: /etc/kubernetes/admin.conf
+k8s_control_join_token_ttl: 30m
+k8s_control_node_ready_retries: 60
+k8s_control_node_ready_delay: 5

@@ -1,0 +1,10 @@
+---
+profile: production
+
+exclude_paths:
+  - playbooks/bootstrap.yml
+  - playbooks/deploy-vaultwarden.yml
+  - playbooks/hardening.yml
+  - playbooks/install-apps.yml
+  - playbooks/remove-apps.yml
+  - playbooks/revert-hardening.yml

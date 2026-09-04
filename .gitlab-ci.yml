@@ -64,6 +64,17 @@ lint:tflint:
   rules:
     - changes: ["terraform-kubeadm/**/*"]
 
+lint:ansible:
+  stage: lint
+  image:
+    name: pipelinecomponents/ansible-lint@sha256:e2b0e8025135df396d0e4f08f66e8083bee7d489df7deb259fec9828bd3d49cd
+    entrypoint: [""]
+  script:
+    - cd ansible
+    - ansible-lint --profile production
+  rules:
+    - changes: ["ansible/**/*"]
+
 validate:kubernetes-manifests:
   stage: validate
   image:

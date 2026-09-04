@@ -1,0 +1,27 @@
+version = 3
+root = "/var/lib/containerd"
+state = "/run/containerd"
+
+[grpc]
+  address = "/run/containerd/containerd.sock"
+
+[plugins.'io.containerd.cri.v1.images']
+  snapshotter = "overlayfs"
+
+  [plugins.'io.containerd.cri.v1.images'.pinned_images]
+    # keep in sync with the pause image kubeadm pre-pulls for this Kubernetes minor
+    sandbox = "{{ k8s_common_pause_image }}"
+
+[plugins.'io.containerd.cri.v1.runtime']
+  [plugins.'io.containerd.cri.v1.runtime'.containerd]
+    default_runtime_name = "runc"
+
+    [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc]
+      runtime_type = "io.containerd.runc.v2"
+
+      [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
+        SystemdCgroup = true
+
+  [plugins.'io.containerd.cri.v1.runtime'.cni]
+    bin_dir = "/opt/cni/bin"
+    conf_dir = "/etc/cni/net.d"
