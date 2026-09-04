@@ -48,6 +48,8 @@ SSH_ARGS = [
 ]
 SSH_OPTS = " ".join(shlex.quote(arg) for arg in SSH_ARGS)
 
+K3S_INSTALL_TIMEOUT = 600
+
 def get_worker_ip(n):
     return f"192.168.122.{BASE_IP_OCTET + n - 2}"
 
@@ -123,27 +125,36 @@ def join_k3s(ip, name):
     print(y(f"  joining {name}..."))
     token = K3S_TOKEN()
     remote_script = "\n".join([
-        "set -eu",
+        "set -euo pipefail",
         (
             "curl -sfL https://get.k3s.io | "
             f"K3S_URL={shlex.quote(K3S_URL)} "
             f"K3S_TOKEN={shlex.quote(token)} sh -s - agent"
         ),
+        "tmp=$(mktemp)",
+        "chmod 0600 \"$tmp\"",
         (
             "printf '%s\\n' "
             f"{shlex.quote('K3S_TOKEN=' + token)} "
-            f"{shlex.quote('K3S_URL=' + K3S_URL)} | "
-            "sudo tee /etc/systemd/system/k3s-agent.service.env >/dev/null"
+            f"{shlex.quote('K3S_URL=' + K3S_URL)} > \"$tmp\""
         ),
+        "sudo install -m 0600 -o root -g root \"$tmp\" /etc/systemd/system/k3s-agent.service.env",
+        "rm -f \"$tmp\"",
         "sudo systemctl daemon-reload",
         "sudo systemctl restart k3s-agent",
     ])
-    result = subprocess.run(
-        ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
-        input=remote_script,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["ssh", *SSH_ARGS, f"labadmin@{ip}", "bash -s"],
+            input=remote_script,
+            capture_output=True,
+            text=True,
+            timeout=K3S_INSTALL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        print(r(f"  failed to install k3s on {name}"))
+        print(r(f"  k3s install on {ip} timed out after {K3S_INSTALL_TIMEOUT}s"))
+        return False
     if result.returncode != 0:
         print(r(f"  failed to install k3s on {name}"))
         return False
