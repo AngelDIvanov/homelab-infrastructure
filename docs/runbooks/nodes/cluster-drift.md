@@ -76,7 +76,7 @@ Always restore the env file and restart the agent after an in-place upgrade:
 ```bash
 # Run from the operator host; the whole repair executes on the target node.
 TOKEN=$(ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token) || exit 1
-[[ "$TOKEN" == K10*::server:* ]] || { echo "node-token is empty or malformed, aborting" >&2; exit 1; }
+[[ "$TOKEN" =~ ^K10[0-9a-f]{64}::server:[0-9a-f]+$ ]] || { echo "node-token is empty or malformed, aborting" >&2; exit 1; }
 {
   printf '%s\n' "$TOKEN"
   cat <<'REMOTE'
