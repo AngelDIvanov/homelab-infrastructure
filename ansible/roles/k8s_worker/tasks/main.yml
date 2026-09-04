@@ -1,7 +1,23 @@
 ---
+- name: Create a join command when the control play did not run in this invocation
+  ansible.builtin.command:
+    cmd: kubeadm token create --print-join-command --ttl 30m
+  delegate_to: "{{ groups['kubeadm_control'][0] }}"
+  register: k8s_worker_join
+  changed_when: true
+  no_log: true
+  when: hostvars[groups['kubeadm_control'][0]].kubeadm_join_command is not defined
+
+- name: Select the join command for this node
+  ansible.builtin.set_fact:
+    k8s_worker_join_command: >-
+      {{ hostvars[groups['kubeadm_control'][0]].kubeadm_join_command
+         | default(k8s_worker_join.stdout | default('')) }}
+  no_log: true
+
 - name: Join the node to the cluster
   ansible.builtin.command:
-    cmd: "{{ hostvars[groups['kubeadm_control'][0]].kubeadm_join_command }} --node-name {{ inventory_hostname }}"
+    cmd: "{{ k8s_worker_join_command }} --node-name {{ inventory_hostname }}"
     creates: /etc/kubernetes/kubelet.conf
   no_log: true
 
