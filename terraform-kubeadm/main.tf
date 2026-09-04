@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.1"
   required_providers {
     libvirt = {
       source  = "dmacvicar/libvirt"
@@ -37,7 +37,9 @@ resource "libvirt_cloudinit_disk" "node" {
     extra_ssh_public_keys = var.extra_ssh_public_keys
   })
   network_config = templatefile("${path.module}/cloud-init/network-config.tpl", {
-    ip_address = each.value.ip
+    ip_address    = each.value.ip
+    prefix_length = split("/", var.node_cidr)[1]
+    gateway       = cidrhost(var.node_cidr, 1)
   })
 }
 
