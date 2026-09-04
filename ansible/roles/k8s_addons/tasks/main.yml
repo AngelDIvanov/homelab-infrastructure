@@ -175,12 +175,20 @@
     apply: true
     src: "{{ k8s_addons_manifest_dir }}/registry-storage.yaml"
 
+- name: Copy the local registry manifest to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../kubernetes/deployments/local-registry.yaml"
+    dest: "{{ k8s_addons_manifest_dir }}/local-registry.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Apply the local registry
   kubernetes.core.k8s:
     kubeconfig: "{{ k8s_addons_kubeconfig }}"
     state: present
     apply: true
-    src: "{{ playbook_dir }}/../../kubernetes/deployments/local-registry.yaml"
+    src: "{{ k8s_addons_manifest_dir }}/local-registry.yaml"
 
 - name: Wait for the local registry to become available
   kubernetes.core.k8s_info:
