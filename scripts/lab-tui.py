@@ -132,14 +132,14 @@ def get_vm_count():
 def get_worker_ip(worker_num):
     return f"192.168.122.{BASE_IP_OCTET + worker_num - 2}"
 
-def run_script(name, log_widget, *args):
+def run_script(name, emit, *args):
     """Run a repository script without invoking an extra shell parser."""
     path = SCRIPTS_DIR / name
     if not path.is_file():
-        log_widget.write_line(f"[red]FAIL Script not found: {path}[/red]")
+        emit(f"[red]FAIL Script not found: {path}[/red]")
         return
     command = ["bash", str(path), *args]
-    log_widget.write_line(f"[cyan]$ {' '.join(command)}[/cyan]")
+    emit(f"[cyan]$ {' '.join(command)}[/cyan]")
     proc = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -148,12 +148,12 @@ def run_script(name, log_widget, *args):
     )
     if proc.stdout:
         for line in proc.stdout:
-            log_widget.write_line(line.rstrip())
+            emit(line.rstrip())
     rc = proc.wait()
     if rc == 0:
-        log_widget.write_line("[green]OK Done[/green]")
+        emit("[green]OK Done[/green]")
     else:
-        log_widget.write_line(f"[red]FAIL Exited with code {rc}[/red]")
+        emit(f"[red]FAIL Exited with code {rc}[/red]")
 
 
 def install_k3s_agent(ip):
@@ -513,17 +513,17 @@ class LabTUI(App):
     # ── Async script runner ───────────────────────────────────
     @work(thread=True)
     def _run_script_async(self, script_name, header, *args):
-        log = self.query_one("#log-panel", Log)
+        log = self.call_from_thread(self.query_one, "#log-panel", Log)
         self.call_from_thread(log.write_line, f"\n[bold cyan]{'─'*50}[/bold cyan]")
         self.call_from_thread(log.write_line, f"[bold yellow]{header}[/bold yellow]")
         self.call_from_thread(log.write_line, f"[bold cyan]{'─'*50}[/bold cyan]")
-        run_script(script_name, log, *args)
+        run_script(script_name, lambda line: self.call_from_thread(log.write_line, line), *args)
         self.call_from_thread(self.refresh_status)
 
     # ── Scale operations ──────────────────────────────────────
     @work(thread=True)
     def _run_upscale(self):
-        log = self.query_one("#log-panel", Log)
+        log = self.call_from_thread(self.query_one, "#log-panel", Log)
         self.call_from_thread(log.write_line, "\n[bold yellow]Upscale Starting upscale...[/bold yellow]")
 
         current   = get_vm_count()
@@ -602,7 +602,7 @@ class LabTUI(App):
 
     @work(thread=True)
     def _run_downscale(self):
-        log = self.query_one("#log-panel", Log)
+        log = self.call_from_thread(self.query_one, "#log-panel", Log)
         current = get_vm_count()
         if current <= 0:
             self.call_from_thread(log.write_line, "[red]No Terraform workers to remove[/red]")
