@@ -127,7 +127,7 @@ create_secret() {
 # Read existing secrets from .bashrc automatically
 EXISTING_GITLAB_TOKEN=$(grep -oP "(?<=export GITLAB_TOKEN=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
 # Take the value of the last active export: quoted value up to its closing quote, or bare value up to a space/comment
-EXISTING_K3S_TOKEN=$(grep -oP "^export K3S_TOKEN=\K.*" "$HOME/.bashrc" | tail -1 | sed -E "s/^'([^']*)'.*$/\1/; s/^\"([^\"]*)\".*$/\1/; s/^([^'\"# ]+).*$/\1/" || true)
+EXISTING_K3S_TOKEN=$(grep -oP "^export K3S_TOKEN=\K.*" "$HOME/.bashrc" | tail -1 | sed -E "s/^'([^']*)'.*$/\1/;t;s/^\"([^\"]*)\".*$/\1/;t;s/^([^'\"# ]+).*$/\1/" || true)
 EXISTING_GMAIL_PASS=$(grep -oP "(?<=export GMAIL_APP_PASS=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
 EXISTING_GMAIL_USER=$(grep -oP "(?<=export GMAIL_USER=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
 EXISTING_SEND_TO=$(grep -oP "(?<=export SEND_TO=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
