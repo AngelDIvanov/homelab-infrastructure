@@ -66,3 +66,13 @@ resource "libvirt_domain" "node" {
     autoport    = true
   }
 }
+
+resource "local_file" "ansible_inventory" {
+  content = templatefile("${path.module}/templates/inventory.ini.tftpl", {
+    control_hostname = "kubeadm-control"
+    control_ip       = var.control_ip
+    workers          = { for name, node in local.workers : "kubeadm-${name}" => node.ip }
+  })
+  filename        = "${path.module}/../ansible/inventory/kubeadm.ini"
+  file_permission = "0644"
+}
