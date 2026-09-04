@@ -63,6 +63,8 @@ validate:kubernetes-manifests:
       find kubernetes -type f -name '*.yaml' ! -name '*.example.yaml' -print0 |
       xargs -0 kubeconform -strict -summary -ignore-missing-schemas
       -kubernetes-version 1.29.0
+      -schema-location default
+      -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
   rules:
     - changes: ["kubernetes/**/*.yaml"]
 
