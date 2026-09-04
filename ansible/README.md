@@ -45,7 +45,7 @@ and then, in order:
 
 - **MetalLB** — replaces the k3s ServiceLB so `type: LoadBalancer` services
   get an address. The L2 pool hands out `192.168.122.200-192.168.122.220`
-  from the libvirt network (`metallb_pool_range` in `group_vars`).
+  from the libvirt network (`metallb_pool_range` in `inventory/group_vars`).
 - **Traefik** — keeps the `traefik` ingress class (and makes it the default)
   that the existing app manifests reference; two replicas with hard pod
   anti-affinity, fronted by a MetalLB LoadBalancer service.
@@ -60,7 +60,7 @@ and then, in order:
   claim. Every node's containerd is configured to pull and push from
   `192.168.122.240:30500` as plain HTTP via `certs.d`.
 
-All chart versions are pinned in `group_vars/kubeadm_all.yml`.
+All chart versions are pinned in `inventory/group_vars/kubeadm_all.yml`.
 
 ## Lint
 
