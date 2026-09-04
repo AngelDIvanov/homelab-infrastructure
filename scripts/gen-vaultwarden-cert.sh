@@ -28,9 +28,9 @@ echo "Certificate generated."
 echo "Creating K8s Secret on control node..."
 scp -o StrictHostKeyChecking=no \
     "$CERT_DIR/cert.pem" "$CERT_DIR/key.pem" \
-    "andy@$K3S_CONTROL:/tmp/"
+    "labadmin@$K3S_CONTROL:/tmp/"
 
-ssh -o StrictHostKeyChecking=no "andy@$K3S_CONTROL" "
+ssh -o StrictHostKeyChecking=no "labadmin@$K3S_CONTROL" "
   sudo k3s kubectl create namespace vaultwarden --dry-run=client -o yaml | sudo k3s kubectl apply -f -
   sudo k3s kubectl delete secret vaultwarden-tls -n vaultwarden --ignore-not-found
   sudo k3s kubectl create secret generic vaultwarden-tls \

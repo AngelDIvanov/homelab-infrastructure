@@ -83,7 +83,7 @@ data:
                  '-o', 'StrictHostKeyChecking=no',
                  '-o', 'ConnectTimeout=10',
                  '-o', 'UserKnownHostsFile=/dev/null',
-                 f'andy@{host}', cmd],
+                 f'labadmin@{host}', cmd],
                 capture_output=True, text=True, timeout=timeout
             )
             return (r.stdout + r.stderr).strip()

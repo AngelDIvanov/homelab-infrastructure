@@ -140,7 +140,7 @@ def wait_for_ssh(ip, timeout=120):
     print(y(f"  waiting for SSH on {ip}..."))
     start = time.time()
     while time.time() - start < timeout:
-        if run(f"ssh {SSH_OPTS} andy@{ip} 'echo ok' 2>/dev/null", capture=True).returncode == 0:
+        if run(f"ssh {SSH_OPTS} labadmin@{ip} 'echo ok' 2>/dev/null", capture=True).returncode == 0:
             print(g(f"  SSH ready on {ip}"))
             return True
         time.sleep(5)
@@ -150,7 +150,7 @@ def wait_for_ssh(ip, timeout=120):
 def preflight_cluster_check():
     """Abort if control plane is unreachable or cluster is degraded."""
     print(y("  pre-flight: checking cluster health..."))
-    res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes --no-headers 2>/dev/null"', capture=True)
+    res = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes --no-headers 2>/dev/null"', capture=True)
     if res.returncode != 0:
         print(r("  ABORT: cannot reach k3s-control — cluster may be down."))
         return False
@@ -167,7 +167,7 @@ def join_k3s(ip, name):
     print(y(f"  joining {name} to k3s..."))
 
     # Fetch full token and validate format before touching the node
-    token_result = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo cat /var/lib/rancher/k3s/server/node-token"', capture=True)
+    token_result = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo cat /var/lib/rancher/k3s/server/node-token"', capture=True)
     full_token = token_result.stdout.strip()
     if not full_token or '::server:' not in full_token:
         print(r(f"  ABORT: node-token from control plane looks wrong: '{full_token[:40]}...'"))
@@ -176,21 +176,21 @@ def join_k3s(ip, name):
     print(g(f"  token validated (format OK)"))
 
     # Install k3s agent
-    cmd = f'ssh {SSH_OPTS} andy@{ip} "curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={full_token} sh -s - agent"'
+    cmd = f'ssh {SSH_OPTS} labadmin@{ip} "curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={full_token} sh -s - agent"'
     if run(cmd).returncode != 0:
         print(r(f"  failed to install k3s on {name}"))
         return False
 
     # The install script wipes the env file — explicitly write the full token back
     print(y("  writing token to agent env file (install script wipes it)..."))
-    run(f'ssh {SSH_OPTS} andy@{ip} "printf \'K3S_TOKEN=%s\\nK3S_URL=%s\\n\' \'{full_token}\' \'{K3S_URL}\' | sudo tee /etc/systemd/system/k3s-agent.service.env > /dev/null"', capture=True)
-    run(f'ssh {SSH_OPTS} andy@{ip} "sudo systemctl daemon-reload && sudo systemctl restart k3s-agent"', capture=True)
+    run(f'ssh {SSH_OPTS} labadmin@{ip} "printf \'K3S_TOKEN=%s\\nK3S_URL=%s\\n\' \'{full_token}\' \'{K3S_URL}\' | sudo tee /etc/systemd/system/k3s-agent.service.env > /dev/null"', capture=True)
+    run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo systemctl daemon-reload && sudo systemctl restart k3s-agent"', capture=True)
 
     # Verify agent is active
     time.sleep(5)
-    result = run(f'ssh {SSH_OPTS} andy@{ip} "systemctl is-active k3s-agent"', capture=True)
+    result = run(f'ssh {SSH_OPTS} labadmin@{ip} "systemctl is-active k3s-agent"', capture=True)
     if result.stdout.strip() != "active":
-        logs = run(f'ssh {SSH_OPTS} andy@{ip} "sudo journalctl -u k3s-agent -n 5 --no-pager 2>/dev/null | grep -i error"', capture=True).stdout.strip()
+        logs = run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo journalctl -u k3s-agent -n 5 --no-pager 2>/dev/null | grep -i error"', capture=True).stdout.strip()
         print(r(f"  k3s-agent failed on {name}"))
         if logs: print(r(f"  Agent errors: {logs}"))
         return False
@@ -198,7 +198,7 @@ def join_k3s(ip, name):
     # Verify node actually appears in cluster (not just service active)
     print(y(f"  waiting for {name} to appear in cluster..."))
     for _ in range(18):  # 90s
-        res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get node {name} --no-headers 2>/dev/null"', capture=True)
+        res = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get node {name} --no-headers 2>/dev/null"', capture=True)
         if res.stdout.strip():
             status = res.stdout.split()[1] if len(res.stdout.split()) > 1 else "Unknown"
             if status == "Ready":
@@ -215,29 +215,29 @@ def repair_agent(ip, name):
     Writes the correct token from control plane into the env file and restarts."""
     print(y(f"  repairing k3s-agent on {name} ({ip})..."))
 
-    token_result = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo cat /var/lib/rancher/k3s/server/node-token"', capture=True)
+    token_result = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo cat /var/lib/rancher/k3s/server/node-token"', capture=True)
     full_token = token_result.stdout.strip()
     if not full_token or '::server:' not in full_token:
         print(r(f"  ABORT: could not fetch valid token from control plane: '{full_token[:40]}'"))
         return False
 
-    current = run(f'ssh {SSH_OPTS} andy@{ip} "sudo cat /etc/systemd/system/k3s-agent.service.env 2>/dev/null"', capture=True).stdout.strip()
+    current = run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo cat /etc/systemd/system/k3s-agent.service.env 2>/dev/null"', capture=True).stdout.strip()
     print(f"  Current env: {current[:80] or '(empty)'}")
 
-    run(f'ssh {SSH_OPTS} andy@{ip} "printf \'K3S_TOKEN=%s\\nK3S_URL=%s\\n\' \'{full_token}\' \'{K3S_URL}\' | sudo tee /etc/systemd/system/k3s-agent.service.env > /dev/null"', capture=True)
-    run(f'ssh {SSH_OPTS} andy@{ip} "sudo systemctl daemon-reload && sudo systemctl restart k3s-agent"', capture=True)
+    run(f'ssh {SSH_OPTS} labadmin@{ip} "printf \'K3S_TOKEN=%s\\nK3S_URL=%s\\n\' \'{full_token}\' \'{K3S_URL}\' | sudo tee /etc/systemd/system/k3s-agent.service.env > /dev/null"', capture=True)
+    run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo systemctl daemon-reload && sudo systemctl restart k3s-agent"', capture=True)
 
     time.sleep(6)
-    status = run(f'ssh {SSH_OPTS} andy@{ip} "systemctl is-active k3s-agent"', capture=True).stdout.strip()
+    status = run(f'ssh {SSH_OPTS} labadmin@{ip} "systemctl is-active k3s-agent"', capture=True).stdout.strip()
     if status != "active":
-        logs = run(f'ssh {SSH_OPTS} andy@{ip} "sudo journalctl -u k3s-agent -n 5 --no-pager 2>/dev/null | grep -i error"', capture=True).stdout.strip()
+        logs = run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo journalctl -u k3s-agent -n 5 --no-pager 2>/dev/null | grep -i error"', capture=True).stdout.strip()
         print(r(f"  k3s-agent still not active on {name}"))
         if logs: print(r(f"  Errors: {logs}"))
         return False
 
     print(y(f"  waiting for {name} to appear Ready in cluster..."))
     for _ in range(18):
-        res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get node {name} --no-headers 2>/dev/null"', capture=True)
+        res = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get node {name} --no-headers 2>/dev/null"', capture=True)
         if res.stdout.strip() and "Ready" in res.stdout:
             print(g(f"  {name} is Ready"))
             return True
@@ -275,7 +275,7 @@ def check_infra_services():
 
     # Check GitLab runner registration on ci-runner
     print(c("\n  ci-runner health"))
-    res = run(f'ssh {SSH_OPTS} andy@{CI_RUNNER_IP} "sudo gitlab-runner list 2>&1 | grep -c Executor || echo 0"', capture=True)
+    res = run(f'ssh {SSH_OPTS} labadmin@{CI_RUNNER_IP} "sudo gitlab-runner list 2>&1 | grep -c Executor || echo 0"', capture=True)
     runner_count = res.stdout.strip()
     if runner_count.isdigit() and int(runner_count) > 0:
         print(g(f"    GitLab Runner  UP   ({runner_count} executor(s) registered)"))
@@ -284,7 +284,7 @@ def check_infra_services():
         all_ok = False
 
     # Check NFS export is reachable from control
-    nfs_check = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "showmount -e {K3S_INFRA_IP} 2>/dev/null | head -3"', capture=True)
+    nfs_check = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "showmount -e {K3S_INFRA_IP} 2>/dev/null | head -3"', capture=True)
     if nfs_check.returncode == 0 and nfs_check.stdout.strip():
         print(g(f"    NFS            UP   ({nfs_check.stdout.splitlines()[0].strip()})"))
     else:
@@ -294,14 +294,14 @@ def check_infra_services():
 
 def drain_node(name):
     print(y(f"  draining {name}..."))
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl drain {name} --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true"')
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl delete node {name} 2>/dev/null || true"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl drain {name} --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl delete node {name} 2>/dev/null || true"')
     print(g(f"  {name} removed"))
 
 def update_ansible_inventory():
     vm_count = get_vm_count()
     content = """[all:vars]
-ansible_user=andy
+ansible_user=labadmin
 ansible_ssh_private_key_file=~/.ssh/id_rsa
 
 [control_plane]
@@ -333,7 +333,7 @@ def sync_images(ip, name):
     image = ""
     source_ip = ""
     for candidate_ip in [K3S_WORKER1_IP, K3S_CONTROL_IP]:
-        res = run(f'ssh {SSH_OPTS} andy@{candidate_ip} "sudo k3s crictl images 2>/dev/null | grep trengo-search | head -1"', capture=True)
+        res = run(f'ssh {SSH_OPTS} labadmin@{candidate_ip} "sudo k3s crictl images 2>/dev/null | grep trengo-search | head -1"', capture=True)
         line = res.stdout.strip()
         if line and "trengo-search" in line:
             parts = line.split()
@@ -345,11 +345,11 @@ def sync_images(ip, name):
         print(y("  no trengo-search image found on any node"))
         return
     print(dim(f"  image: {image} from {source_ip}"))
-    run(f'ssh {SSH_OPTS} andy@{source_ip} "sudo k3s ctr images export /tmp/sync.tar \'{image}\'"')
-    run(f'scp {SSH_OPTS} andy@{source_ip}:/tmp/sync.tar /tmp/')
-    run(f'scp {SSH_OPTS} /tmp/sync.tar andy@{ip}:/tmp/')
-    run(f'ssh {SSH_OPTS} andy@{ip} "sudo k3s ctr images import /tmp/sync.tar && sudo rm /tmp/sync.tar"')
-    run(f'ssh {SSH_OPTS} andy@{source_ip} "sudo rm -f /tmp/sync.tar"', capture=True)
+    run(f'ssh {SSH_OPTS} labadmin@{source_ip} "sudo k3s ctr images export /tmp/sync.tar \'{image}\'"')
+    run(f'scp {SSH_OPTS} labadmin@{source_ip}:/tmp/sync.tar /tmp/')
+    run(f'scp {SSH_OPTS} /tmp/sync.tar labadmin@{ip}:/tmp/')
+    run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo k3s ctr images import /tmp/sync.tar && sudo rm /tmp/sync.tar"')
+    run(f'ssh {SSH_OPTS} labadmin@{source_ip} "sudo rm -f /tmp/sync.tar"', capture=True)
     print(g(f"  synced to {name}"))
 
 # ─────────────────────────────────────────────────────────────
@@ -564,7 +564,7 @@ def do_upscale():
 
     divider("Step 5/6 -- Waiting for node Ready")
     for i in range(12):
-        res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get node {new_name} --no-headers 2>/dev/null | grep -q Ready"', capture=True)
+        res = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get node {new_name} --no-headers 2>/dev/null | grep -q Ready"', capture=True)
         if res.returncode == 0:
             print(g(f"  {new_name} is Ready!")); break
         print(f"  waiting... [{i*10}/120s]")
@@ -576,7 +576,7 @@ def do_upscale():
 
     total_workers = new_count + 1
     divider("Step 6b -- Scaling app replicas")
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas={total_workers}"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas={total_workers}"')
     print(g(f"  scaled trengo-search to {total_workers} replicas"))
 
     divider("Step 6c -- Verifying DaemonSet pods on new node")
@@ -589,7 +589,7 @@ def do_upscale():
     )
     ok = False
     for i in range(18):   # up to 3 minutes
-        res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "{ds_check_cmd}"', capture=True)
+        res = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "{ds_check_cmd}"', capture=True)
         running = [l for l in res.stdout.splitlines() if "Running" in l]
         pending = [l for l in res.stdout.splitlines() if "Running" not in l and l.strip()]
         if running and not pending:
@@ -623,14 +623,14 @@ def do_downscale():
 
     # Safety check: warn if any deployment would drop to 0 replicas after drain
     print(y("  checking pod safety before drain..."))
-    pods_res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get pods -A --no-headers --field-selector spec.nodeName={wname} 2>/dev/null"', capture=True)
+    pods_res = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get pods -A --no-headers --field-selector spec.nodeName={wname} 2>/dev/null"', capture=True)
     if pods_res.stdout.strip():
         running_pods = [l.split() for l in pods_res.stdout.splitlines() if l.strip()]
         print(f"  {len(running_pods)} pod(s) currently on {wname}:")
         for p in running_pods:
             print(f"    {p[0]}/{p[1]}")
         # Check for single-replica deployments that would go to 0
-        risky = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get deployments -A --no-headers 2>/dev/null | awk \'$5==1 && $4==1\'"', capture=True).stdout.strip()
+        risky = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get deployments -A --no-headers 2>/dev/null | awk \'$5==1 && $4==1\'"', capture=True).stdout.strip()
         if risky:
             print(y("  WARNING: these deployments have only 1 ready replica and may become unavailable:"))
             for l in risky.splitlines(): print(y(f"    {l}"))
@@ -643,7 +643,7 @@ def do_downscale():
     # Scale app replicas down before draining so pods aren't rescheduled mid-drain
     remaining_workers = (current - 1) + 1
     divider("Step 0/4 -- Pre-scaling app replicas")
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas={remaining_workers}"', capture=True)
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas={remaining_workers}"', capture=True)
     print(g(f"  scaled trengo-search to {remaining_workers} replicas"))
 
     divider("Step 1/4 -- Draining from k3s")
@@ -711,7 +711,7 @@ def do_repair_node():
             print(r(f"  SSH unavailable — is the VM running?")); continue
         repair_agent(ip, name)
 
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
 
 def do_rejoin():
     divider("REJOIN -- Full re-attach (reinstalls k3s-agent)")
@@ -738,10 +738,10 @@ def do_rejoin():
 
     print(c("\n  Cleaning old node entries from cluster..."))
     for name, _ in all_nodes:
-        run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl delete node {name} 2>/dev/null || true"', capture=True)
+        run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl delete node {name} 2>/dev/null || true"', capture=True)
 
     print(c("  Restarting k3s server..."))
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo systemctl restart k3s"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo systemctl restart k3s"')
     print("  Waiting 30s for k3s to restart...")
     time.sleep(30)
 
@@ -749,11 +749,11 @@ def do_rejoin():
         divider(f"Rejoining {name} ({ip})")
         if not wait_for_ssh(ip, timeout=60):
             print(r(f"  SSH unavailable for {name} — skipping")); continue
-        run(f'ssh {SSH_OPTS} andy@{ip} "sudo rm -f /etc/rancher/node/password"', capture=True)
-        run(f'ssh {SSH_OPTS} andy@{ip} "sudo systemctl stop k3s-agent 2>/dev/null || true"', capture=True)
+        run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo rm -f /etc/rancher/node/password"', capture=True)
+        run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo systemctl stop k3s-agent 2>/dev/null || true"', capture=True)
         join_k3s(ip, name)
 
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
     update_ansible_inventory()
     print(g("\n  Rejoin complete."))
 
@@ -785,7 +785,7 @@ def do_safe_startup():
     # wait for k3s API to be ready
     print(y("  Waiting for k3s API..."))
     for _ in range(24):
-        res = run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes --no-headers 2>/dev/null"', capture=True)
+        res = run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes --no-headers 2>/dev/null"', capture=True)
         if res.returncode == 0 and res.stdout.strip():
             break
         time.sleep(5)
@@ -799,17 +799,17 @@ def do_safe_startup():
     for wname, wip in _all_worker_nodes():
         if not wait_for_ssh(wip, timeout=10):
             print(dim(f"  {wname}: SSH unavailable — skipping")); continue
-        existing = run(f'ssh {SSH_OPTS} andy@{wip} "cat /etc/rancher/k3s/registries.yaml 2>/dev/null"', capture=True).stdout.strip()
+        existing = run(f'ssh {SSH_OPTS} labadmin@{wip} "cat /etc/rancher/k3s/registries.yaml 2>/dev/null"', capture=True).stdout.strip()
         if "192.168.122.218:30500" in existing:
             print(g(f"  {wname}: registries.yaml OK"))
         else:
-            run(f'ssh {SSH_OPTS} andy@{wip} "sudo mkdir -p /etc/rancher/k3s && echo \'{REGISTRIES_YAML}\' | sudo tee /etc/rancher/k3s/registries.yaml > /dev/null"', capture=True)
+            run(f'ssh {SSH_OPTS} labadmin@{wip} "sudo mkdir -p /etc/rancher/k3s && echo \'{REGISTRIES_YAML}\' | sudo tee /etc/rancher/k3s/registries.yaml > /dev/null"', capture=True)
             print(y(f"  {wname}: registries.yaml restored — will restart k3s-agent"))
             workers_needing_restart.append((wname, wip))
 
     if workers_needing_restart:
         for wname, wip in workers_needing_restart:
-            run(f'ssh {SSH_OPTS} andy@{wip} "sudo systemctl restart k3s-agent"', capture=True)
+            run(f'ssh {SSH_OPTS} labadmin@{wip} "sudo systemctl restart k3s-agent"', capture=True)
             print(g(f"  {wname}: k3s-agent restarted"))
         print(y("  Waiting 15s for agents to rejoin..."))
         time.sleep(15)
@@ -821,11 +821,11 @@ def do_safe_startup():
     apps = [("trengo-search", 1), ("trengo-search-staging", 1)]
     for deploy, desired in apps:
         current = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+            f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
             f'"sudo k3s kubectl get deployment {deploy} -n default --no-headers 2>/dev/null | awk \'{{print $2}}\'"',
             capture=True).stdout.strip()
         if current == f"0/{desired}" or current.startswith("0/"):
-            run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment {deploy} --replicas={desired} -n default"', capture=True)
+            run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment {deploy} --replicas={desired} -n default"', capture=True)
             print(g(f"  {deploy} → {desired} replica(s)"))
         elif current:
             print(g(f"  {deploy}: already at {current} — no change"))
@@ -861,7 +861,7 @@ def do_safe_shutdown():
     if wait_for_ssh(K3S_CONTROL_IP, timeout=15):
         for deploy in ["trengo-search", "trengo-search-staging"]:
             res = run(
-                f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+                f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
                 f'"sudo k3s kubectl scale deployment {deploy} --replicas=0 -n default 2>/dev/null"',
                 capture=True)
             if res.returncode == 0:
@@ -879,7 +879,7 @@ def do_safe_shutdown():
         if not wait_for_ssh(wip, timeout=10):
             print(y(f"  {wname} SSH unavailable — will force-shutdown VM later")); continue
         print(y(f"  {wname}: stopping k3s-agent..."))
-        run(f'ssh {SSH_OPTS} andy@{wip} "sudo systemctl stop k3s-agent 2>/dev/null"', capture=True)
+        run(f'ssh {SSH_OPTS} labadmin@{wip} "sudo systemctl stop k3s-agent 2>/dev/null"', capture=True)
         print(g(f"  {wname}: k3s-agent stopped"))
 
     # ── 3. Stop k3s-agent on infra ────────────────────────────────
@@ -887,7 +887,7 @@ def do_safe_shutdown():
     if states.get("k3s-infra", False):
         if wait_for_ssh(K3S_INFRA_IP, timeout=10):
             print(y("  k3s-infra: stopping k3s-agent (pods get 30s graceful window)..."))
-            run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "sudo systemctl stop k3s-agent 2>/dev/null"',
+            run(f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} "sudo systemctl stop k3s-agent 2>/dev/null"',
                 capture=True)
             print(g("  k3s-infra: k3s-agent stopped"))
         else:
@@ -900,7 +900,7 @@ def do_safe_shutdown():
     if states.get("k3s-control", False):
         if wait_for_ssh(K3S_CONTROL_IP, timeout=10):
             print(y("  stopping k3s server..."))
-            run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo systemctl stop k3s 2>/dev/null"',
+            run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo systemctl stop k3s 2>/dev/null"',
                 capture=True)
             print(g("  k3s server stopped"))
         else:
@@ -941,7 +941,7 @@ def do_safe_shutdown():
 def do_status():
     divider("CLUSTER STATUS")
     print(c("\n  K3s Nodes"))
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
     print(c("\n  Terraform Workers"))
     vm_count = get_vm_count()
     print(f"  Terraform vm_count: {vm_count}")
@@ -972,7 +972,7 @@ def do_nuke_test():
 
     divider("Step 1/4 -- Scaling trengo-search to 0")
     result = run(
-        f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas=0 -n default"',
+        f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas=0 -n default"',
         capture=True
     )
     if result.returncode != 0:
@@ -981,7 +981,7 @@ def do_nuke_test():
 
     time.sleep(3)
     pods = run(
-        f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep trengo"',
+        f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get pods -n default --no-headers 2>/dev/null | grep trengo"',
         capture=True
     ).stdout.strip()
     if pods:
@@ -997,7 +997,7 @@ def do_nuke_test():
         elapsed = i * 10
         print(f"  [{elapsed}s] checking Alertmanager...", end='\r', flush=True)
         result = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "curl -s http://localhost:30093/api/v2/alerts?active=true"',
+            f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "curl -s http://localhost:30093/api/v2/alerts?active=true"',
             capture=True
         )
         if "TrengoAppDown" in result.stdout:
@@ -1017,7 +1017,7 @@ def do_nuke_test():
 
     divider("Step 3/4 -- Restoring trengo-search")
     result = run(
-        f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas=1 -n default"',
+        f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl scale deployment trengo-search --replicas=1 -n default"',
         capture=True
     )
     if result.returncode != 0:
@@ -1027,7 +1027,7 @@ def do_nuke_test():
     print(dim("  Waiting for pod to be ready..."))
     for i in range(12):
         res = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get pods -n default --no-headers | grep trengo | grep Running"',
+            f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get pods -n default --no-headers | grep trengo | grep Running"',
             capture=True
         )
         if res.stdout.strip():
@@ -1043,7 +1043,7 @@ def do_nuke_test():
         elapsed = i * 10
         print(f"  [{elapsed}s] checking Alertmanager...", end='\r', flush=True)
         result = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "curl -s http://localhost:30093/api/v2/alerts?active=true"',
+            f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "curl -s http://localhost:30093/api/v2/alerts?active=true"',
             capture=True
         )
         if "TrengoAppDown" not in result.stdout:
@@ -1069,7 +1069,7 @@ def do_nuke_test():
 # ─────────────────────────────────────────────────────────────
 def get_infra_ram():
     res = run(
-        f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} '
+        f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} '
         '"python3 -c \\"import subprocess; r=subprocess.check_output([\'free\']).decode().split()[7:13]; print(int((int(r[1])-int(r[5]))/int(r[1])*100))\\""',
         capture=True
     )
@@ -1084,7 +1084,7 @@ def wait_for_alert(alert_name, timeout_s=180, interval=10):
         mem = get_infra_ram()
         print(f"  [{elapsed}s] RAM: {y(str(mem)+'%')} -- waiting for {c(alert_name)}...", end='\r', flush=True)
         result = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+            f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
             '"curl -s http://localhost:30093/api/v2/alerts?active=true"',
             capture=True
         )
@@ -1099,7 +1099,7 @@ def wait_for_resolved(alert_name, timeout_s=180, interval=10):
         elapsed = i * interval
         mem = get_infra_ram()
         stress = run(
-            f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "pgrep -c stress-ng 2>/dev/null || echo 0"',
+            f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} "pgrep -c stress-ng 2>/dev/null || echo 0"',
             capture=True
         ).stdout.strip()
         stress_gone = stress == "0"
@@ -1110,7 +1110,7 @@ def wait_for_resolved(alert_name, timeout_s=180, interval=10):
             end='\r', flush=True
         )
         result = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+            f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
             '"curl -s http://localhost:30093/api/v2/alerts?active=true"',
             capture=True
         )
@@ -1140,15 +1140,15 @@ def do_ram_nuke_test():
         print("  Cancelled."); return
 
     divider("Baseline -- k3s-infra memory")
-    run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "free -h"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} "free -h"')
 
     run(
-        f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} '
+        f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} '
         '"sudo apt-get install -y stress-ng -qq 2>/dev/null"',
         capture=True
     )
 
-    mem_raw = run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "free -m"', capture=True).stdout.strip().splitlines()
+    mem_raw = run(f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} "free -m"', capture=True).stdout.strip().splitlines()
     mem_line = [x for x in mem_raw if x.startswith('Mem:')][0].split()
     total_mb  = int(mem_line[1])
     used_mb   = int(mem_line[2])
@@ -1166,7 +1166,7 @@ def do_ram_nuke_test():
 
     divider(f"Phase 1 -- Stressing to ~87%  ({phase1_mb}MB)")
     run(
-        f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} ' +
+        f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} ' +
         f'"nohup sudo stress-ng --vm 1 --vm-bytes {phase1_mb}M --timeout 300s > /tmp/stress1.log 2>&1 & echo started"',
         capture=True
     )
@@ -1176,16 +1176,16 @@ def do_ram_nuke_test():
     fired = wait_for_alert("NodeMemoryHigh", timeout_s=180)
     if fired < 0:
         print(r("\n  NodeMemoryHigh did not fire -- aborting"))
-        run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
+        run(f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
         return
 
     print(y("\n  Check #incidents in Slack -- CRITICAL | NodeMemoryHigh should be there"))
     input(c("  Press Enter when you have confirmed the Slack alert to start Phase 2..."))
 
     print(dim("  Killing Phase 1 stress to free headroom..."))
-    run(f"ssh {SSH_OPTS} andy@{K3S_INFRA_IP} 'sudo kill -9 $(pgrep -f stress-ng) 2>/dev/null || true'", capture=True)
+    run(f"ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} 'sudo kill -9 $(pgrep -f stress-ng) 2>/dev/null || true'", capture=True)
     time.sleep(3)
-    mem_raw2  = run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "free -m"', capture=True).stdout.strip().splitlines()
+    mem_raw2  = run(f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} "free -m"', capture=True).stdout.strip().splitlines()
     mem_line2 = [x for x in mem_raw2 if x.startswith('Mem:')][0].split()
     total_mb2 = int(mem_line2[1])
     used_mb2  = int(mem_line2[2])
@@ -1194,7 +1194,7 @@ def do_ram_nuke_test():
     print(f"  {bold('Phase 2 state:')} {y(str(used_mb2))}MB used ({y(str(current2)+'%')}) -- stressing {g(str(phase2_mb))}MB -> 93%")
     divider(f"Phase 2 -- Fresh stress to ~93%  ({phase2_mb}MB)")
     run(
-        f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} ' +
+        f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} ' +
         f'"nohup sudo stress-ng --vm 1 --vm-bytes {phase2_mb}M --timeout 60s > /tmp/stress2.log 2>&1 & echo started"',
         capture=True
     )
@@ -1207,7 +1207,7 @@ def do_ram_nuke_test():
     else:
         print(y("  Auto-remediation triggered -- killing stress-ng + restarting gitlab..."))
         run(
-            f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} '
+            f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} '
             '"sudo kill -9 $(pgrep -f stress-ng) 2>/dev/null; sudo gitlab-ctl restart 2>/dev/null; echo done"',
             capture=True
         )
@@ -1220,10 +1220,10 @@ def do_ram_nuke_test():
         print(g("  Check #incidents -- RESOLVED messages should be in Slack"))
     else:
         print(r("  Alerts did not resolve -- cleaning up manually"))
-        run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
+        run(f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} "sudo pkill -f stress-ng 2>/dev/null || true"', capture=True)
 
     print(c("\n  Final k3s-infra memory:"))
-    run(f'ssh {SSH_OPTS} andy@{K3S_INFRA_IP} "free -h"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_INFRA_IP} "free -h"')
 
     divider("RAM Nuke Test Complete")
     print(f"  {bold('Pipeline tested:')}")
@@ -1312,15 +1312,15 @@ def do_service_links():
 
   {bold(c('KUBEADM CLUSTER'))}
   {b('-'*56)}
-  {bold('kubeadm-control')}  {c('ssh andy@192.168.122.240')}
-  {bold('kubeadm-worker-1')} {c('ssh andy@192.168.122.241')}
+  {bold('kubeadm-control')}  {c('ssh labadmin@192.168.122.240')}
+  {bold('kubeadm-worker-1')} {c('ssh labadmin@192.168.122.241')}
 
   {bold(c('NODE SSH ACCESS'))}
   {b('-'*56)}
-  {bold('k3s-control')}      {c('ssh andy@192.168.122.218')}
-  {bold('k3s-infra')}        {c('ssh andy@192.168.122.230')}   {dim('(monitoring stack)')}
-  {bold('k3s-worker-1')}     {c('ssh andy@192.168.122.219')}
-  {bold('ci-runner')}        {c('ssh andy@192.168.122.220')}   {dim('(Runner only — GitLab moved to k3s-infra)')}
+  {bold('k3s-control')}      {c('ssh labadmin@192.168.122.218')}
+  {bold('k3s-infra')}        {c('ssh labadmin@192.168.122.230')}   {dim('(monitoring stack)')}
+  {bold('k3s-worker-1')}     {c('ssh labadmin@192.168.122.219')}
+  {bold('ci-runner')}        {c('ssh labadmin@192.168.122.220')}   {dim('(Runner only — GitLab moved to k3s-infra)')}
 """)
 
 # ─────────────────────────────────────────────────────────────

@@ -67,7 +67,7 @@ kubectl get pods -A
 The NFS server runs on k3s-infra (.230) at `/data`. If you have an external backup:
 ```bash
 # Restore NFS data from backup
-ssh andy@192.168.122.230 sudo rsync -av /backup/nfs-data/ /data/
+ssh labadmin@192.168.122.230 sudo rsync -av /backup/nfs-data/ /data/
 ```
 
 ## Step 5 — Re-apply Kubernetes manifests

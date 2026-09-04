@@ -52,10 +52,10 @@ fi
 
 # Always apply the manifest from the correct local path
 info "Applying Vaultwarden manifest..."
-ssh -o StrictHostKeyChecking=no andy@192.168.122.218 "cat > /home/andy/vaultwarden.yaml" < "$MANIFEST"
-ssh -o StrictHostKeyChecking=no andy@192.168.122.218 "
-  sudo k3s kubectl apply -f /home/andy/vaultwarden.yaml
-  rm /home/andy/vaultwarden.yaml
+ssh -o StrictHostKeyChecking=no labadmin@192.168.122.218 "cat > /home/labadmin/vaultwarden.yaml" < "$MANIFEST"
+ssh -o StrictHostKeyChecking=no labadmin@192.168.122.218 "
+  sudo k3s kubectl apply -f /home/labadmin/vaultwarden.yaml
+  rm /home/labadmin/vaultwarden.yaml
 "
 success "Vaultwarden deployed at $VAULTWARDEN_URL"
 

@@ -16,7 +16,7 @@ k3s cluster, leaving a 4-node cluster: `k3s-control`, `k3s-infra`,
 - Terraform is run from the `terraform/` directory; state lives there.
 - `kubectl` is run from this machine. If you do not have a local kubeconfig,
   prefix node commands with
-  `ssh andy@192.168.122.218 "sudo k3s kubectl ..."` instead. Examples below
+  `ssh labadmin@192.168.122.218 "sudo k3s kubectl ..."` instead. Examples below
   use `kubectl` directly — adapt as needed.
 - This branch already removed `k3s-worker-3` from the Ansible inventory; apply
   this branch (merge/checkout) before running so config matches reality.
@@ -99,7 +99,7 @@ kubectl get nodes                    # verify: 4 nodes remain, all Ready
 
 Rollback (before VM is destroyed): the VM still exists and runs `k3s-agent`.
 Restart the agent to let it re-register:
-`ssh andy@192.168.122.222 "sudo systemctl restart k3s-agent"`, then
+`ssh labadmin@192.168.122.222 "sudo systemctl restart k3s-agent"`, then
 `kubectl get nodes` until `k3s-worker-3` is Ready again, then `uncordon`.
 
 ## Step 4 — Destroy the VM with Terraform

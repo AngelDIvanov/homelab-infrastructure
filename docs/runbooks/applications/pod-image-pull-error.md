@@ -19,7 +19,7 @@
   ```
 - [ ] Is registries.yaml configured on the affected node?
   ```bash
-  ssh andy@192.168.122.<node-ip> cat /etc/rancher/k3s/registries.yaml
+  ssh labadmin@192.168.122.<node-ip> cat /etc/rancher/k3s/registries.yaml
   ```
 
 ## Recovery Steps
@@ -43,14 +43,14 @@ kubectl get pods -n registry -w
 
 ### registries.yaml missing on node
 ```bash
-ssh andy@192.168.122.<node-ip> sudo mkdir -p /etc/rancher/k3s
-ssh andy@192.168.122.<node-ip> sudo tee /etc/rancher/k3s/registries.yaml <<EOF
+ssh labadmin@192.168.122.<node-ip> sudo mkdir -p /etc/rancher/k3s
+ssh labadmin@192.168.122.<node-ip> sudo tee /etc/rancher/k3s/registries.yaml <<EOF
 mirrors:
   "192.168.122.218:30500":
     endpoint:
       - "http://192.168.122.218:30500"
 EOF
-ssh andy@192.168.122.<node-ip> sudo systemctl restart k3s-agent
+ssh labadmin@192.168.122.<node-ip> sudo systemctl restart k3s-agent
 ```
 
 ## ⚠️ Known Issue: Registry Loses Images on Restart

@@ -57,7 +57,7 @@ spec:
                   ssh -i /root/.ssh/id_rsa \
                       -o StrictHostKeyChecking=no \
                       -o ConnectTimeout=10 \
-                      andy@192.168.122.218 \
+                      labadmin@192.168.122.218 \
                       "sudo sqlite3 /var/lib/rancher/k3s/server/db/state.db '.backup /tmp/k3s-snap.db' && sudo cat /tmp/k3s-snap.db && sudo rm /tmp/k3s-snap.db" \
                       > "$SNAPSHOT_FILE"
 

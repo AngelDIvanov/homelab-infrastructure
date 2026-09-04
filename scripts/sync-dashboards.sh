@@ -23,7 +23,7 @@ for file in "${!DASHBOARD_MAP[@]}"; do
     filepath="$DASHBOARD_DIR/$file"
     if [ -f "$filepath" ]; then
         printf "  %-45s" "$file"
-        result=$(ssh $SSH_OPTS andy@$K3S_CONTROL "sudo k3s kubectl apply -f -" < "$filepath" 2>&1)
+        result=$(ssh $SSH_OPTS labadmin@$K3S_CONTROL "sudo k3s kubectl apply -f -" < "$filepath" 2>&1)
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}OK applied${NC}"
         else
@@ -39,7 +39,7 @@ for json in "$DASHBOARD_DIR"/*.json; do
     name=$(basename "$json" .json)
     cm_name="grafana-dashboard-$(echo $name | tr '_' '-')"
     printf "  %-45s" "$name.json"
-    result=$(ssh $SSH_OPTS andy@$K3S_CONTROL \
+    result=$(ssh $SSH_OPTS labadmin@$K3S_CONTROL \
         "sudo k3s kubectl create configmap $cm_name \
         --from-file=$name.json=/dev/stdin \
         -n monitoring \
@@ -54,5 +54,5 @@ for json in "$DASHBOARD_DIR"/*.json; do
 done
 
 echo -e "\n${GREEN}OK Done — restart Grafana pod to reload dashboards${NC}"
-ssh $SSH_OPTS andy@$K3S_CONTROL "sudo k3s kubectl rollout restart deployment monitoring-grafana -n monitoring" 2>/dev/null
+ssh $SSH_OPTS labadmin@$K3S_CONTROL "sudo k3s kubectl rollout restart deployment monitoring-grafana -n monitoring" 2>/dev/null
 echo -e "${GREEN}OK Grafana restarting${NC}\n"

@@ -16,15 +16,15 @@
   ```
 - [ ] Can you SSH to the node?
   ```bash
-  ssh andy@192.168.122.<node-ip>
+  ssh labadmin@192.168.122.<node-ip>
   ```
 - [ ] Is k3s-agent running?
   ```bash
-  ssh andy@192.168.122.<node-ip> sudo systemctl status k3s-agent
+  ssh labadmin@192.168.122.<node-ip> sudo systemctl status k3s-agent
   ```
 - [ ] Are there agent errors?
   ```bash
-  ssh andy@192.168.122.<node-ip> sudo journalctl -u k3s-agent -n 30 --no-pager
+  ssh labadmin@192.168.122.<node-ip> sudo journalctl -u k3s-agent -n 30 --no-pager
   ```
 
 ## Node IP Reference
@@ -45,16 +45,16 @@ virsh start k3s-worker-1   # or k3s-worker-2 / k3s-infra
 ### Step 2 — Restart k3s-agent if VM is running but node NotReady
 ```bash
 # Replace <ip> with 192.168.122.219 (worker-1) or 192.168.122.221 (worker-2)
-ssh andy@<ip> sudo systemctl restart k3s-agent
+ssh labadmin@<ip> sudo systemctl restart k3s-agent
 # Watch node come back:
 kubectl get nodes -w
 ```
 
 ### Step 3 — If agent won't start (certificate or token issues)
 ```bash
-ssh andy@<ip> sudo systemctl stop k3s-agent
-ssh andy@<ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt
-ssh andy@<ip> sudo systemctl start k3s-agent
+ssh labadmin@<ip> sudo systemctl stop k3s-agent
+ssh labadmin@<ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt
+ssh labadmin@<ip> sudo systemctl start k3s-agent
 # If still failing with "invalid token format":
 #   Check /etc/systemd/system/k3s-agent.service.env on the node
 #   Token must match: sudo cat /var/lib/rancher/k3s/server/node-token (from k3s-control)

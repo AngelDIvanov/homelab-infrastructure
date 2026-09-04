@@ -105,7 +105,7 @@ def wait_for_ssh(ip, timeout=120):
     print(y(f"  waiting for SSH on {ip}..."))
     start = time.time()
     while time.time() - start < timeout:
-        if run(f"ssh {SSH_OPTS} andy@{ip} 'echo ok' 2>/dev/null",
+        if run(f"ssh {SSH_OPTS} labadmin@{ip} 'echo ok' 2>/dev/null",
                capture=True).returncode == 0:
             print(g(f"  SSH ready on {ip}"))
             return True
@@ -115,14 +115,14 @@ def wait_for_ssh(ip, timeout=120):
 
 def join_k3s(ip, name):
     print(y(f"  joining {name}..."))
-    cmd = (f'ssh {SSH_OPTS} andy@{ip} '
+    cmd = (f'ssh {SSH_OPTS} labadmin@{ip} '
            f'"curl -sfL https://get.k3s.io | K3S_URL={K3S_URL} K3S_TOKEN={K3S_TOKEN} sh -"')
     if run(cmd).returncode != 0:
         print(r(f"  failed to install k3s on {name}"))
         return False
-    run(f'ssh {SSH_OPTS} andy@{ip} "sudo systemctl restart k3s-agent"', capture=True)
+    run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo systemctl restart k3s-agent"', capture=True)
     time.sleep(5)
-    res = run(f'ssh {SSH_OPTS} andy@{ip} "systemctl is-active k3s-agent"', capture=True)
+    res = run(f'ssh {SSH_OPTS} labadmin@{ip} "systemctl is-active k3s-agent"', capture=True)
     if res.stdout.strip() == "active":
         print(g(f"  {name} joined"))
         return True
@@ -131,16 +131,16 @@ def join_k3s(ip, name):
 
 def drain_node(name):
     print(y(f"  draining {name}..."))
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
         f'"sudo k3s kubectl drain {name} --ignore-daemonsets --delete-emptydir-data --force 2>/dev/null || true"')
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
         f'"sudo k3s kubectl delete node {name} 2>/dev/null || true"')
     print(g(f"  {name} removed"))
 
 def update_inventory():
     vm_count = get_vm_count()
     content  = """[all:vars]
-ansible_user=andy
+ansible_user=labadmin
 ansible_ssh_private_key_file=~/.ssh/id_rsa
 
 [control_plane]
@@ -166,7 +166,7 @@ workers
 def sync_images(ip, name):
     print(y(f"  syncing images to {name}..."))
     res = run(
-        f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+        f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
         f'"sudo k3s ctr images list | grep trengo-search | head -1 | awk \'{{print $1}}\'"',
         capture=True
     )
@@ -174,10 +174,10 @@ def sync_images(ip, name):
         print(y("  no trengo-search image found"))
         return
     image = res.stdout.strip()
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s ctr images export /tmp/sync.tar {image}"')
-    run(f'scp {SSH_OPTS} andy@{K3S_CONTROL_IP}:/tmp/sync.tar /tmp/')
-    run(f'scp {SSH_OPTS} /tmp/sync.tar andy@{ip}:/tmp/')
-    run(f'ssh {SSH_OPTS} andy@{ip} "sudo k3s ctr images import /tmp/sync.tar"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s ctr images export /tmp/sync.tar {image}"')
+    run(f'scp {SSH_OPTS} labadmin@{K3S_CONTROL_IP}:/tmp/sync.tar /tmp/')
+    run(f'scp {SSH_OPTS} /tmp/sync.tar labadmin@{ip}:/tmp/')
+    run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo k3s ctr images import /tmp/sync.tar"')
     print(g(f"  synced to {name}"))
 
 def upscale():
@@ -207,7 +207,7 @@ def upscale():
 
     for i in range(12):
         res = run(
-            f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+            f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
             f'"sudo k3s kubectl get node {new_name} --no-headers 2>/dev/null | grep -q Ready"',
             capture=True
         )
@@ -261,7 +261,7 @@ def ansible_menu():
             print(r("  invalid"))
 
 def show_status():
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
     print()
     vm_count = get_vm_count()
     print(f"  terraform workers: {vm_count}")
@@ -291,22 +291,22 @@ def rejoin():
         return
 
     for _, name, _ in workers:
-        run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} '
+        run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} '
             f'"sudo k3s kubectl delete node {name} 2>/dev/null || true"', capture=True)
 
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo systemctl restart k3s"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo systemctl restart k3s"')
     print(y("  waiting 30s for k3s..."))
     time.sleep(30)
 
     for _, name, ip in workers:
         if not wait_for_ssh(ip, timeout=60):
             print(r(f"  SSH unavailable for {name}")); continue
-        run(f'ssh {SSH_OPTS} andy@{ip} "sudo rm -f /etc/rancher/node/password"', capture=True)
-        run(f'ssh {SSH_OPTS} andy@{ip} "sudo systemctl stop k3s-agent 2>/dev/null || true"', capture=True)
+        run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo rm -f /etc/rancher/node/password"', capture=True)
+        run(f'ssh {SSH_OPTS} labadmin@{ip} "sudo systemctl stop k3s-agent 2>/dev/null || true"', capture=True)
         join_k3s(ip, name)
 
     time.sleep(30)
-    run(f'ssh {SSH_OPTS} andy@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
+    run(f'ssh {SSH_OPTS} labadmin@{K3S_CONTROL_IP} "sudo k3s kubectl get nodes -o wide"')
     update_inventory()
     print(g("\n  rejoin complete"))
 

@@ -51,7 +51,7 @@ spec:
                   ssh -i /root/.ssh/id_rsa \
                       -o StrictHostKeyChecking=no \
                       -o ConnectTimeout=10 \
-                      andy@192.168.122.230 \
+                      labadmin@192.168.122.230 \
                       "sudo gitlab-backup create STRATEGY=copy BACKUP=auto 2>&1"
 
                   echo "[$(date)] GitLab backup complete."
@@ -59,7 +59,7 @@ spec:
                   # List current backups on the remote host
                   ssh -i /root/.ssh/id_rsa \
                       -o StrictHostKeyChecking=no \
-                      andy@192.168.122.230 \
+                      labadmin@192.168.122.230 \
                       "sudo ls -lht /var/opt/gitlab/backups/*.tar 2>/dev/null | head -10"
               volumeMounts:
                 - name: ssh-key
