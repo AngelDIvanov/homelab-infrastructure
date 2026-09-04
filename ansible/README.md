@@ -68,7 +68,7 @@ and then, in order:
   with verified TLS instead of `--kubelet-insecure-tls`.
 - **Local registry** — applies `kubernetes/deployments/local-registry.yaml`
   unchanged (NodePort 30500, image pinned by digest) plus its NFS volume and
-  claim. Every node's containerd is configured to pull and push from
+  claim. Every node's containerd is configured to pull from
   `192.168.122.240:30500` as plain HTTP via `certs.d`.
 
 All chart versions are pinned in `inventory/group_vars/kubeadm_all.yml`.

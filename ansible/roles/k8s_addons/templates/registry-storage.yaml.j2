@@ -16,7 +16,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: registry-data
-  namespace: registry
+  namespace: "{{ k8s_addons_registry_namespace }}"
 spec:
   accessModes:
     - ReadWriteOnce
