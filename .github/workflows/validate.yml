@@ -43,6 +43,11 @@ jobs:
           pipelinecomponents/yamllint@sha256:82f082414bad17ec04f4d271262a6dcaf64883bb4f1ce73923380125af8b94ee
           yamllint -d '{extends: relaxed, rules: {line-length: disable, colons: disable, empty-lines: disable}}' .
 
+      - name: Lint Ansible
+        run: >-
+          docker run --rm -v "$PWD:/work:ro" -w /work/ansible
+          pipelinecomponents/ansible-lint@sha256:e2b0e8025135df396d0e4f08f66e8083bee7d489df7deb259fec9828bd3d49cd
+
       - name: Check Terraform formatting
         run: |
           image=hashicorp/terraform@sha256:386b7bff108f9fd3b79a2e0110190c162b5e4aebf26afe3eef028fd89532c17e
