@@ -72,38 +72,6 @@ webhooks/tokens, k3s join tokens, private key blocks, AWS keys, and Google API
 keys. If any branch tip tracks those files, remove them from that branch before
 publishing.
 
-## Local operational memory
-
-If Angel asks to rotate the k3s token, run this local script:
-
-```bash
-bash ~/k3s-rotate-token.sh
-```
-
-Treat this as a one-prompt trigger for phrases like "rotate k3s token", "k3s token rotation", or "run k3s rotate token". Do not print, echo, log, or summarize any token values from the script output. Report only success/failure, changed components, and safe next steps.
-
-GitHub CLI is authenticated on this host:
-
-```text
-gh auth status completed successfully for github.com
-git protocol: https
-logged in account: AngelDIvanov
-```
-
-Use `gh` for GitHub operations when helpful, but never print `gh auth token`, OAuth tokens, PATs, or credential helper contents.
-
-Session summary learned from `~/HOMELAB-SUMMARY-2026-06-14.md`:
-
-- Public repo: `github.com/AngelDIvanov/homelab-infrastructure` is public after secret cleanup/history verification.
-- GitHub secret scanning and push protection are enabled for `homelab-infrastructure`.
-- k3s join token was rotated cluster-wide with `~/k3s-rotate-token.sh`; old token revoked; all 4 nodes verified Ready afterward.
-- Keep `/var/lib/rancher/k3s/server/token.bak-rotate` on control if any pre-rotation k3s snapshot might be restored, because it may be needed to decrypt older snapshots.
-- Agent `.env` files contain the new k3s token, so next k3s stop/start should come up clean.
-- `GITLAB_TOKEN` in shell env or `.bashrc` may still be the revoked old PAT; replace it before future GitLab API work.
-- Helper scripts `~/k3s-rotate-token.sh` and `~/close-trengo-mrs.sh` are kept as local runbooks and should not contain secrets.
-- Trengo cleanup was completed: MRs !50 and !52 closed, remote `design/kimi` and `design/gpt` removed, local design worktrees/branches removed, winner was Opus MR !51.
-- When Angel is using z-ai, use the ZAI Coding Plan subscription (not API key pay-per-token).
-
 ## Code style
 
 - No emojis in code, comments, or commit messages unless asked.

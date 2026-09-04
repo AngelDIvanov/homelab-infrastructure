@@ -14,7 +14,7 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 - **GitOps CI/CD** — lint, validate (kubeconform + promtool), security scan (gitleaks + kubesec), deploy, smoke test stages
 - **Automated backups** — k3s SQLite snapshots every 12h, Vaultwarden SQLite hot-copy daily, GitLab full backup daily; all retained with configurable history
 - **Security hardening** — NetworkPolicy default-deny, least-privilege ServiceAccounts, immutable CI tool images, PodDisruptionBudgets, and pod anti-affinity
-- **Self-healing automation** — crashloop recovery cronjobs, health check scripts with auto-fix
+- **Self-healing automation** — crashloop recovery cronjobs, health check scripts, read-only by default with explicit `--fix` / `--restart` / `--reboot` modes
 - **Claude AI auto-healing** — Alertmanager fires → Claude reads live cluster state → diagnoses root cause → one-click Approve in Slack executes the fix automatically
 - **Runbook library** — 13 runbooks covering control plane, nodes, storage, applications, monitoring, and full disaster recovery with RTO/RPO targets
 - **Custom Python control plane** — TUI and menu-driven interface for full lab management
