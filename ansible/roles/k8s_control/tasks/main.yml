@@ -1,12 +1,17 @@
 ---
-- name: Install the Python client for the kubernetes.core modules
+- name: Install pip for the kubernetes.core modules
   ansible.builtin.apt:
     name:
-      - python3-kubernetes
+      - python3-pip
       - python3-yaml
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+- name: Install the Python kubernetes client required by kubernetes.core
+  ansible.builtin.pip:
+    name: "kubernetes>=24.2,<34"
+    state: present
 
 - name: Create the kubeadm configuration directory
   ansible.builtin.file:
@@ -41,7 +46,7 @@
 
 - name: Create the kubeconfig directory for the ansible user
   ansible.builtin.file:
-    path: "{{ ansible_env.HOME }}/.kube"
+    path: "/home/{{ ansible_user }}/.kube"
     state: directory
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
@@ -50,7 +55,7 @@
 - name: Install the admin kubeconfig for the ansible user
   ansible.builtin.copy:
     src: /etc/kubernetes/admin.conf
-    dest: "{{ ansible_env.HOME }}/.kube/config"
+    dest: "/home/{{ ansible_user }}/.kube/config"
     remote_src: true
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
