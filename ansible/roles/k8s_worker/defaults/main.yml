@@ -2,3 +2,5 @@
 k8s_worker_kubeconfig: /etc/kubernetes/admin.conf
 k8s_worker_ready_retries: 60
 k8s_worker_ready_delay: 5
+# Used only when the control play did not run in this invocation
+k8s_worker_join_token_ttl: "{{ hostvars[groups['kubeadm_control'][0]].k8s_control_join_token_ttl | default('30m') }}"
