@@ -96,6 +96,13 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    # kube-apiserver calls the prometheus-operator admission webhook
+    - from:
+        - ipBlock:
+            cidr: 192.168.122.240/32
+      ports:
+        - protocol: TCP
+          port: 10250
     # Allow Traefik to reach Grafana/Alertmanager dashboards
     - from:
         - namespaceSelector:
@@ -146,6 +153,8 @@ spec:
           port: 8080   # generic app metrics (pylab, ...)
         - protocol: TCP
           port: 8081
+        - protocol: TCP
+          port: 9153   # CoreDNS metrics
     # Fixed scrape targets on the kubeadm control node: API server, etcd,
     # scheduler and controller-manager have no pods/Endpoints to select.
     - to:
