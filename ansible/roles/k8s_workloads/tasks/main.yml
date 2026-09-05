@@ -19,3 +19,27 @@
       url: https://grafana.github.io/helm-charts
     - name: portainer
       url: https://portainer.github.io/k8s
+
+- name: Create the workload namespaces
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    api_version: v1
+    kind: Namespace
+    name: "{{ item }}"
+  loop: "{{ k8s_workloads_namespaces }}"
+
+- name: Copy the static NFS volume manifest to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../kubernetes/storage/nfs-static-volumes.yaml"
+    dest: "{{ k8s_workloads_manifest_dir }}/nfs-static-volumes.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply the static NFS volumes and claims
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/nfs-static-volumes.yaml"

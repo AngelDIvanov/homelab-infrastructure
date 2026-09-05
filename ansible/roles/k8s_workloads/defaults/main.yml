@@ -2,3 +2,8 @@
 k8s_workloads_kubeconfig: /etc/kubernetes/admin.conf
 k8s_workloads_manifest_dir: /etc/kubeadm/workloads
 k8s_workloads_helm_timeout: 10m
+k8s_workloads_namespaces:
+  - monitoring
+  - vaultwarden
+  - portainer
+  - pylab
