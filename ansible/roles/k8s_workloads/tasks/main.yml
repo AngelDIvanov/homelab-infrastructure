@@ -88,3 +88,40 @@
     apply: true
     src: "{{ item.path }}"
   loop: "{{ k8s_workloads_grafana_manifests.files | map(attribute='path') | sort }}"
+
+- name: Copy the Loki and Promtail values to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../monitoring/values/{{ item }}"
+    dest: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - loki.yaml
+    - promtail.yaml
+
+- name: Install Loki
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    release_name: loki
+    chart_ref: grafana/loki
+    chart_version: "{{ loki_chart_version }}"
+    release_namespace: monitoring
+    create_namespace: true
+    wait: true
+    timeout: "{{ k8s_workloads_helm_timeout }}"
+    values_files:
+      - "{{ k8s_workloads_manifest_dir }}/loki.yaml"
+
+- name: Install Promtail
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    release_name: promtail
+    chart_ref: grafana/promtail
+    chart_version: "{{ promtail_chart_version }}"
+    release_namespace: monitoring
+    create_namespace: true
+    wait: true
+    timeout: "{{ k8s_workloads_helm_timeout }}"
+    values_files:
+      - "{{ k8s_workloads_manifest_dir }}/promtail.yaml"
