@@ -64,6 +64,12 @@ default = true
 [[plugin]]
 name = "actionlint"
 
+# pytest asserts (B101) and dummy HMAC fixtures (B105/B106) are expected in
+# test files; bandit targets production code paths.
+[[exclude]]
+plugins = ["bandit"]
+file_patterns = ["tests/**"]
+
 [[plugin]]
 name = "bandit"
 
