@@ -8,7 +8,12 @@
 #   kubectl delete networkpolicy <name> -n <namespace>
 #
 # Namespaces covered: vaultwarden, registry, monitoring, pylab
-# DNS (port 53 UDP/TCP) is always allowed — required for service discovery.
+# Traefik runs in the `traefik` namespace (default ingress class).
+# DNS (port 53 UDP/TCP to kube-system) is always allowed — required for
+# service discovery via CoreDNS.
+# Every namespace below already has an ingress-isolating policy selecting
+# all pods, which is the default-deny ingress posture; no extra
+# default-deny objects are needed.
 
 # ── vaultwarden ───────────────────────────────────────────────────────────────
 # Only Traefik may reach Vaultwarden. No egress except DNS.
@@ -26,7 +31,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kube-system
+              kubernetes.io/metadata.name: traefik
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
@@ -36,7 +41,11 @@ spec:
         - protocol: TCP
           port: 3012  # WebSocket notifications
   egress:
-    - ports:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
@@ -61,7 +70,11 @@ spec:
         - protocol: TCP
           port: 5000
   egress:
-    - ports:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
@@ -71,7 +84,7 @@ spec:
 # ── monitoring ────────────────────────────────────────────────────────────────
 # Prometheus must scrape all namespaces (egress to any pod on metrics ports).
 # Grafana must reach Prometheus and Loki internally.
-# Alertmanager must reach Slack/GitLab (egress to internet on 443).
+# Alertmanager must reach the webhook receiver and the internet (egress 443).
 # Ingress: only Traefik (for dashboards) and intra-namespace.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -87,7 +100,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kube-system
+              kubernetes.io/metadata.name: traefik
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
@@ -107,7 +120,11 @@ spec:
     - Egress
   egress:
     # DNS
-    - ports:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
@@ -126,16 +143,34 @@ spec:
         - protocol: TCP
           port: 9093   # Alertmanager
         - protocol: TCP
-          port: 9100   # node-exporter
-        - protocol: TCP
-          port: 8080   # generic app metrics
+          port: 8080   # generic app metrics (pylab, ...)
         - protocol: TCP
           port: 8081
+    # Fixed scrape targets on the kubeadm control node: API server, etcd,
+    # scheduler and controller-manager have no pods/Endpoints to select.
+    - to:
+        - ipBlock:
+            cidr: 192.168.122.240/32
+      ports:
+        - protocol: TCP
+          port: 6443   # kube-apiserver
+        - protocol: TCP
+          port: 2381   # etcd metrics
+        - protocol: TCP
+          port: 10257  # controller-manager metrics
+        - protocol: TCP
+          port: 10259  # scheduler metrics
+    # Kubelet and node-exporter metrics run on the node network, so the
+    # lab subnet is the destination, not a pod or namespace selector.
+    - to:
+        - ipBlock:
+            cidr: 192.168.122.0/24
+      ports:
+        - protocol: TCP
+          port: 9100   # node-exporter
         - protocol: TCP
           port: 10250  # kubelet
-        - protocol: TCP
-          port: 10255
-    # Egress to internet: Slack webhooks and external APIs (port 443)
+    # Egress to internet: webhooks and external APIs (port 443)
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
@@ -164,13 +199,25 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kube-system
+              kubernetes.io/metadata.name: traefik
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
+    # Prometheus scrapes /metrics on the pods directly
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8080
   egress:
     # DNS
-    - ports:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
