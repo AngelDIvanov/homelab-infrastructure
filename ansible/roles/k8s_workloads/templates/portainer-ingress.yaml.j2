@@ -3,6 +3,9 @@ kind: Ingress
 metadata:
   name: portainer
   namespace: portainer
+  annotations:
+    # Portainer serves HTTPS only; Traefik skips verification of its self-signed certificate
+    traefik.ingress.kubernetes.io/service.serversscheme: "https"
 spec:
   ingressClassName: traefik
   rules:

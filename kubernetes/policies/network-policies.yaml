@@ -179,6 +179,8 @@ spec:
           port: 9100   # node-exporter
         - protocol: TCP
           port: 10250  # kubelet
+        - protocol: TCP
+          port: 10249  # kube-proxy metrics
     # Egress to internet: webhooks and external APIs (port 443)
     - to:
         - ipBlock:
