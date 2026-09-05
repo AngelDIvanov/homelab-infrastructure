@@ -2,16 +2,30 @@
 # Vaultwarden daily backup CronJob.
 #
 # What it does:
-#   1. SSHes to k3s-infra (.230) where the NFS share lives
-#   2. Copies the Vaultwarden SQLite database using sqlite3 .backup (safe hot copy)
-#   3. Stores timestamped backup under /data/backups/vaultwarden/ on the NFS server
-#   4. Retains last 30 backups (~1 month)
+#   1. Copies the Vaultwarden SQLite database using sqlite3 .backup (safe hot copy)
+#      straight from the NFS-backed vaultwarden-nfs claim mounted read-only
+#   2. Stores timestamped backups on the NFS-backed vaultwarden-backups claim
+#   3. Retains last 30 backups (~1 month)
 #
 # Restore:
 #   1. Scale down vaultwarden: kubectl scale deploy vaultwarden -n vaultwarden --replicas=0
 #   2. Copy backup to NFS: cp /data/backups/vaultwarden/<backup>.db /data/vaultwarden/db.sqlite3
 #   3. Scale back up:       kubectl scale deploy vaultwarden -n vaultwarden --replicas=1
 
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vaultwarden-backups
+  namespace: vaultwarden
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 2Gi
+
+---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -26,13 +40,6 @@ spec:
     spec:
       template:
         spec:
-          tolerations:
-            - key: node-role
-              operator: Equal
-              value: infra
-              effect: NoSchedule
-          nodeSelector:
-            node-role: infra
           restartPolicy: OnFailure
           containers:
             - name: backup
@@ -70,6 +77,5 @@ spec:
               persistentVolumeClaim:
                 claimName: vaultwarden-nfs
             - name: backup-storage
-              hostPath:
-                path: /data/backups
-                type: DirectoryOrCreate
+              persistentVolumeClaim:
+                claimName: vaultwarden-backups
