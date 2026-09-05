@@ -127,6 +127,9 @@ scripts/
   check-lab.sh      read-only health check with explicit remediation modes
   deploy.sh         build and push the trengo-search app
 
+tests/
+  test_webhook.py   unit tests — command allowlist/blocklist, Slack signature verification
+
 terraform/          k3s worker VMs (dynamic scale)
 terraform-kubeadm/  standalone kubeadm cluster (separate experiment, not connected to main lab)
 ```
