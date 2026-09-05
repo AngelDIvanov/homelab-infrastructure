@@ -37,6 +37,12 @@ jobs:
       - name: Compile Python
         run: python3 -m compileall -q scripts
 
+      - name: Test Python
+        run: >-
+          docker run --rm -v "$PWD:/work" -w /work
+          python@sha256:63094abdaf49e046da9f6529ecd6ce4d853d9bfbf00a25c52bbbb68b3223b490
+          sh -c "pip install --quiet pytest && python -m pytest tests -v"
+
       - name: Lint YAML
         run: >-
           docker run --rm -v "$PWD:/code" -w /code

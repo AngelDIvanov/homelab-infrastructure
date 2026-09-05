@@ -5,6 +5,7 @@
 stages:
   - lint
   - validate
+  - test
   - security
   - deploy
   - smoke
@@ -129,6 +130,18 @@ validate:terraform:
     - terraform -chdir=terraform-kubeadm validate
   rules:
     - changes: ["terraform/**/*", "terraform-kubeadm/**/*"]
+
+test:python:
+  stage: test
+  image:
+    name: python@sha256:63094abdaf49e046da9f6529ecd6ce4d853d9bfbf00a25c52bbbb68b3223b490
+    entrypoint: [""]
+  before_script:
+    - pip install --quiet pytest
+  script:
+    - python -m pytest tests -v
+  rules:
+    - changes: ["scripts/webhook.py", "scripts/lab-*.py", "tests/**/*"]
 
 security:secret-detection:
   stage: security
