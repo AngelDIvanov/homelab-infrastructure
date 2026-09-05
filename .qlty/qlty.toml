@@ -66,6 +66,9 @@ name = "actionlint"
 
 [[plugin]]
 name = "bandit"
+exclude = [
+  "**/tests/**",  # pytest asserts (B101) and dummy secret strings (B105/B106) are expected in tests
+]
 
 [[plugin]]
 name = "hadolint"
