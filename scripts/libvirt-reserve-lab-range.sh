@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Keep libvirt's default-network DHCP range below .200 so the fixed lab
-# addresses (MetalLB pool .200-.220, NFS .230, kubeadm nodes .240+) are
-# never handed out as leases. Idempotent; applies to the live and
+# addresses (MetalLB pool .200-.217, k3s nodes .218-.221, NFS .230,
+# kubeadm nodes .240+) are never handed out as leases. Idempotent; applies to the live and
 # persistent network definition and restores the previous ranges if the
 # replacement cannot be added.
 set -euo pipefail

@@ -140,8 +140,10 @@ test:python:
     - pip install --quiet pytest
   script:
     - python -m pytest tests -v
+    - python scripts/check-configmap-sync.py
+    - python scripts/validate-ip-allocations.py
   rules:
-    - changes: ["scripts/webhook.py", "scripts/lab-*.py", "tests/**/*"]
+    - changes: ["scripts/webhook.py", "scripts/lab-*.py", "tests/**/*", "kubernetes/deployments/alertmanager-webhook.yaml", "ansible/inventory/**/*"]
 
 security:secret-detection:
   stage: security

@@ -157,9 +157,31 @@ class TestVerifySlack:
         headers["X-Slack-Request-Timestamp"] = "not-a-number"
         assert webhook.verify_slack(headers, body) is False
 
-    def test_secret_unset_bypasses_verification(self, monkeypatch):
+    def test_secret_unset_fails_closed(self, monkeypatch):
         monkeypatch.setattr(webhook, "SLACK_SIGNING_SECRET", "")
-        assert webhook.verify_slack({}, b"anything") is True
+        assert webhook.verify_slack({}, b"anything") is False
+
+
+# ── verify_alertmanager ────────────────────────────────────────────────────────────
+
+class TestVerifyAlertmanager:
+    def test_correct_bearer_token_passes(self, monkeypatch):
+        monkeypatch.setattr(webhook, "ALERTMANAGER_TOKEN", "tok-123")
+        headers = {"Authorization": "Bearer tok-123"}
+        assert webhook.verify_alertmanager(headers) is True
+
+    def test_wrong_token_fails(self, monkeypatch):
+        monkeypatch.setattr(webhook, "ALERTMANAGER_TOKEN", "tok-123")
+        headers = {"Authorization": "Bearer wrong"}
+        assert webhook.verify_alertmanager(headers) is False
+
+    def test_missing_header_fails(self, monkeypatch):
+        monkeypatch.setattr(webhook, "ALERTMANAGER_TOKEN", "tok-123")
+        assert webhook.verify_alertmanager({}) is False
+
+    def test_unset_token_fails_closed(self, monkeypatch):
+        monkeypatch.setattr(webhook, "ALERTMANAGER_TOKEN", "")
+        assert webhook.verify_alertmanager({"Authorization": "Bearer x"}) is False
 
 
 # ── approver allowlist wiring ─────────────────────────────────────────────────
@@ -175,3 +197,104 @@ class TestSlackApproversConfig:
             [u.strip() for u in "angel, ops-oncall ,".split(",") if u.strip()],
         )
         assert webhook.SLACK_APPROVERS == ["angel", "ops-oncall"]
+
+
+# ── handle_alerts: per-alert status ──────────────────────────────────────────
+
+class TestHandleAlertsPerAlertStatus:
+    """A firing group can contain resolved alerts — each alert must branch on
+    its own status, and only firing alerts may reach run_remediation()."""
+
+    @pytest.fixture
+    def mocks(self, monkeypatch):
+        called = {"remediation": [], "firing": [], "resolved": []}
+        monkeypatch.setattr(webhook, "run_remediation",
+                            lambda a: called["remediation"].append(a) or None)
+        monkeypatch.setattr(webhook, "notify_firing",
+                            lambda a, n, issue=None, remediation=None, repeat=False: called["firing"].append(a))
+        monkeypatch.setattr(webhook, "notify_resolved",
+                            lambda a, n, issue=None: called["resolved"].append(a))
+        monkeypatch.setattr(webhook, "find_open_issue", lambda n: None)
+        monkeypatch.setattr(webhook, "create_issue", lambda a, n, r=None: None)
+        monkeypatch.setattr(webhook, "close_issue", lambda i, a, n: None)
+        return called
+
+    @staticmethod
+    def alert(name, status):
+        return {"status": status,
+                "labels": {"alertname": name, "severity": "warning"},
+                "annotations": {}}
+
+    def test_mixed_group_resolved_alert_not_remidiated(self, mocks):
+        payload = {"status": "firing",
+                   "alerts": [self.alert("NodeDown", "firing"),
+                              self.alert("NodeDiskHigh", "resolved")]}
+        webhook.handle_alerts(payload)
+
+        remidiated = [a["labels"]["alertname"] for a in mocks["remediation"]]
+        assert remidiated == ["NodeDown"], "resolved alert in firing group must not be remediated"
+        assert len(mocks["firing"]) == 1
+        assert len(mocks["resolved"]) == 1
+
+    def test_firing_group_alerts_fire(self, mocks):
+        payload = {"status": "firing",
+                   "alerts": [self.alert("NodeDown", "firing")]}
+        webhook.handle_alerts(payload)
+        assert len(mocks["remediation"]) == 1
+        assert len(mocks["firing"]) == 1
+        assert mocks["resolved"] == []
+
+    def test_resolved_group_with_firing_alert_still_remidiated(self, mocks):
+        payload = {"status": "resolved",
+                   "alerts": [self.alert("NodeDown", "firing")]}
+        webhook.handle_alerts(payload)
+        assert len(mocks["remediation"]) == 1
+        assert mocks["resolved"] == []
+
+    def test_alert_without_status_inherits_group(self, mocks):
+        alert = self.alert("NodeDown", "firing")
+        del alert["status"]  # status key absent entirely
+        payload = {"status": "firing", "alerts": [alert]}
+        webhook.handle_alerts(payload)
+        assert len(mocks["remediation"]) == 1
+
+
+# ── _ssh exit codes & run_remediation success ────────────────────────────────
+
+class TestSshExitCodes:
+    def test_ssh_returns_exit_code(self, monkeypatch):
+        import subprocess as sp
+        monkeypatch.setattr(webhook, "SSH_KNOWN_HOSTS", "")
+        monkeypatch.setattr(webhook.subprocess, "run",
+                            lambda *a, **k: sp.CompletedProcess(args=a, returncode=3, stdout="out", stderr=""))
+        out, rc = webhook._ssh("h", "cmd")
+        assert (out, rc) == ("out", 3)
+
+    def test_ssh_timeout_maps_to_124(self, monkeypatch):
+        import subprocess as sp
+        monkeypatch.setattr(webhook, "SSH_KNOWN_HOSTS", "")
+        def raise_timeout(*a, **k):
+            raise sp.TimeoutExpired(cmd="ssh", timeout=1)
+        monkeypatch.setattr(webhook.subprocess, "run", raise_timeout)
+        out, rc = webhook._ssh("h", "cmd")
+        assert rc == 124 and out == "(timeout)"
+
+    def test_ssh_out_annotates_failure(self, monkeypatch):
+        monkeypatch.setattr(webhook, "_ssh", lambda h, c, timeout=30: ("boom", 255))
+        assert webhook._ssh_out("h", "c") == "[exit 255] boom"
+
+
+class TestRunRemediationSuccess:
+    @pytest.mark.parametrize("rc,expected", [(0, True), (1, False), (124, False), (255, False)])
+    def test_success_follows_exit_code(self, monkeypatch, rc, expected):
+        monkeypatch.setattr(webhook, "_ssh", lambda h, c, timeout=30: ("ignored output", rc))
+        alert = {"labels": {"alertname": "NodeMemoryCritical", "instance": "192.168.122.230:9100"}}
+        result = webhook.run_remediation(alert)
+        assert result is not None and result["success"] is expected
+
+    def test_output_wording_no_longer_defines_success(self, monkeypatch):
+        # regression: 'error' string-grep used to decide success
+        monkeypatch.setattr(webhook, "_ssh", lambda h, c, timeout=30: ("all good, no error here", 1))
+        alert = {"labels": {"alertname": "NodeMemoryCritical", "instance": "192.168.122.230:9100"}}
+        result = webhook.run_remediation(alert)
+        assert result["success"] is False
