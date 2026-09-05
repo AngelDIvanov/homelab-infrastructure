@@ -73,6 +73,37 @@ and then, in order:
 
 All chart versions are pinned in `inventory/group_vars/kubeadm_all.yml`.
 
+## Workloads
+
+After the add-ons, move the applications and the monitoring stack over with one
+command:
+
+```bash
+ansible-playbook -i inventory/kubeadm.ini playbooks/kubeadm-workloads.yml
+```
+
+The play creates the workload namespaces (`monitoring`, `vaultwarden`,
+`portainer`, `pylab`), binds the static NFS volumes to them, installs
+kube-prometheus-stack, Loki and Promtail, applies Vaultwarden, pylab,
+trengo-search and Portainer plus their ingresses, the backup CronJobs, and the
+network policies last.
+
+Everything web-facing is served through traefik ingresses instead of the old
+NodePorts. The hostnames must resolve to the Traefik load balancer address
+`192.168.122.200` — via `/etc/hosts` entries or the lab DNS:
+
+| Service      | URL                              |
+|--------------|----------------------------------|
+| Grafana      | http://grafana.homelab.local     |
+| Prometheus   | http://prometheus.homelab.local  |
+| Alertmanager | http://alertmanager.homelab.local |
+| Vaultwarden  | http://vault.homelab.local       |
+| Portainer    | http://portainer.homelab.local   |
+| pylab        | http://pylab.local               |
+
+Chart versions are pinned next to the add-on charts in
+`inventory/group_vars/kubeadm_all.yml`.
+
 ## Lint
 
 ```bash
