@@ -1,0 +1,6 @@
+- name: Deploy the workloads
+  hosts: kubeadm_control
+  become: true
+  tags: [workloads]
+  roles:
+    - role: k8s_workloads
