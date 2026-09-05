@@ -7,3 +7,5 @@ k8s_workloads_namespaces:
   - vaultwarden
   - portainer
   - pylab
+k8s_workloads_portainer_ingress_host: portainer.homelab.local
+k8s_workloads_portainer_service_port: 9000

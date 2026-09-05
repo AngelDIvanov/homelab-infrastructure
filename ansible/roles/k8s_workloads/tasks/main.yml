@@ -125,3 +125,57 @@
     timeout: "{{ k8s_workloads_helm_timeout }}"
     values_files:
       - "{{ k8s_workloads_manifest_dir }}/promtail.yaml"
+
+- name: Copy the application manifests to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../kubernetes/deployments/{{ item }}"
+    dest: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - vaultwarden.yaml
+    - pylab.yaml
+    - trengo-search.yaml
+
+- name: Apply the application manifests
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+  loop:
+    - vaultwarden.yaml
+    - pylab.yaml
+    - trengo-search.yaml
+
+- name: Install Portainer
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    release_name: portainer
+    chart_ref: portainer/portainer
+    chart_version: "{{ portainer_chart_version }}"
+    release_namespace: portainer
+    create_namespace: true
+    wait: true
+    timeout: "{{ k8s_workloads_helm_timeout }}"
+    values:
+      persistence:
+        existingClaim: portainer-nfs
+      service:
+        type: ClusterIP
+
+- name: Render the Portainer ingress
+  ansible.builtin.template:
+    src: portainer-ingress.yaml.j2
+    dest: "{{ k8s_workloads_manifest_dir }}/portainer-ingress.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply the Portainer ingress
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/portainer-ingress.yaml"

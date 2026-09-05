@@ -6,20 +6,6 @@ metadata:
 
 ---
 apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: vaultwarden-data
-  namespace: vaultwarden
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: local-path
-  resources:
-    requests:
-      storage: 1Gi
-
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nginx-vaultwarden
@@ -141,11 +127,34 @@ metadata:
   name: vaultwarden
   namespace: vaultwarden
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: vaultwarden
   ports:
     - name: https
       port: 443
       targetPort: 443
-      nodePort: 30900
+
+---
+# Traefik proxies to the nginx sidecar, which terminates the Vaultwarden TLS
+# certificate and upgrades the /notifications/hub websocket connection.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vaultwarden
+  namespace: vaultwarden
+  annotations:
+    traefik.ingress.kubernetes.io/service.serversscheme: "https"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: vault.homelab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vaultwarden
+                port:
+                  number: 443
