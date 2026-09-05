@@ -43,8 +43,8 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: backup
-              # the vaultwarden image ships sqlite3, so nothing is installed at run time
-              image: vaultwarden/server:latest@sha256:43498a94b22f9563f2a94b53760ab3e710eefc0d0cac2efda4b12b9eb8690664
+              # a small image that ships the sqlite3 CLI, so nothing is installed at run time
+              image: keinos/sqlite3:3.50.4@sha256:7ea29f0c7e91a8c3f315e831459d07000f34e9e9b25fbc30be2e0481b3e0450f
               command:
                 - /bin/sh
                 - -c
