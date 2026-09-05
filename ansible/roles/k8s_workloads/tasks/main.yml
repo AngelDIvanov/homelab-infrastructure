@@ -176,6 +176,15 @@
     group: root
     mode: "0644"
 
+- name: Remove the plain Ingress that the IngressRoute replaces
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: absent
+    api_version: networking.k8s.io/v1
+    kind: Ingress
+    name: portainer
+    namespace: portainer
+
 - name: Apply the Portainer ingress
   kubernetes.core.k8s:
     kubeconfig: "{{ k8s_workloads_kubeconfig }}"
