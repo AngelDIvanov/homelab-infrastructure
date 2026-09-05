@@ -102,3 +102,26 @@ jobs:
           docker run --rm -v "$PWD:/repo" -w /repo
           zricethezav/gitleaks@sha256:eadfe256fa18d6a78a717abc9ed454c8e03865d1c46d627bca83977f4424901a
           detect --source . --verbose
+
+  qlty:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install qlty
+        env:
+          QLTY_VERSION: "0.643.0"
+          QLTY_SHA256: "40500d150001b8389f2eb5dd089d07a9da70292a7c0bca3bdf72fb6c16fa20e5"
+        run: |
+          curl -fsSL -o qlty.tar.xz "https://github.com/qltysh/qlty/releases/download/v${QLTY_VERSION}/qlty-x86_64-unknown-linux-gnu.tar.xz"
+          echo "${QLTY_SHA256}  qlty.tar.xz" | sha256sum -c -
+          tar -xJf qlty.tar.xz
+          sudo install -m 0755 qlty-x86_64-unknown-linux-gnu/qlty /usr/local/bin/qlty
+          rm -rf qlty.tar.xz qlty-x86_64-unknown-linux-gnu
+
+      - name: Run qlty on changed files
+        run: qlty check --upstream origin/main --no-progress
