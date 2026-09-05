@@ -36,7 +36,8 @@ ansible-playbook -i inventory/kubeadm.ini playbooks/kubeadm-bootstrap.yml --tags
 
 The libvirt `default` network hands out DHCP leases from `192.168.122.2` to `.254`
 by default. The lab uses fixed addresses above `.199`: the MetalLB pool
-(`.200-.220`), the NFS server (`.230`) and the kubeadm nodes (`.240+`). Shrink the
+(`.200-.217`, disjoint from the k3s nodes at `.218-.221`), the NFS server
+(`.230`) and the kubeadm nodes (`.240+`). Shrink the
 DHCP range once on the hypervisor so dnsmasq can never lease one of them:
 
 ```bash
