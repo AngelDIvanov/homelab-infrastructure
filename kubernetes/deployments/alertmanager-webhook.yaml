@@ -111,6 +111,7 @@ data:
 
     # ── SSH helpers ───────────────────────────────────────────────────────────────
     SSH_BIN = shutil.which('ssh') or 'ssh'   # absolute path (bandit B607): no PATH lookup games
+    NO_OUTPUT = '(no output)'
 
     def _ssh_opts():
         if SSH_KNOWN_HOSTS:
@@ -132,7 +133,7 @@ data:
                  '-o', 'ConnectTimeout=10', f'{SSH_USER}@{host}', cmd],
                 capture_output=True, text=True, timeout=timeout,
             )
-            out = (r.stdout + r.stderr).strip() or '(no output)'
+            out = (r.stdout + r.stderr).strip() or NO_OUTPUT
             return out, r.returncode
         except subprocess.TimeoutExpired:
             return '(timeout)', 124
@@ -195,8 +196,10 @@ data:
             args = [SSH_BIN, '-i', SSH_KEY, *_ssh_opts(),
                     '-o', 'ConnectTimeout=10', *shlex.split(rest)]
             try:
+                # nosec B603 -- args are built from the allowlisted command only
+                # (parse_commands: operator allowlist + blocklist + metachar rejection).
                 r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-                out = (r.stdout + r.stderr).strip() or '(no output)'
+                out = (r.stdout + r.stderr).strip() or NO_OUTPUT
                 return out if r.returncode == 0 else f'[exit {r.returncode}] {out}'
             except subprocess.TimeoutExpired:
                 return '(timeout)'
@@ -920,29 +923,34 @@ data:
         log.info(f"Received {payload.get('status', 'unknown')} group with {len(alerts)} alerts")
 
         for alert in alerts:
-            status    = alert.get('status', payload.get('status', ''))
-            inc_num   = inc_number(alert)
-            severity  = alert['labels'].get('severity', 'info')
-            alertname = alert['labels'].get('alertname', 'Unknown')
+            _handle_one_alert(alert, payload.get('status', ''))
 
-            if status == 'firing':
-                existing = find_open_issue(inc_num)
-                if not existing:
-                    remediation = run_remediation(alert)
-                    if severity == 'critical':
-                        issue = create_issue(alert, inc_num, remediation)
-                        notify_firing(alert, inc_num, issue, remediation)
-                    else:
-                        notify_firing(alert, inc_num, None, remediation)
+
+    def _handle_one_alert(alert, group_status):
+        """Route a single alert by its own status (falls back to the group's
+        only when the per-alert status is absent)."""
+        status   = alert.get('status') or group_status
+        inc_num  = inc_number(alert)
+        severity = alert['labels'].get('severity', 'info')
+
+        if status == 'firing':
+            existing = find_open_issue(inc_num)
+            if not existing:
+                remediation = run_remediation(alert)
+                if severity == 'critical':
+                    issue = create_issue(alert, inc_num, remediation)
+                    notify_firing(alert, inc_num, issue, remediation)
                 else:
-                    log.info(f"Issue already exists for INC-{inc_num} — sending repeat notification")
-                    notify_firing(alert, inc_num, existing, repeat=True)
+                    notify_firing(alert, inc_num, None, remediation)
+            else:
+                log.info(f"Issue already exists for INC-{inc_num} — sending repeat notification")
+                notify_firing(alert, inc_num, existing, repeat=True)
 
-            elif status == 'resolved':
-                issue = find_open_issue(inc_num) if severity == 'critical' else None
-                if issue:
-                    close_issue(issue, alert, inc_num)
-                notify_resolved(alert, inc_num, issue)
+        elif status == 'resolved':
+            issue = find_open_issue(inc_num) if severity == 'critical' else None
+            if issue:
+                close_issue(issue, alert, inc_num)
+            notify_resolved(alert, inc_num, issue)
 
 
     class WebhookHandler(BaseHTTPRequestHandler):
@@ -972,16 +980,24 @@ data:
             # ── Alertmanager webhook: POST / (bearer-authenticated) ──────────────
             if self.path != '/':
                 # Only the Slack routes and the alert endpoint are exposed.
-                self.send_response(404); self.end_headers(); return
+                self.send_response(404)
+                self.end_headers()
+                return
             if not verify_alertmanager(dict(self.headers)):
-                self.send_response(401); self.end_headers(); return
+                self.send_response(401)
+                self.end_headers()
+                return
             try:
                 payload = json.loads(body)
             except Exception:
-                self.send_response(400); self.end_headers(); return
+                self.send_response(400)
+                self.end_headers()
+                return
 
             handle_alerts(payload)
-            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'ok')
 
         def log_message(self, *args):
             pass
