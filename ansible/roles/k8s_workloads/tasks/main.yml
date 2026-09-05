@@ -43,3 +43,48 @@
     state: present
     apply: true
     src: "{{ k8s_workloads_manifest_dir }}/nfs-static-volumes.yaml"
+
+- name: Copy the kube-prometheus-stack values to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../monitoring/values/kube-prometheus-stack.yaml"
+    dest: "{{ k8s_workloads_manifest_dir }}/kube-prometheus-stack.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the kube-prometheus-stack
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    release_name: monitoring
+    chart_ref: prometheus-community/kube-prometheus-stack
+    chart_version: "{{ kube_prometheus_stack_chart_version }}"
+    release_namespace: monitoring
+    create_namespace: true
+    wait: true
+    timeout: "{{ k8s_workloads_helm_timeout }}"
+    values_files:
+      - "{{ k8s_workloads_manifest_dir }}/kube-prometheus-stack.yaml"
+
+- name: Copy the Grafana dashboards and rules to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../monitoring/grafana/"
+    dest: "{{ k8s_workloads_manifest_dir }}/grafana/"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Only *.yaml manifests carry Kubernetes objects; the *.json files next to
+# them are Grafana exports, not cluster resources.
+- name: Collect the Grafana configuration manifests
+  ansible.builtin.find:
+    paths: "{{ k8s_workloads_manifest_dir }}/grafana"
+    patterns: "*.yaml"
+  register: k8s_workloads_grafana_manifests
+
+- name: Apply the Grafana dashboards, alerts and datasource
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ item.path }}"
+  loop: "{{ k8s_workloads_grafana_manifests.files | map(attribute='path') | sort }}"
