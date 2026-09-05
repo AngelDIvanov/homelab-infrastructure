@@ -18,6 +18,7 @@ before touching infra.
 | `kubernetes/` | k3s manifests: deployments, services, monitoring, backup, policies, namespaces, self-healing. |
 | `monitoring/` | Prometheus / Grafana / Loki / promtail values. |
 | `scripts/` | Python control plane (`lab-manager.py`, `lab-control.py`, `lab-tui.py`, `webhook.py`) + bash ops scripts. |
+| `tests/` | Pytest suite for the security-critical webhook paths (`parse_commands`, `verify_slack`). Run with `python -m pytest tests`. |
 | `docs/` | Runbooks, postmortems, audits, images. |
 | `.gitlab/` | Self-hosted GitLab CI pipeline definitions. |
 
