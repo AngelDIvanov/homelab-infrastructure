@@ -1,3 +1,6 @@
+# Portainer serves HTTPS only with a self-signed certificate. A Traefik
+# IngressRoute lets the backend reference a ServersTransport that skips
+# verification for this one service, without changing Traefik's defaults.
 apiVersion: traefik.io/v1alpha1
 kind: ServersTransport
 metadata:
@@ -6,26 +9,19 @@ metadata:
 spec:
   insecureSkipVerify: true
 ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
 metadata:
   name: portainer
   namespace: portainer
-  annotations:
-    # Portainer serves HTTPS only with a self-signed certificate; the transport
-    # below skips verification for this backend alone
-    traefik.ingress.kubernetes.io/service.serversscheme: "https"
-    traefik.ingress.kubernetes.io/service.serverstransport: portainer-portainer-selfsigned@kubernetescrd
 spec:
-  ingressClassName: traefik
-  rules:
-    - host: {{ k8s_workloads_portainer_ingress_host }}
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: portainer
-                port:
-                  number: {{ k8s_workloads_portainer_service_port }}
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`{{ k8s_workloads_portainer_ingress_host }}`)
+      kind: Rule
+      services:
+        - name: portainer
+          port: {{ k8s_workloads_portainer_service_port }}
+          scheme: https
+          serversTransport: portainer-selfsigned

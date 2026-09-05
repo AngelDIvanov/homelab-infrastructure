@@ -53,6 +53,18 @@
     - item.content | b64decode is not search(item.item.flag)
   changed_when: true
 
+# Re-rendering etcd restarts it, and the API server is unavailable for a few
+# seconds while it comes back.
+- name: Wait for the API server after the static pod changes
+  ansible.builtin.uri:
+    url: https://127.0.0.1:6443/readyz
+    validate_certs: false
+    status_code: 200
+  register: k8s_control_apiserver_ready
+  until: k8s_control_apiserver_ready.status == 200
+  retries: 30
+  delay: 5
+
 - name: Read the kube-proxy configuration
   kubernetes.core.k8s_info:
     kubeconfig: "{{ k8s_control_kubeconfig }}"
