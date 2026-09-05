@@ -1,11 +1,21 @@
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: portainer-selfsigned
+  namespace: portainer
+spec:
+  insecureSkipVerify: true
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: portainer
   namespace: portainer
   annotations:
-    # Portainer serves HTTPS only; Traefik skips verification of its self-signed certificate
+    # Portainer serves HTTPS only with a self-signed certificate; the transport
+    # below skips verification for this backend alone
     traefik.ingress.kubernetes.io/service.serversscheme: "https"
+    traefik.ingress.kubernetes.io/service.serverstransport: portainer-portainer-selfsigned@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:
