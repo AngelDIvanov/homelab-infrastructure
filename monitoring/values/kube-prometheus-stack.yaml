@@ -82,12 +82,6 @@ alertmanager:
           - alertname
           - namespace
 
-# kube-proxy metrics stay bound to localhost on kubeadm, so the down
-# alert for it stays off; scheduler and controller-manager are scraped now.
-defaultRules:
-  disabled:
-    KubeProxyDown: true
-
 # kubeadm runs etcd and the control-plane components as static pods with no
 # discoverable Endpoints, so the exporters scrape fixed addresses instead.
 kubeEtcd:
