@@ -188,9 +188,10 @@ def dispatch_cmd(cmd, timeout=60):
         args = [SSH_BIN, '-i', SSH_KEY, *_ssh_opts(),
                 '-o', 'ConnectTimeout=10', *shlex.split(rest)]
         try:
-            # nosec B603 -- args are built from the allowlisted command only
-            # (parse_commands: operator allowlist + blocklist + metachar rejection).
-            r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+            # B603 justification: args are built from the allowlisted command
+            # only (parse_commands: operator allowlist + blocklist + metachar
+            # rejection), never raw LLM output.
+            r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)  # nosec B603
             out = (r.stdout + r.stderr).strip() or NO_OUTPUT
             return out if r.returncode == 0 else f'[exit {r.returncode}] {out}'
         except subprocess.TimeoutExpired:
@@ -208,33 +209,33 @@ def gather_state():
 
     # Deployments — surfaces zero-replica and unavailable deployments explicitly
     deployments = ssh_kube('get deployments -A -o wide 2>/dev/null')
-    if deployments and '(no output)' not in deployments:
+    if deployments and NO_OUTPUT not in deployments:
         out.append(f"=== DEPLOYMENTS ===\n{deployments}")
 
     unhealthy = ssh_kube(
         "get pods -A --no-headers 2>/dev/null | grep -vE '(Running|Completed|Succeeded)'"
     )
-    if unhealthy and '(no output)' not in unhealthy:
+    if unhealthy and NO_OUTPUT not in unhealthy:
         out.append(f"=== UNHEALTHY PODS ===\n{unhealthy}")
 
     warnings = ssh_kube(
         "get events -A --field-selector=type=Warning "
         "--sort-by='.lastTimestamp' 2>/dev/null | tail -15"
     )
-    if warnings and '(no output)' not in warnings:
+    if warnings and NO_OUTPUT not in warnings:
         out.append(f"=== RECENT WARNINGS ===\n{warnings}")
 
     jobs = ssh_kube(
         "get jobs -A --no-headers 2>/dev/null | grep -v ' 1/1 '"
     )
-    if jobs and '(no output)' not in jobs:
+    if jobs and NO_OUTPUT not in jobs:
         out.append(f"=== FAILED/INCOMPLETE JOBS ===\n{jobs}")
 
     first_bad = ssh_kube(
         "get pods -A --no-headers 2>/dev/null "
         "| grep -vE '(Running|Completed|Succeeded)' | head -1"
     )
-    if first_bad and '(no output)' not in first_bad and '(error' not in first_bad:
+    if first_bad and NO_OUTPUT not in first_bad and '(error' not in first_bad:
         parts = first_bad.split()
         if len(parts) >= 2:
             ns, pod = parts[0], parts[1]
@@ -242,7 +243,7 @@ def gather_state():
                 f"logs {pod} -n {ns} --tail=40 --previous 2>/dev/null "
                 f"|| sudo k3s kubectl logs {pod} -n {ns} --tail=40 2>/dev/null"
             )
-            if logs and '(no output)' not in logs:
+            if logs and NO_OUTPUT not in logs:
                 out.append(f"=== LOGS ({ns}/{pod}) ===\n{logs}")
 
     try:
