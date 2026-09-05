@@ -108,9 +108,10 @@ def _ssh(host, cmd, timeout=30):
     if not SSH_KNOWN_HOSTS:
         log.warning("SSH_KNOWN_HOSTS not set — SSH host keys are NOT verified")
     try:
-        # nosec B603 -- cmd comes only from RUNBOOKS constants or parse_commands()
-        # (operator allowlist + blocklist + metachar rejection), never raw LLM output.
-        r = subprocess.run(
+        # B603 justification: cmd comes only from RUNBOOKS constants or
+        # parse_commands() (operator allowlist + blocklist + metachar rejection),
+        # never raw LLM output.
+        r = subprocess.run(  # nosec B603
             [SSH_BIN, '-i', SSH_KEY, *host_opts,
              '-o', 'ConnectTimeout=10', f'{SSH_USER}@{host}', cmd],
             capture_output=True, text=True, timeout=timeout,
