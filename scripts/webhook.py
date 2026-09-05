@@ -34,6 +34,9 @@ SLACK_APPROVERS      = [u.strip() for u in os.environ.get('SLACK_APPROVERS', '')
 SLACK_CRITICAL_URL = os.environ.get('SLACK_CRITICAL_URL', '')
 SLACK_WARNING_URL  = os.environ.get('SLACK_WARNING_URL',  '')
 SLACK_INFO_URL     = os.environ.get('SLACK_INFO_URL',     '')
+# Bearer token required on the Alertmanager endpoint (POST /). Fail closed:
+# empty token rejects all alert traffic instead of opening the endpoint.
+ALERTMANAGER_TOKEN = os.environ.get('ALERTMANAGER_TOKEN', '')
 ALERTMANAGER_URL   = os.environ.get('ALERTMANAGER_URL',   f'http://{K3S_CONTROL_IP}:30093')
 PROMETHEUS_URL     = os.environ.get('PROMETHEUS_URL',     f'http://{K3S_CONTROL_IP}:30090')
 
@@ -101,12 +104,17 @@ pending = {}   # token → {commands, response_url}
 # ── SSH helpers ───────────────────────────────────────────────────────────────
 SSH_BIN = shutil.which('ssh') or 'ssh'   # absolute path (bandit B607): no PATH lookup games
 
+def _ssh_opts():
+    if SSH_KNOWN_HOSTS:
+        return ['-o', 'StrictHostKeyChecking=yes', '-o', f'UserKnownHostsFile={SSH_KNOWN_HOSTS}']
+    log.warning("SSH_KNOWN_HOSTS not set — SSH host keys are NOT verified")
+    return ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null']
+
 def _ssh(host, cmd, timeout=30):
-    host_opts = ['-o', 'StrictHostKeyChecking=yes', '-o', f'UserKnownHostsFile={SSH_KNOWN_HOSTS}'] \
-        if SSH_KNOWN_HOSTS else \
-        ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null']
-    if not SSH_KNOWN_HOSTS:
-        log.warning("SSH_KNOWN_HOSTS not set — SSH host keys are NOT verified")
+    """Run cmd over SSH. Returns (combined_output, exit_code); timeouts map
+    to 124 and local errors to 255 (the `timeout` convention), so callers can
+    distinguish failure from success instead of grepping for 'error'."""
+    host_opts = _ssh_opts()
     try:
         # B603 justification: cmd comes only from RUNBOOKS constants or
         # parse_commands() (operator allowlist + blocklist + metachar rejection),
@@ -116,14 +124,21 @@ def _ssh(host, cmd, timeout=30):
              '-o', 'ConnectTimeout=10', f'{SSH_USER}@{host}', cmd],
             capture_output=True, text=True, timeout=timeout,
         )
-        return (r.stdout + r.stderr).strip() or '(no output)'
+        out = (r.stdout + r.stderr).strip() or '(no output)'
+        return out, r.returncode
     except subprocess.TimeoutExpired:
-        return '(timeout)'
+        return '(timeout)', 124
     except Exception as e:
-        return f'(error: {e})'
+        return f'(error: {e})', 255
+
+def _ssh_out(host, cmd, timeout=30):
+    """Diagnostic wrapper around _ssh: output string, annotated with the
+    exit code when non-zero (for Slack threads, diagnosis context)."""
+    out, rc = _ssh(host, cmd, timeout)
+    return out if rc == 0 else f'[exit {rc}] {out}'
 
 def ssh_kube(args, timeout=20):
-    return _ssh(K3S_CONTROL_IP, f'sudo k3s kubectl {args}', timeout)
+    return _ssh_out(K3S_CONTROL_IP, f'sudo k3s kubectl {args}', timeout)
 
 _nodes_cache = {'ts': 0.0, 'data': {}}
 def cluster_nodes():
@@ -156,31 +171,30 @@ def dispatch_cmd(cmd, timeout=60):
     c = cmd.strip()
     if re.match(r'^virsh\b', c):
         # virsh lives on the hypervisor host, not inside any VM
-        return _ssh(HYPERVISOR_IP, c, timeout=timeout)
+        return _ssh_out(HYPERVISOR_IP, c, timeout=timeout)
     if re.match(r'^(sudo\s+)?kubectl\b', c):
         # kubectl as labadmin on k3s-control can't read k3s.yaml — use sudo k3s kubectl
         kubectl_args = re.sub(r'^(sudo\s+)?kubectl\s+', '', c)
-        return _ssh(K3S_CONTROL_IP, f'sudo k3s kubectl {kubectl_args}', timeout=timeout)
+        return _ssh_out(K3S_CONTROL_IP, f'sudo k3s kubectl {kubectl_args}', timeout=timeout)
     if re.match(r'^docker\b', c):
         # docker build/push runs on the hypervisor where source code lives
-        return _ssh(HYPERVISOR_IP, c, timeout=120)
+        return _ssh_out(HYPERVISOR_IP, c, timeout=120)
     if re.match(r'^ssh\b', c):
         # Run SSH directly from the webhook pod — it has the homelab@ansible key
         # that is authorized on all nodes. Routing through k3s-control would use
         # labadmin's key there, which may not match.
-        c_fixed = re.sub(
-            r'^ssh\b',
-            f'ssh -i {SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null',
-            c,
-        )
+        rest = re.sub(r'^ssh\b\s*', '', c)
+        args = [SSH_BIN, '-i', SSH_KEY, *_ssh_opts(),
+                '-o', 'ConnectTimeout=10', *shlex.split(rest)]
         try:
-            r = subprocess.run(shlex.split(c_fixed), capture_output=True, text=True, timeout=timeout)
-            return (r.stdout + r.stderr).strip() or '(no output)'
+            r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+            out = (r.stdout + r.stderr).strip() or '(no output)'
+            return out if r.returncode == 0 else f'[exit {r.returncode}] {out}'
         except subprocess.TimeoutExpired:
             return '(timeout)'
         except Exception as e:
             return f'(error: {e})'
-    return _ssh(K3S_CONTROL_IP, c, timeout=timeout)
+    return _ssh_out(K3S_CONTROL_IP, c, timeout=timeout)
 
 # ── Cluster state gathering ───────────────────────────────────────────────────
 def gather_state():
@@ -412,8 +426,11 @@ def slack_send(webhook_url, payload):
 
 # ── Slack signature verification ──────────────────────────────────────────────
 def verify_slack(headers, body_bytes):
+    # Fail closed: without a signing secret we cannot authenticate Slack at
+    # all, so requests are rejected instead of silently trusted.
     if not SLACK_SIGNING_SECRET:
-        return True
+        log.error("SLACK_SIGNING_SECRET not set — rejecting Slack request (fail closed)")
+        return False
     ts  = headers.get('X-Slack-Request-Timestamp', '')
     sig = headers.get('X-Slack-Signature', '')
     if not ts or not sig:
@@ -428,6 +445,16 @@ def verify_slack(headers, body_bytes):
         SLACK_SIGNING_SECRET.encode(), base.encode(), hashlib.sha256
     ).hexdigest()
     return hmac.compare_digest(expected, sig)
+
+# ── Alertmanager bearer auth ──────────────────────────────────────────────────
+def verify_alertmanager(headers):
+    """Bearer-token check for POST /. Fail closed: an unset token rejects
+    everything rather than leaving the alert endpoint unauthenticated."""
+    if not ALERTMANAGER_TOKEN:
+        log.error("ALERTMANAGER_TOKEN not set — rejecting alert (fail closed)")
+        return False
+    return hmac.compare_digest(f'Bearer {ALERTMANAGER_TOKEN}',
+                               headers.get('Authorization', ''))
 
 # ── /lab slash command handler ────────────────────────────────────────────────
 def handle_lab(body_bytes):
@@ -680,9 +707,9 @@ def run_remediation(alert):
         name = nodes[ip]
         cmd  = 'sudo k3s crictl rmi --prune'
         log.info(f"Auto-remediation: NodeDiskHigh on {name} ({ip})")
-        out = _ssh(ip, cmd, timeout=120)
-        success = 'error' not in out.lower()
-        log.info(f"Remediation {'ok' if success else 'FAILED'} on {name}")
+        out, rc = _ssh(ip, cmd, timeout=120)
+        success = rc == 0
+        log.info(f"Remediation {'ok' if success else f'FAILED (exit {rc})'} on {name}")
         return {'success': success, 'host': ip, 'cmd': cmd,
                 'description': f'Pruned unused container images on {name}.', 'output': out[:500]}
     if alertname not in RUNBOOKS:
@@ -691,9 +718,9 @@ def run_remediation(alert):
         if rb['instance_contains'] not in instance:
             continue
         log.info(f"Auto-remediation: {alertname} on {rb['host']}")
-        out = _ssh(rb['host'], rb['cmd'], timeout=120)
-        success = 'error' not in out.lower()
-        log.info(f"Remediation {'ok' if success else 'FAILED'} on {rb['host']}")
+        out, rc = _ssh(rb['host'], rb['cmd'], timeout=120)
+        success = rc == 0
+        log.info(f"Remediation {'ok' if success else f'FAILED (exit {rc})'} on {rb['host']}")
         return {
             'success': success, 'host': rb['host'],
             'cmd': rb['cmd'], 'description': rb['description'], 'output': out[:500],
@@ -877,6 +904,39 @@ def notify_resolved(alert, inc_num, issue=None):
     })
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
+def handle_alerts(payload):
+    """Process one Alertmanager group. Each alert carries its own status —
+    a firing group can contain resolved alerts (and vice versa), so every
+    alert branches on its own status, never the group's."""
+    alerts = payload.get('alerts', [])
+    log.info(f"Received {payload.get('status', 'unknown')} group with {len(alerts)} alerts")
+
+    for alert in alerts:
+        status    = alert.get('status', payload.get('status', ''))
+        inc_num   = inc_number(alert)
+        severity  = alert['labels'].get('severity', 'info')
+        alertname = alert['labels'].get('alertname', 'Unknown')
+
+        if status == 'firing':
+            existing = find_open_issue(inc_num)
+            if not existing:
+                remediation = run_remediation(alert)
+                if severity == 'critical':
+                    issue = create_issue(alert, inc_num, remediation)
+                    notify_firing(alert, inc_num, issue, remediation)
+                else:
+                    notify_firing(alert, inc_num, None, remediation)
+            else:
+                log.info(f"Issue already exists for INC-{inc_num} — sending repeat notification")
+                notify_firing(alert, inc_num, existing, repeat=True)
+
+        elif status == 'resolved':
+            issue = find_open_issue(inc_num) if severity == 'critical' else None
+            if issue:
+                close_issue(issue, alert, inc_num)
+            notify_resolved(alert, inc_num, issue)
+
+
 class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
@@ -901,40 +961,18 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
             return
 
-        # ── Alertmanager webhook: POST / ──────────────────────────────────────
+        # ── Alertmanager webhook: POST / (bearer-authenticated) ──────────────
+        if self.path != '/':
+            # Only the Slack routes and the alert endpoint are exposed.
+            self.send_response(404); self.end_headers(); return
+        if not verify_alertmanager(dict(self.headers)):
+            self.send_response(401); self.end_headers(); return
         try:
             payload = json.loads(body)
         except Exception:
             self.send_response(400); self.end_headers(); return
 
-        status = payload.get('status', '')
-        alerts = payload.get('alerts', [])
-        log.info(f"Received {status} with {len(alerts)} alerts")
-
-        for alert in alerts:
-            inc_num   = inc_number(alert)
-            severity  = alert['labels'].get('severity', 'info')
-            alertname = alert['labels'].get('alertname', 'Unknown')
-
-            if status == 'firing':
-                existing = find_open_issue(inc_num)
-                if not existing:
-                    remediation = run_remediation(alert)
-                    if severity == 'critical':
-                        issue = create_issue(alert, inc_num, remediation)
-                        notify_firing(alert, inc_num, issue, remediation)
-                    else:
-                        notify_firing(alert, inc_num, None, remediation)
-                else:
-                    log.info(f"Issue already exists for INC-{inc_num} — sending repeat notification")
-                    notify_firing(alert, inc_num, existing, repeat=True)
-
-            elif status == 'resolved':
-                issue = find_open_issue(inc_num) if severity == 'critical' else None
-                if issue:
-                    close_issue(issue, alert, inc_num)
-                notify_resolved(alert, inc_num, issue)
-
+        handle_alerts(payload)
         self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
 
     def log_message(self, *args):
