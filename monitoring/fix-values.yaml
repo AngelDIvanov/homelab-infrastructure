@@ -81,6 +81,12 @@ alertmanager:
       - name: gitlab-webhook
         webhook_configs:
           - url: 'http://alertmanager-webhook:8080'
+            # The webhook rejects unauthenticated POSTs (fail closed).
+            # Set the same value as the alertmanager-token Secret.
+            http_config:
+              authorization:
+                type: Bearer
+                credentials: REPLACE_WITH_ALERTMANAGER_TOKEN
             send_resolved: true
     inhibit_rules:
       - source_match:

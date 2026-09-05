@@ -192,7 +192,7 @@ python3 scripts/lab-tui.py       # TUI (requires: pip install textual)
 
 Secrets (`K3S_TOKEN`, `GITLAB_TOKEN`, ...) are pulled from environment variables or Vaultwarden via the Bitwarden CLI. See `scripts/load-secrets.sh` for the bootstrap flow and `scripts/setup-vault.sh` to set Vaultwarden up from scratch.
 
-The secret rotation procedure for all 5 cluster secrets is documented in [`docs/runbooks/applications/secret-rotation.md`](docs/runbooks/applications/secret-rotation.md). No Secret manifests live in git — in-cluster secrets are created from the `.yaml.example` templates (`alertmanager-webhook.yaml`, `pylab-secrets.yaml.example`, ...) and never committed with real values.
+The secret rotation procedure for all 5 cluster secrets is documented in [`docs/runbooks/applications/secret-rotation.md`](docs/runbooks/applications/secret-rotation.md). No Secret manifests live in git — in-cluster secrets are created from the `.yaml.example` templates (`alertmanager-webhook.yaml`, `pylab-secrets.yaml.example`, ...) and never committed with real values. The webhook additionally requires an `alertmanager-token` Secret (`ALERTMANAGER_TOKEN`, sent by Alertmanager as a bearer token) — the alert endpoint is fail-closed without it:
 
 ---
 
@@ -223,11 +223,15 @@ Restore procedures for each component are documented in the [runbooks](docs/runb
 
 **PodDisruptionBudgets** — applied to Traefik and pylab to prevent accidental full-cluster downtime during rolling updates.
 
-**Webhook security** — Slack request signatures are validated on every inbound payload using `SLACK_SIGNING_SECRET`. Approve & Run is gated by `SLACK_APPROVERS`, a comma-separated allowlist of Slack usernames; users outside the list are denied and the attempt is logged. The webhook endpoint is not exposed to the internet; it is accessible only within the cluster via a ClusterIP service and Traefik ingress restricted to the internal network.
+**Webhook security** — Every inbound route is authenticated and fail-closed. Slack requests (`/slack/lab`, `/slack/actions`) require a valid `SLACK_SIGNING_SECRET` HMAC — a missing secret rejects requests instead of trusting them, and the deployment marks the secret as required. The Alertmanager endpoint (`POST /`) requires a bearer token (`ALERTMANAGER_TOKEN`, sent by Alertmanager via `webhook_configs` `http_config` authorization); without a token configured the endpoint rejects everything rather than accept unauthenticated traffic — the ngrok tunnel therefore cannot be used to trigger remediation anonymously. Unknown paths return 404. Approve & Run is additionally gated by `SLACK_APPROVERS`, a comma-separated allowlist of Slack usernames; users outside the list are denied and the attempt is logged. The webhook endpoint is reachable from the internet only through the ngrok tunnel.
 
-**LLM command hardening** — Claude's suggested commands are parsed server-side: only `kubectl`, `k3s`, `ssh`, `virsh` and `docker` commands pass, shell metacharacters (`;`, `|`, `&`, backticks, `$(`) are rejected, and reads of secrets, tokens, private keys or `node-token` are blocked — independently of what the prompt asks for. Defense in depth: the prompt forbids it, the parser enforces it.
+**LLM command hardening** — Claude's suggested commands are parsed server-side: only `kubectl`, `k3s`, `ssh`, `virsh` and `docker` commands pass, shell metacharacters (`;`, `|`, `&`, backticks, `$(`) are rejected, and reads of secrets, tokens, private keys or `node-token` are blocked — independently of what the prompt asks for. Defense in depth: the prompt forbids it, the parser enforces it. Longer term: replace free-form commands with structured action IDs validated against trusted remediation scripts (tracked in Known limitations).
 
 **SSH host-key pinning** — Ansible inventories and the auto-healing webhook verify SSH host keys (`StrictHostKeyChecking=yes`) against pinned keys. Keys are read out-of-band through the QEMU guest agent (`scripts/homelab-known-hosts.sh`, `scripts/kubeadm-known-hosts.sh`), so a rogue host on the libvirt bridge cannot substitute its own key.
+
+**Remediation success is exit-code based** — SSH remediation results are classified by the remote exit code (timeouts map to 124), not by grepping output for the word "error"; failed remediation is reported as failed.
+
+**Address allocation guardrails** — the MetalLB pool (`.200-.217`) is disjoint from all static lab addresses (`.218-.221`, `.230`, `.240+`) and from the libvirt DHCP range (ends at `.199`, see `scripts/libvirt-reserve-lab-range.sh`). `scripts/validate-ip-allocations.py` fails CI on any overlap, and `scripts/check-configmap-sync.py` fails CI if the ConfigMap copy of `webhook.py` drifts from `scripts/webhook.py` (the deployed copy is the ConfigMap — drift would silently deploy unhardened code).
 
 **Secret rotation** — documented procedure for rotating all 5 cluster secrets: `docs/runbooks/applications/secret-rotation.md`.
 
@@ -289,7 +293,7 @@ Alerts and diagnoses are kept compact in the channel — full details expand in 
 - **Command output** — list of commands run in channel; full stdout/stderr in thread
 - **Resolution** — RESOLVED notification with duration, incident link auto-closed
 
-Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge is `scripts/webhook.py`.
+Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge is `scripts/webhook.py`; Alertmanager reaches it with a bearer token (`http_config.authorization` in `monitoring/fix-values.yaml`), and each alert is processed by its own status — a firing group can contain resolved alerts.
 
 ---
 
@@ -331,6 +335,7 @@ Merge requests require a 9-point checklist and at least one approval before merg
 - **Single KVM host** — all VMs share one physical machine; host failure requires full rebuild (documented in DR runbook)
 - **No GitOps operator** — cluster state is applied via CI/CD push rather than continuously reconciled by ArgoCD or FluxCD
 - **SQLite k3s backend** — appropriate for this scale; etcd would be required for a true HA control plane
+- **Free-form remediation commands** — approved commands are constrained by the operator allowlist + blocklist + metachar rejection, but the stronger design is structured action IDs with validated arguments mapped to trusted remediation scripts; tracked as future work
 - `terraform-kubeadm/` is a standalone experiment for learning kubeadm; it is not connected to the main lab
 
 ---
