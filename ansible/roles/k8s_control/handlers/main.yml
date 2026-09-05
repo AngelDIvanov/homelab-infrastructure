@@ -1,0 +1,5 @@
+---
+- name: Restart kube-proxy
+  ansible.builtin.command:
+    cmd: kubectl --kubeconfig {{ k8s_control_kubeconfig }} -n kube-system rollout restart daemonset kube-proxy
+  changed_when: true
