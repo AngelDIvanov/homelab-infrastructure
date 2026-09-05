@@ -1,3 +1,4 @@
 ---
 k8s_common_pause_image: "registry.k8s.io/pause:3.10"
 k8s_common_containerd_config: /etc/containerd/config.toml
+k8s_common_registry_mirror: "192.168.122.240:30500"

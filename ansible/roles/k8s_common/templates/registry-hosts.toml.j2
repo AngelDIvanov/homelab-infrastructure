@@ -1,0 +1,6 @@
+server = "http://{{ k8s_common_registry_mirror }}"
+capabilities = ["pull", "resolve"]
+
+[host."http://{{ k8s_common_registry_mirror }}"]
+capabilities = ["pull", "resolve"]
+skip_verify = true

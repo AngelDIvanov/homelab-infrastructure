@@ -1,0 +1,34 @@
+deployment:
+  replicas: 2
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - traefik
+        topologyKey: kubernetes.io/hostname
+
+service:
+  spec:
+    type: LoadBalancer
+
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+  name: traefik
+
+ports:
+  web:
+    port: 8000
+    exposedPort: 80
+  websecure:
+    port: 8443
+    exposedPort: 443
+
+ingressRoute:
+  dashboard:
+    enabled: false

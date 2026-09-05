@@ -1,0 +1,229 @@
+---
+- name: Create the add-on manifest directory
+  ansible.builtin.file:
+    path: "{{ k8s_addons_manifest_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the pinned helm release archive
+  ansible.builtin.get_url:
+    url: "https://get.helm.sh/helm-v{{ k8s_addons_helm_version }}-linux-amd64.tar.gz"
+    dest: "{{ k8s_addons_helm_archive_dir }}/helm-v{{ k8s_addons_helm_version }}-linux-amd64.tar.gz"
+    checksum: "sha256:{{ k8s_addons_helm_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Create the helm extraction directory
+  ansible.builtin.file:
+    path: "{{ k8s_addons_helm_extract_dir }}/helm-{{ k8s_addons_helm_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Unpack the helm release archive
+  ansible.builtin.unarchive:
+    src: "{{ k8s_addons_helm_archive_dir }}/helm-v{{ k8s_addons_helm_version }}-linux-amd64.tar.gz"
+    dest: "{{ k8s_addons_helm_extract_dir }}/helm-{{ k8s_addons_helm_version }}"
+    creates: "{{ k8s_addons_helm_extract_dir }}/helm-{{ k8s_addons_helm_version }}/linux-amd64/helm"
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+
+- name: Install the helm binary
+  ansible.builtin.copy:
+    src: "{{ k8s_addons_helm_extract_dir }}/helm-{{ k8s_addons_helm_version }}/linux-amd64/helm"
+    dest: /usr/local/bin/helm
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+
+- name: Add the helm chart repositories
+  kubernetes.core.helm_repository:
+    name: "{{ item.name }}"
+    repo_url: "{{ item.url }}"
+    state: present
+  loop:
+    - name: metallb
+      url: https://metallb.github.io/metallb
+    - name: traefik
+      url: https://traefik.github.io/charts
+    - name: nfs-subdir-external-provisioner
+      url: https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
+    - name: metrics-server
+      url: https://kubernetes-sigs.github.io/metrics-server
+    - name: kubelet-csr-approver
+      url: https://postfinance.github.io/kubelet-csr-approver
+
+- name: Install the MetalLB load balancer
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    release_name: metallb
+    chart_ref: metallb/metallb
+    chart_version: "{{ metallb_chart_version }}"
+    release_namespace: "{{ k8s_addons_metallb_namespace }}"
+    create_namespace: true
+    wait: true
+
+- name: Render the MetalLB address pool
+  ansible.builtin.template:
+    src: metallb-pool.yaml.j2
+    dest: "{{ k8s_addons_manifest_dir }}/metallb-pool.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render the MetalLB L2 advertisement
+  ansible.builtin.template:
+    src: metallb-l2.yaml.j2
+    dest: "{{ k8s_addons_manifest_dir }}/metallb-l2.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply the MetalLB address pool
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_addons_manifest_dir }}/metallb-pool.yaml"
+  register: k8s_addons_metallb_pool
+  until: not k8s_addons_metallb_pool.failed
+  retries: 12
+  delay: 10
+
+- name: Apply the MetalLB L2 advertisement
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_addons_manifest_dir }}/metallb-l2.yaml"
+  register: k8s_addons_metallb_l2
+  until: not k8s_addons_metallb_l2.failed
+  retries: 12
+  delay: 10
+
+- name: Render the Traefik values
+  ansible.builtin.template:
+    src: traefik-values.yaml.j2
+    dest: "{{ k8s_addons_manifest_dir }}/traefik-values.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the Traefik ingress controller
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    release_name: traefik
+    chart_ref: traefik/traefik
+    chart_version: "{{ traefik_chart_version }}"
+    release_namespace: "{{ k8s_addons_traefik_namespace }}"
+    create_namespace: true
+    wait: true
+    values_files:
+      - "{{ k8s_addons_manifest_dir }}/traefik-values.yaml"
+
+- name: Install the NFS subdir external provisioner
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    release_name: nfs-subdir-external-provisioner
+    chart_ref: nfs-subdir-external-provisioner/nfs-subdir-external-provisioner
+    chart_version: "{{ nfs_provisioner_chart_version }}"
+    release_namespace: "{{ k8s_addons_nfs_provisioner_namespace }}"
+    create_namespace: true
+    wait: true
+    values:
+      nfs:
+        server: "{{ nfs_server }}"
+        path: "{{ nfs_path }}"
+      storageClass:
+        name: nfs
+        defaultClass: true
+        archiveOnDelete: false
+
+- name: Install the kubelet CSR approver
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    release_name: kubelet-csr-approver
+    chart_ref: kubelet-csr-approver/kubelet-csr-approver
+    chart_version: "{{ kubelet_csr_approver_chart_version }}"
+    release_namespace: kube-system
+    wait: true
+    values:
+      providerRegex: "^kubeadm-(control|worker-[0-9]+)$"
+      # only the node addresses from the inventory may appear as IP SANs
+      providerIpPrefixes: >-
+        {{ groups['kubeadm_all'] | map('extract', hostvars, 'ansible_host')
+           | map('regex_replace', '$', '/32') | list }}
+      # node names have no DNS records on the lab network, so the DNS SAN
+      # check cannot be satisfied; identity is enforced by the regex and IP list
+      bypassDnsResolution: true
+
+- name: Install the metrics server
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    release_name: metrics-server
+    chart_ref: metrics-server/metrics-server
+    chart_version: "{{ metrics_server_chart_version }}"
+    release_namespace: kube-system
+    wait: true
+
+- name: Create the registry namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    state: present
+    api_version: v1
+    kind: Namespace
+    name: "{{ k8s_addons_registry_namespace }}"
+
+- name: Render the registry storage manifest
+  ansible.builtin.template:
+    src: registry-storage.yaml.j2
+    dest: "{{ k8s_addons_manifest_dir }}/registry-storage.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply the registry NFS volume and claim
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_addons_manifest_dir }}/registry-storage.yaml"
+
+- name: Copy the local registry manifest to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../kubernetes/deployments/local-registry.yaml"
+    dest: "{{ k8s_addons_manifest_dir }}/local-registry.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply the local registry
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_addons_manifest_dir }}/local-registry.yaml"
+
+- name: Wait for the local registry to become available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_addons_kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: registry
+    namespace: "{{ k8s_addons_registry_namespace }}"
+  register: k8s_addons_registry
+  until:
+    - k8s_addons_registry.resources | length > 0
+    - >-
+      k8s_addons_registry.resources[0].status.conditions | default([], true)
+      | selectattr('type', 'equalto', 'Available')
+      | map(attribute='status') | list | join == 'True'
+  retries: 30
+  delay: 10
