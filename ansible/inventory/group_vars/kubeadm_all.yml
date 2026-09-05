@@ -10,6 +10,6 @@ traefik_chart_version: "41.4.0"
 nfs_provisioner_chart_version: "4.0.18"
 metrics_server_chart_version: "3.14.0"
 kubelet_csr_approver_chart_version: "1.2.15"
-metallb_pool_range: "192.168.122.200-192.168.122.220"
+metallb_pool_range: "192.168.122.200-192.168.122.217"
 nfs_server: "192.168.122.230"
 nfs_path: /data

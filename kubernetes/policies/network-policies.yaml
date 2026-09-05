@@ -146,6 +146,47 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+    # alertmanager-webhook diagnosis & remediation paths — kept narrow on
+    # purpose. SSH (22) to the hypervisor and every lab node, GitLab API
+    # (8929) on k3s-infra, Prometheus/Alertmanager nodeports (30090/30093)
+    # and the local registry (30500) on k3s-control.
+    # Keep in sync with ansible/inventory/homelab.ini and lab-network-config.
+    - to:
+        - ipBlock:
+            cidr: 192.168.122.1/32    # hypervisor: virsh, docker builds
+      ports:
+        - protocol: TCP
+          port: 22
+    - to:
+        - ipBlock:
+            cidr: 192.168.122.218/32  # k3s-control: kubectl via SSH, nodeports, registry
+      ports:
+        - protocol: TCP
+          port: 22
+        - protocol: TCP
+          port: 30090
+        - protocol: TCP
+          port: 30093
+        - protocol: TCP
+          port: 30500
+    - to:
+        - ipBlock:
+            cidr: 192.168.122.230/32  # k3s-infra: GitLab API, SSH remediation
+      ports:
+        - protocol: TCP
+          port: 22
+        - protocol: TCP
+          port: 8929
+    - to:
+        - ipBlock:
+            cidr: 192.168.122.219/32  # workers + CI runner: SSH remediation
+        - ipBlock:
+            cidr: 192.168.122.220/32
+        - ipBlock:
+            cidr: 192.168.122.221/32
+      ports:
+        - protocol: TCP
+          port: 22
 
 ---
 # ── pylab ─────────────────────────────────────────────────────────────────────
