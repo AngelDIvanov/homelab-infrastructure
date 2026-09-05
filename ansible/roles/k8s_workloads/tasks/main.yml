@@ -86,7 +86,7 @@
     kubeconfig: "{{ k8s_workloads_kubeconfig }}"
     state: present
     apply: true
-    src: "{{ item.path }}"
+    src: "{{ item }}"
   loop: "{{ k8s_workloads_grafana_manifests.files | map(attribute='path') | sort }}"
 
 - name: Copy the Loki and Promtail values to the control node
