@@ -41,6 +41,11 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          # the export allows root and the Vaultwarden data is root-owned, while the
+          # sqlite3 image defaults to an unprivileged user
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
           containers:
             - name: backup
               # a small image that ships the sqlite3 CLI, so nothing is installed at run time
