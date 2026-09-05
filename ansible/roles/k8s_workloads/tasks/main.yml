@@ -176,6 +176,13 @@
     group: root
     mode: "0644"
 
+- name: Apply the Portainer ingress
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/portainer-ingress.yaml"
+
 - name: Remove the plain Ingress that the IngressRoute replaces
   kubernetes.core.k8s:
     kubeconfig: "{{ k8s_workloads_kubeconfig }}"
@@ -184,13 +191,6 @@
     kind: Ingress
     name: portainer
     namespace: portainer
-
-- name: Apply the Portainer ingress
-  kubernetes.core.k8s:
-    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
-    state: present
-    apply: true
-    src: "{{ k8s_workloads_manifest_dir }}/portainer-ingress.yaml"
 
 - name: Copy the backup CronJobs to the control node
   ansible.builtin.copy:
