@@ -32,8 +32,12 @@ singleBinary:
   replicas: 1
   persistence:
     enabled: true
-    storageClass: ""
+    # "-" renders an empty storageClassName so the claim binds the static NFS volume
+    storageClass: "-"
     size: 10Gi
+    enableStatefulSetAutoDeletePVC: false
+    whenDeleted: Retain
+    whenScaled: Retain
 
 # Single-binary mode renders no read/write/backend pods; their replica
 # counts must be zeroed out for the chart's mode validation. The built-in

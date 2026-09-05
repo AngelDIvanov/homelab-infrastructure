@@ -61,30 +61,8 @@
     group: "{{ ansible_user }}"
     mode: "0600"
 
-- name: Read the running kube-scheduler static pod manifest
-  ansible.builtin.slurp:
-    src: /etc/kubernetes/manifests/kube-scheduler.yaml
-  register: k8s_control_scheduler_manifest
-  changed_when: false
-  failed_when: false
-
-# kubelet watches /etc/kubernetes/manifests and restarts the static pods on its
-# own once the manifests change, so no service restart is needed here.
-- name: Re-render the control-plane static pods to expose component metrics
-  when:
-    - k8s_control_scheduler_manifest.content is defined
-    - k8s_control_scheduler_manifest.content | b64decode is not search('--bind-address=0.0.0.0')
-  ansible.builtin.command:
-    cmd: kubeadm init phase control-plane all --config {{ k8s_control_config_path }}
-  changed_when: true
-
-- name: Re-render the local etcd static pod to expose etcd metrics
-  when:
-    - k8s_control_scheduler_manifest.content is defined
-    - k8s_control_scheduler_manifest.content | b64decode is not search('--bind-address=0.0.0.0')
-  ansible.builtin.command:
-    cmd: kubeadm init phase etcd local --config {{ k8s_control_config_path }}
-  changed_when: true
+- name: Expose the control-plane metrics endpoints
+  ansible.builtin.import_tasks: metrics.yml
 
 - name: Download the Calico operator manifest
   ansible.builtin.get_url:

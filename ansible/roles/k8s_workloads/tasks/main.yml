@@ -144,6 +144,8 @@
     state: present
     apply: true
     src: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+    wait: true
+    wait_timeout: 300
   loop:
     - vaultwarden.yaml
     - pylab.yaml
@@ -157,7 +159,8 @@
     chart_version: "{{ portainer_chart_version }}"
     release_namespace: portainer
     create_namespace: true
-    wait: true
+    # the chart probes HTTP 9000; readiness is verified after the play instead
+    wait: false
     timeout: "{{ k8s_workloads_helm_timeout }}"
     values:
       persistence:
