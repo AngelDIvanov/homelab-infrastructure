@@ -1,6 +1,14 @@
 deployment:
   replicas: 2
 
+# Two replicas with hard anti-affinity on two workers: a surge pod has nowhere
+# to go, so roll one replica at a time instead
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+    maxSurge: 0
+
 affinity:
   podAntiAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:

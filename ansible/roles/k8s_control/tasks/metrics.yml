@@ -54,14 +54,20 @@
   changed_when: true
 
 - name: Read the kube-proxy configuration
-  ansible.builtin.command:
-    cmd: kubectl --kubeconfig {{ k8s_control_kubeconfig }} -n kube-system get configmap kube-proxy -o jsonpath={.data.config\.conf}
-  register: k8s_control_kube_proxy_config
-  changed_when: false
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_control_kubeconfig }}"
+    api_version: v1
+    kind: ConfigMap
+    name: kube-proxy
+    namespace: kube-system
+  register: k8s_control_kube_proxy_configmap
 
 - name: Re-render the kube-proxy addon when it does not expose metrics yet
   ansible.builtin.command:
     cmd: kubeadm init phase addon kube-proxy --config {{ k8s_control_config_path }}
-  when: "k8s_control_kube_proxy_config.stdout is not search('metricsBindAddress: 0.0.0.0:10249')"
+  when: >-
+    k8s_control_kube_proxy_configmap.resources | length == 0
+    or (k8s_control_kube_proxy_configmap.resources[0].data['config.conf'] | default(''))
+       is not search('metricsBindAddress: 0.0.0.0:10249')
   changed_when: true
   notify: Restart kube-proxy
