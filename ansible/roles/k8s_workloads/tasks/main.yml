@@ -180,6 +180,29 @@
     apply: true
     src: "{{ k8s_workloads_manifest_dir }}/portainer-ingress.yaml"
 
+- name: Copy the backup CronJobs to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../kubernetes/backup/{{ item }}"
+    dest: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - etcd-snapshot-cronjob.yaml
+    - gitlab-backup-cronjob.yaml
+    - vaultwarden-backup-cronjob.yaml
+
+- name: Apply the backup CronJobs
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+  loop:
+    - etcd-snapshot-cronjob.yaml
+    - gitlab-backup-cronjob.yaml
+    - vaultwarden-backup-cronjob.yaml
+
 # Applied last so every workload the policies reference exists already.
 - name: Copy the network policies to the control node
   ansible.builtin.copy:
