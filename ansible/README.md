@@ -32,6 +32,47 @@ with `../scripts/kubeadm-known-hosts.sh`, then re-run only the worker play:
 ansible-playbook -i inventory/kubeadm.ini playbooks/kubeadm-bootstrap.yml --tags workers
 ```
 
+## Network prerequisites
+
+The libvirt `default` network hands out DHCP leases from `192.168.122.2` to `.254`
+by default. The lab uses fixed addresses above `.199`: the MetalLB pool
+(`.200-.220`), the NFS server (`.230`) and the kubeadm nodes (`.240+`). Shrink the
+DHCP range once on the hypervisor so dnsmasq can never lease one of them:
+
+```bash
+../scripts/libvirt-reserve-lab-range.sh   # sets the default network DHCP range to .2-.199
+```
+
+## Add-ons
+
+After the bootstrap, install everything k3s used to bundle with one command:
+
+```bash
+ansible-playbook -i inventory/kubeadm.ini playbooks/kubeadm-addons.yml
+```
+
+The playbook installs helm on the control node (pinned version and sha256)
+and then, in order:
+
+- **MetalLB** — replaces the k3s ServiceLB so `type: LoadBalancer` services
+  get an address. The L2 pool hands out `192.168.122.200-192.168.122.220`
+  from the libvirt network (`metallb_pool_range` in `inventory/group_vars`).
+- **Traefik** — keeps the `traefik` ingress class (and makes it the default)
+  that the existing app manifests reference; two replicas with hard pod
+  anti-affinity, fronted by a MetalLB LoadBalancer service.
+- **NFS subdir external provisioner** — keeps the `nfs` StorageClass and marks
+  it default, so PVCs bind against `192.168.122.230:/data` like before.
+- **metrics-server** with **kubelet-csr-approver** — kubelets request serving
+  certs from the cluster CA (`serverTLSBootstrap` in the kubeadm config) and
+  the approver signs them for the kubeadm node names, so metrics-server runs
+  with verified TLS instead of `--kubelet-insecure-tls`.
+- **Local registry** — applies `kubernetes/deployments/local-registry.yaml`
+  unchanged (NodePort 30500, image pinned by digest) plus its NFS volume and
+  claim. Every node's containerd is configured to pull from
+  `192.168.122.240:30500` as plain HTTP via `certs.d`.
+
+All chart versions are pinned in `inventory/group_vars/kubeadm_all.yml`.
+
 ## Lint
 
 ```bash

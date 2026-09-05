@@ -1,0 +1,12 @@
+---
+k8s_addons_kubeconfig: /etc/kubernetes/admin.conf
+k8s_addons_manifest_dir: /etc/kubeadm/addons
+k8s_addons_helm_version: "3.21.4"
+k8s_addons_helm_sha256: "61f88ab166748cb19604d7884cb100ae9ccb13804ddeb98e08af167eacbb6a14"
+k8s_addons_helm_archive_dir: /usr/local/src
+k8s_addons_helm_extract_dir: /usr/local/lib
+k8s_addons_metallb_namespace: metallb-system
+k8s_addons_traefik_namespace: traefik
+k8s_addons_nfs_provisioner_namespace: nfs-provisioner
+k8s_addons_registry_namespace: registry
+k8s_addons_registry_storage_size: 20Gi
