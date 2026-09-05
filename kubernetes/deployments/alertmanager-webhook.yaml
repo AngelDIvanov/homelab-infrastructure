@@ -991,6 +991,10 @@ spec:
                   name: slack-signing-secret
                   key: secret
                   optional: true
+            # Comma-separated Slack usernames allowed to click Approve & Run.
+            # Empty = anyone in the channel may approve (previous behaviour).
+            - name: SLACK_APPROVERS
+              value: "angel"
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:

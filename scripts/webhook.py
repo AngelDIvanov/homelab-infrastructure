@@ -14,6 +14,9 @@ GITLAB_TOKEN      = os.environ.get('GITLAB_TOKEN',      '')
 GITLAB_PROJECT_ID = os.environ.get('GITLAB_PROJECT_ID', '1')
 SSH_KEY           = os.environ.get('SSH_KEY',           '/root/.ssh/id_rsa')
 SSH_USER          = os.environ.get('SSH_USER',          'labadmin')
+# Path to a known_hosts file inside the pod. When set, SSH host keys are
+# verified (StrictHostKeyChecking=yes). Leave empty only for throwaway labs.
+SSH_KNOWN_HOSTS   = os.environ.get('SSH_KNOWN_HOSTS',   '')
 K3S_CONTROL_IP    = os.environ.get('K3S_CONTROL_IP',    '192.168.122.218')
 HYPERVISOR_IP     = os.environ.get('HYPERVISOR_IP',     '192.168.122.1')
 REGISTRY_URL      = os.environ.get('REGISTRY_URL',      'http://192.168.122.218:30500')
@@ -23,6 +26,9 @@ ANTHROPIC_MODEL      = os.environ.get('ANTHROPIC_MODEL',      'claude-sonnet-4-6
 SLACK_BOT_TOKEN      = os.environ.get('SLACK_BOT_TOKEN',      '')
 SLACK_SIGNING_SECRET = os.environ.get('SLACK_SIGNING_SECRET', '')
 SLACK_INCIDENTS      = os.environ.get('SLACK_INCIDENTS',      '#incidents')
+# Comma-separated Slack usernames allowed to click Approve & Run.
+# Empty (default) keeps the previous behaviour: anyone in the channel may approve.
+SLACK_APPROVERS      = [u.strip() for u in os.environ.get('SLACK_APPROVERS', '').split(',') if u.strip()]
 
 SLACK_CRITICAL_URL = os.environ.get('SLACK_CRITICAL_URL', '')
 SLACK_WARNING_URL  = os.environ.get('SLACK_WARNING_URL',  '')
@@ -93,10 +99,14 @@ pending = {}   # token → {commands, response_url}
 
 # ── SSH helpers ───────────────────────────────────────────────────────────────
 def _ssh(host, cmd, timeout=30):
+    host_opts = ['-o', 'StrictHostKeyChecking=yes', '-o', f'UserKnownHostsFile={SSH_KNOWN_HOSTS}'] \
+        if SSH_KNOWN_HOSTS else \
+        ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null']
+    if not SSH_KNOWN_HOSTS:
+        log.warning("SSH_KNOWN_HOSTS not set — SSH host keys are NOT verified")
     try:
         r = subprocess.run(
-            ['ssh', '-i', SSH_KEY, '-o', 'StrictHostKeyChecking=no',
-             '-o', 'UserKnownHostsFile=/dev/null',
+            ['ssh', '-i', SSH_KEY, *host_opts,
              '-o', 'ConnectTimeout=10', f'{SSH_USER}@{host}', cmd],
             capture_output=True, text=True, timeout=timeout,
         )
@@ -309,6 +319,9 @@ _BLOCKED_PATTERNS = [
     re.compile(r'kubectl\s+(get|describe)\s+secret', re.IGNORECASE),
     re.compile(r'rm\s+-rf\s+/'),
     re.compile(r'kubectl\s+delete\s+(job|pod)\s+.*drift-test'),  # cleanup of old test artifacts
+    # The system prompt already forbids them; enforce it server-side too.
+    re.compile(r'[;|&`]'),
+    re.compile(r'\$\('),
 ]
 
 def parse_commands(text):
@@ -578,6 +591,17 @@ def handle_action(body_bytes):
             return b'ok'
 
         if aid == 'lab_approve':
+            if SLACK_APPROVERS and user not in SLACK_APPROVERS:
+                log.warning(f"Approve denied: {user!r} is not in SLACK_APPROVERS")
+                if resp_url:
+                    slack_respond(resp_url, f":lock: {user} is not an authorized approver. Ask an on-call engineer to approve.")
+                else:
+                    slack_post(SLACK_INCIDENTS,
+                               [{"type": "section",
+                                 "text": {"type": "mrkdwn",
+                                          "text": f":lock: Approve by *{user}* denied — not in SLACK_APPROVERS."}}],
+                               text=f"Approve by {user} denied")
+                return b'ok'
             entry = pending.pop(token, None)
             if not entry:
                 if resp_url:
