@@ -97,7 +97,7 @@ spec:
       serviceAccountName: pylab
       containers:
         - name: pylab
-          image: 192.168.122.218:30500/pylab:latest
+          image: 192.168.122.240:30500/pylab:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -185,7 +185,7 @@ spec:
 ---
 # ─── Ingress (Traefik) ────────────────────────────────────────────────────────
 # Real-life issue: change the host → 404 from Traefik, app is fine
-# Access via: http://pylab.local (add to /etc/hosts → 192.168.122.218)
+# Access via: http://pylab.local (add to /etc/hosts → 192.168.122.200, the Traefik address)
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
