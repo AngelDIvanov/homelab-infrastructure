@@ -4,6 +4,7 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json, urllib.request, urllib.error, urllib.parse
 import os, hashlib, hmac, logging, subprocess, threading, time, uuid, re, shlex
+import shutil
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
@@ -98,6 +99,8 @@ RUNBOOKS = {
 pending = {}   # token → {commands, response_url}
 
 # ── SSH helpers ───────────────────────────────────────────────────────────────
+SSH_BIN = shutil.which('ssh') or 'ssh'   # absolute path (bandit B607): no PATH lookup games
+
 def _ssh(host, cmd, timeout=30):
     host_opts = ['-o', 'StrictHostKeyChecking=yes', '-o', f'UserKnownHostsFile={SSH_KNOWN_HOSTS}'] \
         if SSH_KNOWN_HOSTS else \
@@ -105,8 +108,10 @@ def _ssh(host, cmd, timeout=30):
     if not SSH_KNOWN_HOSTS:
         log.warning("SSH_KNOWN_HOSTS not set — SSH host keys are NOT verified")
     try:
+        # nosec B603 -- cmd comes only from RUNBOOKS constants or parse_commands()
+        # (operator allowlist + blocklist + metachar rejection), never raw LLM output.
         r = subprocess.run(
-            ['ssh', '-i', SSH_KEY, *host_opts,
+            [SSH_BIN, '-i', SSH_KEY, *host_opts,
              '-o', 'ConnectTimeout=10', f'{SSH_USER}@{host}', cmd],
             capture_output=True, text=True, timeout=timeout,
         )
