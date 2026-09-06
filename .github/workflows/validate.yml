@@ -94,14 +94,14 @@ jobs:
           git fetch --no-tags origin "$BASE_REF"
           docker run --rm -v "$PWD:/repo" -w /repo \
             zricethezav/gitleaks@sha256:eadfe256fa18d6a78a717abc9ed454c8e03865d1c46d627bca83977f4424901a \
-            detect --source . --verbose --log-opts "origin/$BASE_REF..HEAD"
+            detect --source . --verbose --redact --log-opts "origin/$BASE_REF..HEAD"
 
       - name: Scan repository for secrets
         if: github.event_name == 'push'
         run: >-
           docker run --rm -v "$PWD:/repo" -w /repo
           zricethezav/gitleaks@sha256:eadfe256fa18d6a78a717abc9ed454c8e03865d1c46d627bca83977f4424901a
-          detect --source . --verbose
+          detect --source . --verbose --redact
 
   qlty:
     runs-on: ubuntu-24.04
