@@ -145,7 +145,7 @@ security:secret-detection:
       else
         RANGE="$CI_COMMIT_SHA"
       fi
-      gitleaks detect --source . --verbose --log-opts "$RANGE"
+      gitleaks detect --source . --verbose --redact --log-opts "$RANGE"
   allow_failure: false
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
