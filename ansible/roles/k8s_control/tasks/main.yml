@@ -61,6 +61,9 @@
     group: "{{ ansible_user }}"
     mode: "0600"
 
+- name: Expose the control-plane metrics endpoints
+  ansible.builtin.import_tasks: metrics.yml
+
 - name: Download the Calico operator manifest
   ansible.builtin.get_url:
     url: https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml

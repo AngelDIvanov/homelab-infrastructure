@@ -1,0 +1,16 @@
+- name: Expose control-plane metrics for the monitoring stack
+  hosts: kubeadm_control
+  become: true
+  tags: [metrics]
+  tasks:
+    - name: Render the kubeadm configuration and re-render the static pods if needed
+      ansible.builtin.import_role:
+        name: k8s_control
+        tasks_from: metrics
+
+- name: Deploy the workloads
+  hosts: kubeadm_control
+  become: true
+  tags: [workloads]
+  roles:
+    - role: k8s_workloads

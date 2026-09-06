@@ -1,0 +1,112 @@
+grafana:
+  plugins:
+    - yesoreyeram-infinity-datasource
+  persistence:
+    enabled: true
+    existingClaim: grafana-nfs
+  initChownData:
+    enabled: false
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - grafana.homelab.local
+
+prometheus:
+  verticalPodAutoscaler:
+    enabled: false
+  prometheusSpec:
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: nfs
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - prometheus.homelab.local
+
+alertmanager:
+  verticalPodAutoscaler:
+    enabled: false
+  alertmanagerSpec:
+    logLevel: info
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - alertmanager.homelab.local
+  config:
+    global:
+      resolve_timeout: 30s
+    route:
+      group_by: ['alertname', 'namespace', 'severity']
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 4h
+      receiver: gitlab-webhook
+      routes:
+        - match:
+            severity: critical
+          receiver: gitlab-webhook
+          repeat_interval: 4h
+        - match:
+            severity: warning
+          receiver: gitlab-webhook
+          repeat_interval: 4h
+        - match:
+            severity: info
+          receiver: gitlab-webhook
+          repeat_interval: 24h
+    receivers:
+      - name: gitlab-webhook
+        webhook_configs:
+          - url: 'http://alertmanager-webhook:8080'
+            send_resolved: true
+    inhibit_rules:
+      - source_match:
+          severity: critical
+        target_match:
+          severity: warning
+        equal:
+          - alertname
+          - namespace
+
+# kubeadm runs etcd and the control-plane components as static pods with no
+# discoverable Endpoints, so the exporters scrape fixed addresses instead.
+kubeEtcd:
+  enabled: true
+  endpoints:
+    - 192.168.122.240
+  service:
+    enabled: true
+    port: 2381
+    targetPort: 2381
+  serviceMonitor:
+    scheme: http
+
+kubeScheduler:
+  enabled: true
+  endpoints:
+    - 192.168.122.240
+  serviceMonitor:
+    https: true
+    insecureSkipVerify: true
+
+kubeControllerManager:
+  enabled: true
+  endpoints:
+    - 192.168.122.240
+  serviceMonitor:
+    https: true
+    insecureSkipVerify: true

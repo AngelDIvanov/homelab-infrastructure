@@ -1,0 +1,67 @@
+# Single-binary Loki on the static NFS claim: the chart's StatefulSet creates
+# its PVC through a volumeClaimTemplate named "storage", so the pre-created
+# claim storage-loki-0 (bound to the nfs-loki PV) is adopted unchanged.
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  limits_config:
+    retention_period: 744h
+    max_cache_freshness_per_query: 10m
+  compactor:
+    working_directory: /var/loki/retention
+    delete_request_store: filesystem
+    compaction_interval: 10m
+    retention_enabled: true
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    # "-" renders an empty storageClassName so the claim binds the static NFS volume
+    storageClass: "-"
+    size: 10Gi
+    enableStatefulSetAutoDeletePVC: false
+    whenDeleted: Retain
+    whenScaled: Retain
+
+# Single-binary mode renders no read/write/backend pods; their replica
+# counts must be zeroed out for the chart's mode validation. The built-in
+# memcached caches are dropped too: one small lab node, no cache tier.
+test:
+  enabled: false
+gateway:
+  enabled: false
+lokiCanary:
+  enabled: false
+minio:
+  enabled: false
+memcached:
+  enabled: false
+memcachedExporter:
+  enabled: false
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+write:
+  replicas: 0
+read:
+  replicas: 0
+backend:
+  replicas: 0

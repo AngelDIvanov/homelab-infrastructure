@@ -1,0 +1,232 @@
+---
+- name: Create the workload manifest directory
+  ansible.builtin.file:
+    path: "{{ k8s_workloads_manifest_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Add the helm chart repositories
+  kubernetes.core.helm_repository:
+    name: "{{ item.name }}"
+    repo_url: "{{ item.url }}"
+    state: present
+  loop:
+    - name: prometheus-community
+      url: https://prometheus-community.github.io/helm-charts
+    - name: grafana
+      url: https://grafana.github.io/helm-charts
+    - name: portainer
+      url: https://portainer.github.io/k8s
+
+- name: Create the workload namespaces
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    api_version: v1
+    kind: Namespace
+    name: "{{ item }}"
+  loop: "{{ k8s_workloads_namespaces }}"
+
+- name: Copy the static NFS volume manifest to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../kubernetes/storage/nfs-static-volumes.yaml"
+    dest: "{{ k8s_workloads_manifest_dir }}/nfs-static-volumes.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply the static NFS volumes and claims
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/nfs-static-volumes.yaml"
+
+- name: Copy the kube-prometheus-stack values to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../monitoring/values/kube-prometheus-stack.yaml"
+    dest: "{{ k8s_workloads_manifest_dir }}/kube-prometheus-stack.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the kube-prometheus-stack
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    release_name: monitoring
+    chart_ref: prometheus-community/kube-prometheus-stack
+    chart_version: "{{ kube_prometheus_stack_chart_version }}"
+    release_namespace: monitoring
+    create_namespace: true
+    wait: true
+    timeout: "{{ k8s_workloads_helm_timeout }}"
+    values_files:
+      - "{{ k8s_workloads_manifest_dir }}/kube-prometheus-stack.yaml"
+
+- name: Copy the Grafana dashboards and rules to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../monitoring/grafana/"
+    dest: "{{ k8s_workloads_manifest_dir }}/grafana/"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Only *.yaml manifests carry Kubernetes objects; the *.json files next to
+# them are Grafana exports, not cluster resources.
+- name: Collect the Grafana configuration manifests
+  ansible.builtin.find:
+    paths: "{{ k8s_workloads_manifest_dir }}/grafana"
+    patterns: "*.yaml"
+  register: k8s_workloads_grafana_manifests
+
+- name: Apply the Grafana dashboards, alerts and datasource
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ item }}"
+  loop: "{{ k8s_workloads_grafana_manifests.files | map(attribute='path') | sort }}"
+
+- name: Copy the Loki and Promtail values to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../monitoring/values/{{ item }}"
+    dest: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - loki.yaml
+    - promtail.yaml
+
+- name: Install Loki
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    release_name: loki
+    chart_ref: grafana/loki
+    chart_version: "{{ loki_chart_version }}"
+    release_namespace: monitoring
+    create_namespace: true
+    wait: true
+    timeout: "{{ k8s_workloads_helm_timeout }}"
+    values_files:
+      - "{{ k8s_workloads_manifest_dir }}/loki.yaml"
+
+- name: Install Promtail
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    release_name: promtail
+    chart_ref: grafana/promtail
+    chart_version: "{{ promtail_chart_version }}"
+    release_namespace: monitoring
+    create_namespace: true
+    wait: true
+    timeout: "{{ k8s_workloads_helm_timeout }}"
+    values_files:
+      - "{{ k8s_workloads_manifest_dir }}/promtail.yaml"
+
+- name: Copy the application manifests to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../kubernetes/deployments/{{ item }}"
+    dest: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - vaultwarden.yaml
+    - pylab.yaml
+    - trengo-search.yaml
+
+- name: Apply the application manifests
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+    wait: true
+    wait_timeout: 300
+  loop:
+    - vaultwarden.yaml
+    - pylab.yaml
+    - trengo-search.yaml
+
+- name: Install Portainer
+  kubernetes.core.helm:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    release_name: portainer
+    chart_ref: portainer/portainer
+    chart_version: "{{ portainer_chart_version }}"
+    release_namespace: portainer
+    create_namespace: true
+    # the chart probes HTTP 9000; readiness is verified after the play instead
+    wait: false
+    timeout: "{{ k8s_workloads_helm_timeout }}"
+    values:
+      persistence:
+        existingClaim: portainer-nfs
+      service:
+        type: ClusterIP
+
+- name: Render the Portainer ingress
+  ansible.builtin.template:
+    src: portainer-ingress.yaml.j2
+    dest: "{{ k8s_workloads_manifest_dir }}/portainer-ingress.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply the Portainer ingress
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/portainer-ingress.yaml"
+
+- name: Remove the plain Ingress that the IngressRoute replaces
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: absent
+    api_version: networking.k8s.io/v1
+    kind: Ingress
+    name: portainer
+    namespace: portainer
+
+- name: Copy the backup CronJobs to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../kubernetes/backup/{{ item }}"
+    dest: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - etcd-snapshot-cronjob.yaml
+    - gitlab-backup-cronjob.yaml
+    - vaultwarden-backup-cronjob.yaml
+
+- name: Apply the backup CronJobs
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/{{ item }}"
+  loop:
+    - etcd-snapshot-cronjob.yaml
+    - gitlab-backup-cronjob.yaml
+    - vaultwarden-backup-cronjob.yaml
+
+# Applied last so every workload the policies reference exists already.
+- name: Copy the network policies to the control node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../kubernetes/policies/network-policies.yaml"
+    dest: "{{ k8s_workloads_manifest_dir }}/network-policies.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply the network policies
+  kubernetes.core.k8s:
+    kubeconfig: "{{ k8s_workloads_kubeconfig }}"
+    state: present
+    apply: true
+    src: "{{ k8s_workloads_manifest_dir }}/network-policies.yaml"

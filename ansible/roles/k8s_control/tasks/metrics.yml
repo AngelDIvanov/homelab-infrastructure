@@ -1,0 +1,85 @@
+---
+# kubeadm binds scheduler, controller-manager and etcd metrics to localhost by
+# default. Re-render only the static pods that still lack the setting; kubelet
+# restarts a static pod on its own when its manifest changes.
+- name: Determine the installed kubeadm version
+  ansible.builtin.command:
+    cmd: kubeadm version -o short
+  register: k8s_control_kubeadm_version
+  changed_when: false
+
+- name: Expose the kubeadm version to the configuration template
+  ansible.builtin.set_fact:
+    k8s_control_kubernetes_version: "{{ k8s_control_kubeadm_version.stdout | trim }}"
+
+- name: Render the kubeadm configuration with the metrics settings
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: "{{ k8s_control_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Read the control-plane static pod manifests
+  ansible.builtin.slurp:
+    src: "/etc/kubernetes/manifests/{{ item.manifest }}"
+  loop:
+    - { name: scheduler, manifest: kube-scheduler.yaml, flag: "--bind-address=0.0.0.0" }
+    - { name: controller-manager, manifest: kube-controller-manager.yaml, flag: "--bind-address=0.0.0.0" }
+    - { name: etcd, manifest: etcd.yaml, flag: "--listen-metrics-urls=http://{{ ansible_host }}:2381" }
+  loop_control:
+    label: "{{ item.name }}"
+  register: k8s_control_static_manifests
+
+- name: Re-render the control-plane components that do not expose metrics yet
+  ansible.builtin.command:
+    cmd: kubeadm init phase control-plane {{ item.item.name }} --config {{ k8s_control_config_path }}
+  loop: "{{ k8s_control_static_manifests.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.item.name != 'etcd'
+    - item.content | b64decode is not search(item.item.flag)
+  changed_when: true
+
+- name: Re-render the local etcd static pod when it does not expose metrics yet
+  ansible.builtin.command:
+    cmd: kubeadm init phase etcd local --config {{ k8s_control_config_path }}
+  loop: "{{ k8s_control_static_manifests.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.item.name == 'etcd'
+    - item.content | b64decode is not search(item.item.flag)
+  changed_when: true
+
+# Re-rendering etcd restarts it, and the API server is unavailable for a few
+# seconds while it comes back.
+- name: Wait for the API server after the static pod changes
+  ansible.builtin.uri:
+    url: https://127.0.0.1:6443/readyz
+    validate_certs: false
+    status_code: 200
+  register: k8s_control_apiserver_ready
+  until: k8s_control_apiserver_ready.status == 200
+  retries: 30
+  delay: 5
+
+- name: Read the kube-proxy configuration
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ k8s_control_kubeconfig }}"
+    api_version: v1
+    kind: ConfigMap
+    name: kube-proxy
+    namespace: kube-system
+  register: k8s_control_kube_proxy_configmap
+
+- name: Re-render the kube-proxy addon when it does not expose metrics yet
+  ansible.builtin.command:
+    cmd: kubeadm init phase addon kube-proxy --config {{ k8s_control_config_path }}
+  when: >-
+    k8s_control_kube_proxy_configmap.resources | length == 0
+    or (k8s_control_kube_proxy_configmap.resources[0].data['config.conf'] | default(''))
+       is not search('metricsBindAddress: 0.0.0.0:10249')
+  changed_when: true
+  notify: Restart kube-proxy

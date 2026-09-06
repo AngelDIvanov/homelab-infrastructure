@@ -6,20 +6,6 @@ metadata:
 
 ---
 apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: vaultwarden-data
-  namespace: vaultwarden
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: local-path
-  resources:
-    requests:
-      storage: 1Gi
-
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nginx-vaultwarden
@@ -29,9 +15,7 @@ data:
     events {}
     http {
       server {
-        listen 443 ssl;
-        ssl_certificate     /ssl/cert.pem;
-        ssl_certificate_key /ssl/key.pem;
+        listen 8080;
 
         # Vaultwarden web UI
         location / {
@@ -81,18 +65,21 @@ spec:
               value: "true"
             - name: SIGNUPS_ALLOWED
               value: "true"
+            # Push relay needs the vaultwarden-push secret; enable once it exists
             - name: PUSH_ENABLED
-              value: "true"
+              value: "false"
             - name: PUSH_INSTALLATION_ID
               valueFrom:
                 secretKeyRef:
                   name: vaultwarden-push
                   key: installation-id
+                  optional: true
             - name: PUSH_INSTALLATION_KEY
               valueFrom:
                 secretKeyRef:
                   name: vaultwarden-push
                   key: installation-key
+                  optional: true
           volumeMounts:
             - name: data
               mountPath: /data
@@ -107,14 +94,11 @@ spec:
         - name: nginx
           image: nginx:alpine
           ports:
-            - containerPort: 443
+            - containerPort: 8080
           volumeMounts:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
-            - name: tls
-              mountPath: /ssl
-              readOnly: true
           resources:
             requests:
               memory: "16Mi"
@@ -130,9 +114,6 @@ spec:
         - name: nginx-config
           configMap:
             name: nginx-vaultwarden
-        - name: tls
-          secret:
-            secretName: vaultwarden-tls
 
 ---
 apiVersion: v1
@@ -141,11 +122,32 @@ metadata:
   name: vaultwarden
   namespace: vaultwarden
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: vaultwarden
   ports:
-    - name: https
-      port: 443
-      targetPort: 443
-      nodePort: 30900
+    - name: http
+      port: 80
+      targetPort: 8080
+
+---
+# Traefik terminates the client connection; the nginx sidecar fronts
+# Vaultwarden and upgrades the /notifications/hub websocket connection.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vaultwarden
+  namespace: vaultwarden
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: vault.homelab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vaultwarden
+                port:
+                  number: 80

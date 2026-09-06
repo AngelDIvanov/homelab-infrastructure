@@ -32,7 +32,7 @@ spec:
         version: v1
     spec:
       containers:
-      - image: 192.168.122.218:30500/trengo-search:latest
+      - image: 192.168.122.240:30500/trengo-search:latest
         # IfNotPresent so CI's import-to-node deploys (k3s ctr images import +
         # kubectl set image trengo-search:<sha>) use the local image instead of
         # trying to pull a registry-less tag from Docker Hub (ImagePullBackOff).
@@ -102,7 +102,7 @@ spec:
         app: trengo-search-staging
     spec:
       containers:
-      - image: 192.168.122.218:30500/trengo-search:latest
+      - image: 192.168.122.240:30500/trengo-search:latest
         imagePullPolicy: IfNotPresent
         name: trengo-search
         ports:

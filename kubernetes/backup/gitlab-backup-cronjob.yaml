@@ -2,7 +2,7 @@
 # GitLab daily backup CronJob.
 #
 # What it does:
-#   1. SSHes to k3s-infra (.230) where GitLab CE runs
+#   1. SSHes to the GitLab CE VM (.230) outside the cluster
 #   2. Runs gitlab-backup create (repos, issues, wikis, uploads, CI artifacts)
 #   3. GitLab stores backups in /var/opt/gitlab/backups/ by default
 #   4. Retains last 7 backups (configurable via BACKUP_KEEP_TIME in gitlab.rb)
@@ -28,13 +28,6 @@ spec:
     spec:
       template:
         spec:
-          tolerations:
-            - key: node-role
-              operator: Equal
-              value: infra
-              effect: NoSchedule
-          nodeSelector:
-            node-role: infra
           restartPolicy: OnFailure
           containers:
             - name: backup
@@ -46,7 +39,7 @@ spec:
                   set -e
                   apk add --no-cache openssh-client > /dev/null 2>&1
 
-                  echo "[$(date)] Triggering GitLab backup on k3s-infra..."
+                  echo "[$(date)] Triggering GitLab backup on the GitLab VM..."
 
                   ssh -i /root/.ssh/id_rsa \
                       -o StrictHostKeyChecking=no \
