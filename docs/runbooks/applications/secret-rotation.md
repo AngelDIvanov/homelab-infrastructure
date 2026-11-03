@@ -16,7 +16,7 @@
 | `pylab-secrets` | pylab | `DB_URL`, `API_KEY` | pylab deployment |
 | `vaultwarden-push` | vaultwarden | `installation-id`, `installation-key` | vaultwarden push notifications |
 | `vaultwarden-tls` | vaultwarden | `cert.pem`, `key.pem` | nginx sidecar TLS |
-| `webhook-ssh-key` | kube-system | `id_rsa`, `known_hosts` | webhook, backup cronjobs |
+| `webhook-ssh-key` | monitoring, kube-system | `id_rsa`, `known_hosts` | webhook (monitoring), backup cronjobs (kube-system) |
 | `registry-auth` | registry | `htpasswd` | registry basic auth |
 
 ---
@@ -87,10 +87,12 @@ openssl s_client -connect 192.168.122.218:30900 </dev/null 2>/dev/null | \
 
 ### webhook-ssh-key
 
-The webhook pod and all backup cronjobs use this key to SSH into cluster nodes and the hypervisor.
-The same Secret carries `known_hosts`, the pinned host keys the webhook verifies against
+The webhook pod (namespace `monitoring`) and all backup cronjobs (namespace `kube-system`) use
+this key to SSH into cluster nodes and the hypervisor. A pod can only mount a Secret from its own
+namespace, so the Secret exists once per namespace and both copies are rotated together.
+The Secret also carries `known_hosts`, the pinned host keys the webhook verifies against
 (`SSH_KNOWN_HOSTS=/root/.ssh/known_hosts`). Regenerate it with `scripts/homelab-known-hosts.sh`
-on the hypervisor whenever a VM or the hypervisor gets new host keys, then re-apply the Secret.
+on the hypervisor whenever a VM or the hypervisor gets new host keys, then re-apply the Secrets.
 
 ```bash
 # 1. Generate new key pair on the hypervisor
@@ -103,21 +105,23 @@ done
 # Also add to hypervisor itself (for virsh/docker commands)
 cat /tmp/webhook-new-key.pub >> ~/.ssh/authorized_keys
 
-# 3. Update Kubernetes secret
+# 3. Update the Kubernetes Secret in both namespaces (webhook: monitoring, cronjobs: kube-system)
 ./scripts/homelab-known-hosts.sh   # refresh ansible/inventory/known_hosts-k3s
-kubectl create secret generic webhook-ssh-key \
-  --namespace kube-system \
-  --from-file=id_rsa=/tmp/webhook-new-key \
-  --from-file=known_hosts=ansible/inventory/known_hosts-k3s \
-  --dry-run=client -o yaml | kubectl apply -f -
+for NS in monitoring kube-system; do
+  kubectl create secret generic webhook-ssh-key \
+    --namespace "$NS" \
+    --from-file=id_rsa=/tmp/webhook-new-key \
+    --from-file=known_hosts=ansible/inventory/known_hosts-k3s \
+    --dry-run=client -o yaml | kubectl apply -f -
+done
 
 # 4. Restart webhook deployment
-kubectl rollout restart deployment/webhook -n kube-system
-kubectl rollout status deployment/webhook -n kube-system --timeout=60s
+kubectl rollout restart deployment/alertmanager-webhook -n monitoring
+kubectl rollout status deployment/alertmanager-webhook -n monitoring --timeout=60s
 
 # 5. Remove OLD public key from authorized_keys on all nodes
 # Get old key fingerprint first:
-OLD_FINGERPRINT=$(kubectl get secret webhook-ssh-key -n kube-system \
+OLD_FINGERPRINT=$(kubectl get secret webhook-ssh-key -n monitoring \
   -o jsonpath='{.data.id_rsa}' | base64 -d | ssh-keygen -y -f /dev/stdin | \
   ssh-keygen -lf /dev/stdin)
 # Then on each node, remove it from authorized_keys manually or via:

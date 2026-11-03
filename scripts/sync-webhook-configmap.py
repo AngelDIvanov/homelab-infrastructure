@@ -19,7 +19,10 @@ INDENT = "    "
 
 
 def render(source: str) -> str:
-    return "".join(INDENT + line if line.strip() else "\n" for line in source.splitlines(keepends=True))
+    block = "".join(INDENT + line if line.strip() else "\n" for line in source.splitlines(keepends=True))
+    # The block must end with a newline, or the next run would take the
+    # separator of the following document as the end of this one.
+    return block if block.endswith("\n") else block + "\n"
 
 
 def main() -> int:
