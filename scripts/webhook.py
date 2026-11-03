@@ -27,7 +27,8 @@ ANTHROPIC_MODEL      = os.environ.get('ANTHROPIC_MODEL',      'claude-sonnet-4-6
 SLACK_BOT_TOKEN      = os.environ.get('SLACK_BOT_TOKEN',      '')
 SLACK_SIGNING_SECRET = os.environ.get('SLACK_SIGNING_SECRET', '')
 SLACK_INCIDENTS      = os.environ.get('SLACK_INCIDENTS',      '#incidents')
-# Comma-separated Slack usernames allowed to click Approve & Run.
+# Comma-separated Slack user IDs (U…) allowed to click Approve & Run. Usernames
+# are accepted too but are weaker: their owner can change them.
 # Empty (default) keeps the previous behaviour: anyone in the channel may approve.
 SLACK_APPROVERS      = [u.strip() for u in os.environ.get('SLACK_APPROVERS', '').split(',') if u.strip()]
 
@@ -101,12 +102,16 @@ pending = {}   # token → {commands, response_url}
 # ── SSH helpers ───────────────────────────────────────────────────────────────
 SSH_BIN = shutil.which('ssh') or 'ssh'   # absolute path (bandit B607): no PATH lookup games
 
+def _ssh_host_opts():
+    """Host-key options shared by every ssh invocation: pinned keys when
+    SSH_KNOWN_HOSTS is set, otherwise the (logged) unverified fallback."""
+    if SSH_KNOWN_HOSTS:
+        return ['-o', 'StrictHostKeyChecking=yes', '-o', f'UserKnownHostsFile={SSH_KNOWN_HOSTS}']
+    log.warning("SSH_KNOWN_HOSTS not set — SSH host keys are NOT verified")
+    return ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null']
+
 def _ssh(host, cmd, timeout=30):
-    host_opts = ['-o', 'StrictHostKeyChecking=yes', '-o', f'UserKnownHostsFile={SSH_KNOWN_HOSTS}'] \
-        if SSH_KNOWN_HOSTS else \
-        ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null']
-    if not SSH_KNOWN_HOSTS:
-        log.warning("SSH_KNOWN_HOSTS not set — SSH host keys are NOT verified")
+    host_opts = _ssh_host_opts()
     try:
         # B603 justification: cmd comes only from RUNBOOKS constants or
         # parse_commands() (operator allowlist + blocklist + metachar rejection),
@@ -170,7 +175,7 @@ def dispatch_cmd(cmd, timeout=60):
         # labadmin's key there, which may not match.
         c_fixed = re.sub(
             r'^ssh\b',
-            f'ssh -i {SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null',
+            lambda _m: shlex.join([SSH_BIN, '-i', SSH_KEY, *_ssh_host_opts()]),
             c,
         )
         try:
@@ -326,7 +331,7 @@ _BLOCKED_PATTERNS = [
     re.compile(r'rm\s+-rf\s+/'),
     re.compile(r'kubectl\s+delete\s+(job|pod)\s+.*drift-test'),  # cleanup of old test artifacts
     # The system prompt already forbids them; enforce it server-side too.
-    re.compile(r'[;|&`]'),
+    re.compile(r'[;|&`<>]'),
     re.compile(r'\$\('),
 ]
 
@@ -578,7 +583,11 @@ def handle_action(body_bytes):
     params   = dict(urllib.parse.parse_qsl(body_bytes.decode()))
     payload  = json.loads(params.get('payload', '{}'))
     resp_url = payload.get('response_url', '')
-    user     = payload.get('user', {}).get('name', 'unknown')
+    # Slack guarantees user.id in block_actions payloads; name/username are
+    # optional and user-changeable, so authorisation prefers the ID.
+    slack_user = payload.get('user', {})
+    user_id  = slack_user.get('id', '')
+    user     = slack_user.get('username') or slack_user.get('name') or user_id or 'unknown'
 
     for action in payload.get('actions', []):
         aid   = action.get('action_id')
@@ -597,8 +606,8 @@ def handle_action(body_bytes):
             return b'ok'
 
         if aid == 'lab_approve':
-            if SLACK_APPROVERS and user not in SLACK_APPROVERS:
-                log.warning(f"Approve denied: {user!r} is not in SLACK_APPROVERS")
+            if SLACK_APPROVERS and ({user_id, user} - {''}).isdisjoint(SLACK_APPROVERS):
+                log.warning(f"Approve denied: {user!r} ({user_id or 'no id'}) is not in SLACK_APPROVERS")
                 if resp_url:
                     slack_respond(resp_url, f":lock: {user} is not an authorized approver. Ask an on-call engineer to approve.")
                 else:

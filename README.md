@@ -189,7 +189,7 @@ python3 scripts/lab-tui.py       # TUI (requires: pip install textual)
 
 Secrets (`K3S_TOKEN`, `GITLAB_TOKEN`, ...) are pulled from environment variables or Vaultwarden via the Bitwarden CLI. See `scripts/load-secrets.sh` for the bootstrap flow and `scripts/setup-vault.sh` to set Vaultwarden up from scratch.
 
-The secret rotation procedure for all 5 cluster secrets is documented in [`docs/runbooks/applications/secret-rotation.md`](docs/runbooks/applications/secret-rotation.md). No Secret manifests live in git — in-cluster secrets are created from the `.yaml.example` templates (`alertmanager-webhook.yaml`, `pylab-secrets.yaml.example`, ...) and never committed with real values.
+The secret rotation procedure for all 5 cluster secrets is documented in [`docs/runbooks/applications/secret-rotation.md`](docs/runbooks/applications/secret-rotation.md). No real-valued Secret manifests are committed — in-cluster secrets are created from the `.yaml.example` templates (`grafana-gitlab-secret.yaml.example`, `pylab-secrets.yaml.example`...) and never committed with real values.
 
 ---
 
@@ -220,11 +220,11 @@ Restore procedures for each component are documented in the [runbooks](docs/runb
 
 **PodDisruptionBudgets** — applied to Traefik and pylab to prevent accidental full-cluster downtime during rolling updates.
 
-**Webhook security** — Slack request signatures are validated on every inbound payload using `SLACK_SIGNING_SECRET`. Approve & Run is gated by `SLACK_APPROVERS`, a comma-separated allowlist of Slack usernames; users outside the list are denied and the attempt is logged. The webhook endpoint is not exposed to the internet; it is accessible only within the cluster via a ClusterIP service and Traefik ingress restricted to the internal network.
+**Webhook security** — Slack request signatures are validated on every inbound payload using `SLACK_SIGNING_SECRET`. Approve & Run is gated by `SLACK_APPROVERS`, a comma-separated allowlist of Slack user IDs (`U…`, usernames are accepted but can be changed by their owner); users outside the list are denied and the attempt is logged. The webhook endpoint is not exposed to the internet; it is accessible only within the cluster via a ClusterIP service and Traefik ingress restricted to the internal network.
 
-**LLM command hardening** — Claude's suggested commands are parsed server-side: only `kubectl`, `k3s`, `ssh`, `virsh` and `docker` commands pass, shell metacharacters (`;`, `|`, `&`, backticks, `$(`) are rejected, and reads of secrets, tokens, private keys or `node-token` are blocked — independently of what the prompt asks for. Defense in depth: the prompt forbids it, the parser enforces it.
+**LLM command hardening** — Claude's suggested commands are parsed server-side: only `kubectl`, `k3s`, `ssh`, `virsh` and `docker` commands pass, shell metacharacters (`;`, `|`, `&`, `<`, `>`, backticks, `$(`) are rejected, and reads of secrets, tokens, private keys or `node-token` are blocked — independently of what the prompt asks for. Defense in depth: the prompt forbids it, the parser enforces it.
 
-**SSH host-key pinning** — Ansible inventories and the auto-healing webhook verify SSH host keys (`StrictHostKeyChecking=yes`) against pinned keys. Keys are read out-of-band through the QEMU guest agent (`scripts/homelab-known-hosts.sh`, `scripts/kubeadm-known-hosts.sh`), so a rogue host on the libvirt bridge cannot substitute its own key.
+**SSH host-key pinning** — Ansible inventories and the auto-healing webhook verify SSH host keys (`StrictHostKeyChecking=yes`) against pinned keys. Keys are read out-of-band through the QEMU guest agent (`scripts/homelab-known-hosts.sh`, `scripts/kubeadm-known-hosts.sh`), so a rogue host on the libvirt bridge cannot substitute its own key. The homelab script also pins the hypervisor's own keys, and the resulting file is mounted into the webhook pod as `/root/.ssh/known_hosts` (`SSH_KNOWN_HOSTS`). The webhook ConfigMap is generated from `scripts/webhook.py` by `scripts/sync-webhook-configmap.py`, and CI fails if the two drift apart.
 
 **Secret rotation** — documented procedure for rotating all 5 cluster secrets: `docs/runbooks/applications/secret-rotation.md`.
 
