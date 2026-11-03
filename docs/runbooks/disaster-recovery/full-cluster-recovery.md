@@ -109,7 +109,7 @@ curl http://192.168.122.218:30080/api/health  # Grafana
 
 Run this monthly to verify the process works:
 
-1. Take a manual snapshot: `kubectl create job --from=cronjob/k3s-db-snapshot manual-snap -n kube-system`
+1. Take a manual snapshot: `kubectl create job --from=cronjob/etcd-snapshot manual-snap -n kube-system`
 2. Spin up a test VM using Terraform workspace
 3. Restore the snapshot to the test VM
 4. Verify `kubectl get nodes` works

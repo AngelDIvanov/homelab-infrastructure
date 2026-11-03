@@ -9,7 +9,15 @@
 #
 # Restore:
 #   1. Scale down vaultwarden: kubectl scale deploy vaultwarden -n vaultwarden --replicas=0
-#   2. Copy backup to NFS: cp /data/backups/vaultwarden/<backup>.db /data/vaultwarden/db.sqlite3
+#   2. Copy the backup over the live database. The backups sit in the directory the
+#      NFS subdir provisioner created for the vaultwarden-backups claim (under /data on
+#      the NFS server, named <namespace>-<claim>-<pv>), the live database in /data/vaultwarden.
+#      Easiest from a one-off pod that mounts both claims:
+#        kubectl run -n vaultwarden restore --rm -it --restart=Never --image=busybox \
+#          --overrides='{"spec":{"volumes":[{"name":"b","persistentVolumeClaim":{"claimName":"vaultwarden-backups"}},{"name":"d","persistentVolumeClaim":{"claimName":"vaultwarden-nfs"}}],"containers":[{"name":"restore","image":"busybox","stdin":true,"tty":true,"volumeMounts":[{"name":"b","mountPath":"/backups"},{"name":"d","mountPath":"/vaultwarden"}]}]}}' \
+#          -- sh -c 'cp /backups/<backup>.db /vaultwarden/db.sqlite3'
+#      Or on the NFS server: kubectl get pv -o custom-columns=NAME:.metadata.name,PATH:.spec.nfs.path
+#      shows the backup directory; cp <that dir>/<backup>.db /data/vaultwarden/db.sqlite3
 #   3. Scale back up:       kubectl scale deploy vaultwarden -n vaultwarden --replicas=1
 
 apiVersion: v1

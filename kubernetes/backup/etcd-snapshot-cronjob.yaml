@@ -4,7 +4,9 @@
 # etcd-snapshots claim every 12h; the 14 most recent snapshots are retained.
 #
 # The etcd client certificates live only on the control node, so the job is
-# pinned there with hostNetwork and a read-only hostPath for the PKI.
+# pinned there with hostNetwork. Only the three files etcdctl needs are
+# mounted (read-only, one hostPath each); the directory also holds ca.key and
+# the server/peer keys, which the job must not be able to read.
 #
 # Restore procedure:
 #   1. Move /etc/kubernetes/manifests/etcd.yaml aside (kubelet stops etcd)
@@ -76,16 +78,30 @@ spec:
                   echo "[$(date)] Retained snapshots:"
                   ls -lh /backup/etcd-*.db
               volumeMounts:
-                - name: etcd-certs
-                  mountPath: /etc/kubernetes/pki/etcd
+                - name: etcd-ca
+                  mountPath: /etc/kubernetes/pki/etcd/ca.crt
+                  readOnly: true
+                - name: etcd-client-cert
+                  mountPath: /etc/kubernetes/pki/etcd/healthcheck-client.crt
+                  readOnly: true
+                - name: etcd-client-key
+                  mountPath: /etc/kubernetes/pki/etcd/healthcheck-client.key
                   readOnly: true
                 - name: backup
                   mountPath: /backup
           volumes:
-            - name: etcd-certs
+            - name: etcd-ca
               hostPath:
-                path: /etc/kubernetes/pki/etcd
-                type: Directory
+                path: /etc/kubernetes/pki/etcd/ca.crt
+                type: File
+            - name: etcd-client-cert
+              hostPath:
+                path: /etc/kubernetes/pki/etcd/healthcheck-client.crt
+                type: File
+            - name: etcd-client-key
+              hostPath:
+                path: /etc/kubernetes/pki/etcd/healthcheck-client.key
+                type: File
             - name: backup
               persistentVolumeClaim:
                 claimName: etcd-snapshots
