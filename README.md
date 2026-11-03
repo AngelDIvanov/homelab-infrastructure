@@ -231,7 +231,7 @@ Restore procedures for each component are documented in the [runbooks](docs/runb
 
 **Remediation success is exit-code based** — SSH remediation results are classified by the remote exit code (timeouts map to 124), not by grepping output for the word "error"; failed remediation is reported as failed.
 
-**Address allocation guardrails** — the MetalLB pool (`.200-.217`) is disjoint from all static lab addresses (`.218-.221`, `.230`, `.240+`) and from the libvirt DHCP range (ends at `.199`, see `scripts/libvirt-reserve-lab-range.sh`). `scripts/validate-ip-allocations.py` fails CI on any overlap, and `scripts/check-configmap-sync.py` fails CI if the ConfigMap copy of `webhook.py` drifts from `scripts/webhook.py` (the deployed copy is the ConfigMap — drift would silently deploy unhardened code).
+**Address allocation guardrails** — the MetalLB pool (`.200-.217`) is disjoint from all static lab addresses (`.218-.221`, `.230`, `.240+`) and from the libvirt DHCP range (ends at `.199`, see `scripts/libvirt-reserve-lab-range.sh`). `scripts/validate-ip-allocations.py` fails CI on any overlap, and `scripts/sync-webhook-configmap.py --check` fails CI if the ConfigMap copy of `webhook.py` drifts from `scripts/webhook.py` (the same script without `--check` regenerates it) (the deployed copy is the ConfigMap — drift would silently deploy unhardened code).
 
 **Secret rotation** — documented procedure for rotating all 5 cluster secrets: `docs/runbooks/applications/secret-rotation.md`.
 
