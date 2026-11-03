@@ -78,8 +78,8 @@ If the above steps don't restore the control plane within 15 minutes, proceed to
 
 ## Post-Incident
 - [ ] Review why k3s stopped (OOM, disk, crash)
-- [ ] Verify snapshot job is running: `kubectl get cronjob k3s-db-snapshot -n kube-system`
-- [ ] Check snapshot age: `ls -lt /var/lib/k3s-snapshots/`
+- [ ] Verify the snapshot job is running: `kubectl get cronjob etcd-snapshot -n kube-system`
+- [ ] Check snapshot age: `kubectl get jobs -n kube-system -l job-name --sort-by=.status.startTime | grep etcd-snapshot`, then list `/backup` from a pod that mounts the `etcd-snapshots` claim
 
 ## Related Alerts
 - `K3sWorkerNodeDown` — worker nodes unreachable after control plane recovery

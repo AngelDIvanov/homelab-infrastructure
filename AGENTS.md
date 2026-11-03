@@ -47,8 +47,9 @@ CronJob/Loki capture stays clean). Don't add raw color codes to log paths.
   dir. Use `terraform` commands.
 - **Secrets live in Vaultwarden**, not in the repo. Preserve image SHA pinning
   wherever it exists and keep NetworkPolicy default-deny when adding workloads.
-- **k3s uses SQLite**, not etcd. Backups are SQLite snapshots; respect the backup
-  CronJobs in `kubernetes/backup/`.
+- **The kubeadm cluster uses etcd**; `kubernetes/backup/etcd-snapshot-cronjob.yaml`
+  takes real etcd snapshots. Respect the backup CronJobs in `kubernetes/backup/`.
+  (The legacy k3s lab used SQLite; its `k3s-db-snapshot` job is gone.)
 - CI runs lint → validate (kubeconform + promtool) → security scan (gitleaks +
   kubesec) → deploy → smoke test. Keep manifests passing kubeconform/promtool.
 
