@@ -16,7 +16,7 @@
 | `pylab-secrets` | pylab | `DB_URL`, `API_KEY` | pylab deployment |
 | `vaultwarden-push` | vaultwarden | `installation-id`, `installation-key` | vaultwarden push notifications |
 | `vaultwarden-tls` | vaultwarden | `cert.pem`, `key.pem` | nginx sidecar TLS |
-| `webhook-ssh-key` | kube-system | `id_rsa` | webhook, backup cronjobs |
+| `webhook-ssh-key` | kube-system | `id_rsa`, `known_hosts` | webhook, backup cronjobs |
 | `registry-auth` | registry | `htpasswd` | registry basic auth |
 
 ---
@@ -88,6 +88,9 @@ openssl s_client -connect 192.168.122.218:30900 </dev/null 2>/dev/null | \
 ### webhook-ssh-key
 
 The webhook pod and all backup cronjobs use this key to SSH into cluster nodes and the hypervisor.
+The same Secret carries `known_hosts`, the pinned host keys the webhook verifies against
+(`SSH_KNOWN_HOSTS=/root/.ssh/known_hosts`). Regenerate it with `scripts/homelab-known-hosts.sh`
+on the hypervisor whenever a VM or the hypervisor gets new host keys, then re-apply the Secret.
 
 ```bash
 # 1. Generate new key pair on the hypervisor
@@ -101,9 +104,11 @@ done
 cat /tmp/webhook-new-key.pub >> ~/.ssh/authorized_keys
 
 # 3. Update Kubernetes secret
+./scripts/homelab-known-hosts.sh   # refresh ansible/inventory/known_hosts-k3s
 kubectl create secret generic webhook-ssh-key \
   --namespace kube-system \
   --from-file=id_rsa=/tmp/webhook-new-key \
+  --from-file=known_hosts=ansible/inventory/known_hosts-k3s \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # 4. Restart webhook deployment

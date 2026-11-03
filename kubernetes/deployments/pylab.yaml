@@ -60,11 +60,13 @@ data:
 # ─── Secret ───────────────────────────────────────────────────────────────────
 # The Secret is NOT stored in git. Copy kubernetes/deployments/pylab-secrets.yaml.example,
 # fill in real values, apply it, then delete the copy:
-#   cp kubernetes/deployments/pylab-secrets.yaml.example /tmp/pylab-secrets.yaml
+#   install -m 600 kubernetes/deployments/pylab-secrets.yaml.example /tmp/pylab-secrets.yaml
 #   ${EDITOR:-vi} /tmp/pylab-secrets.yaml && kubectl apply -f /tmp/pylab-secrets.yaml && rm /tmp/pylab-secrets.yaml
 #
-# Real-life issue: delete or rename this secret → /ready returns 503,
-# pod goes NotReady, traffic stops. Good for testing readiness gate behavior.
+# Real-life issue: delete or rename this secret → running pods are unaffected
+# (env is injected at start), but replacement pods fail with
+# CreateContainerConfigError until the Secret is back. Good for testing
+# rollout failure handling.
 
 ---
 # ─── Deployment ───────────────────────────────────────────────────────────────
@@ -140,8 +142,9 @@ spec:
             timeoutSeconds: 2
 
           # ── Readiness probe ───────────────────────────────────────────────
-          # Real-life issue: delete pylab-secrets → pod stays Running but
-          # goes NotReady → removed from Service endpoints → no traffic
+          # Real-life issue: when the app makes /ready return 503 → pod stays
+          # Running but goes NotReady → removed from Service endpoints → no
+          # traffic (a missing Secret does NOT do this: see the Secret note above)
           readinessProbe:
             httpGet:
               path: /ready
