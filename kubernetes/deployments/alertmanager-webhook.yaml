@@ -330,6 +330,12 @@ data:
 
     # ── Parse safe commands from Claude response ──────────────────────────────────
     _SAFE_CMD = re.compile(r'^(sudo\s+)?(kubectl|k3s|ssh|virsh|docker)\b')
+    # An ssh line must be `ssh [user@]host command`: no options before the
+    # destination, so ProxyCommand/LocalCommand/-F/-i and friends cannot smuggle a
+    # local command or key into the webhook pod. ssh stops option parsing at the
+    # destination, so flags inside the remote command are harmless.
+    _SSH_FORM = re.compile(r'^(?:sudo\s+)?ssh\s+(?:[A-Za-z0-9][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*\s+[^-\s]')
+    _SSH_LINE = re.compile(r'^(?:sudo\s+)?ssh\b')
 
     # Block commands that read sensitive files or perform destructive ops
     _BLOCKED_PATTERNS = [
@@ -354,6 +360,9 @@ data:
                     continue
                 if any(p.search(line) for p in _BLOCKED_PATTERNS):
                     log.warning(f"Blocked sensitive/dangerous command: {line}")
+                    continue
+                if _SSH_LINE.match(line) and not _SSH_FORM.match(line):
+                    log.warning(f"Blocked ssh line (must be 'ssh [user@]host command', no options): {line}")
                     continue
                 commands.append(line)
         return commands
@@ -398,8 +407,14 @@ data:
             summary = summary[:277] + '…'
         return summary
 
-    def slack_respond(url, text, replace=True):
-        body = json.dumps({"text": text, "replace_original": replace}).encode()
+    def slack_respond(url, text, replace=True, response_type=None):
+        """Reply through a Slack response_url. replace=True rewrites the source
+        message; response_type='in_channel' posts for everyone (Slack's default
+        for response_url is an ephemeral reply to the clicking user)."""
+        payload = {"text": text, "replace_original": replace}
+        if response_type:
+            payload["response_type"] = response_type
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             url, data=body,
             headers={"Content-Type": "application/json"},
@@ -617,7 +632,10 @@ data:
                 if SLACK_APPROVERS and ({user_id, user} - {''}).isdisjoint(SLACK_APPROVERS):
                     log.warning(f"Approve denied: {user!r} ({user_id or 'no id'}) is not in SLACK_APPROVERS")
                     if resp_url:
-                        slack_respond(resp_url, f":lock: {user} is not an authorized approver. Ask an on-call engineer to approve.")
+                        # New in-channel message: the source message keeps its
+                        # Approve & Run button for an authorised approver.
+                        slack_respond(resp_url, f":lock: {user} is not an authorized approver. Ask an on-call engineer to approve.",
+                                      replace=False, response_type='in_channel')
                     else:
                         slack_post(SLACK_INCIDENTS,
                                    [{"type": "section",
