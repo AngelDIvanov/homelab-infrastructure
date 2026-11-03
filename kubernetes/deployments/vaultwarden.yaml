@@ -133,6 +133,12 @@ spec:
 ---
 # Traefik terminates the client connection; the nginx sidecar fronts
 # Vaultwarden and upgrades the /notifications/hub websocket connection.
+#
+# Plain HTTP for now: TLS for the lab hostnames is a separate step. Until it
+# lands, login and sync traffic crosses the lab network in cleartext and the
+# web vault does not work (browsers require a secure context for its crypto
+# APIs on a non-localhost host). Use the Bitwarden desktop, mobile or browser
+# clients only. Once TLS exists, add `tls:` here on the websecure entrypoint.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

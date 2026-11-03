@@ -241,14 +241,14 @@ spec:
             description: "The local registry at 192.168.122.218:30500 has been unreachable for 2+ minutes. New image pulls will fail across the cluster."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/registry-down.md"
 
-        - alert: K3sSnapshotMissing
-          expr: (time() - kube_cronjob_status_last_schedule_time{cronjob="k3s-db-snapshot", namespace="kube-system"}) > 46800
+        - alert: EtcdSnapshotMissing
+          expr: (time() - kube_cronjob_status_last_schedule_time{cronjob="etcd-snapshot", namespace="kube-system"}) > 46800
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "k3s database snapshot has not run in 13+ hours"
-            description: "The k3s-db-snapshot CronJob last ran {{ $value | humanizeDuration }} ago (expected every 12h). Check: kubectl get cronjob k3s-db-snapshot -n kube-system"
+            summary: "etcd snapshot has not run in 13+ hours"
+            description: "The etcd-snapshot CronJob last ran {{ $value | humanizeDuration }} ago (expected every 12h). Check: kubectl get cronjob etcd-snapshot -n kube-system"
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/control-plane/api-server-down.md"
 
         - alert: K3sControlPlaneUnhealthy

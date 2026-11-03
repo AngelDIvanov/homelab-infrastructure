@@ -102,6 +102,8 @@ NodePorts. The hostnames must resolve to the Traefik load balancer address
 | Portainer    | http://portainer.homelab.local   |
 | pylab        | http://pylab.local               |
 
+The hostnames are served over plain HTTP until TLS for the lab hostnames is set up. For Vaultwarden that means cleartext login and sync traffic on the lab network, and the web vault does not work (browsers only expose the crypto APIs it needs in a secure context). Use the Bitwarden desktop, mobile or browser clients until the Ingress has TLS.
+
 Chart versions are pinned next to the add-on charts in
 `inventory/group_vars/kubeadm_all.yml`.
 
