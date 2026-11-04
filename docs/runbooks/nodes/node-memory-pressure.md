@@ -17,7 +17,7 @@
   ```bash
   ssh labadmin@192.168.122.<ip> ps aux --sort=-%mem | head -15
   ```
-- [ ] Is GitLab (on k3s-infra .230) consuming too much?
+- [ ] Is GitLab (on the infra VM .230) consuming too much?
   ```bash
   ssh labadmin@192.168.122.230 sudo gitlab-ctl status
   ```
@@ -32,7 +32,7 @@
 
 ## Recovery Steps
 
-### k3s-infra (.230) — GitLab host
+### Infra VM (.230) — GitLab host
 ```bash
 # Restart Sidekiq (often the biggest consumer after long uptime)
 ssh labadmin@192.168.122.230 sudo gitlab-ctl restart sidekiq
@@ -49,14 +49,15 @@ ssh labadmin@192.168.122.<ip> sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_c
 
 ### Any node — prune container images
 ```bash
-ssh labadmin@192.168.122.<ip> sudo k3s crictl rmi --prune
+ssh labadmin@192.168.122.<ip> sudo crictl rmi --prune
 ```
 
 ## Long-Term Fix
 If a node is consistently above 80%, increase VM memory via Terraform:
 ```bash
-# Edit terraform/terraform.tfvars — increase infra_memory or vm_memory
-# Then: cd terraform && terraform apply
+# Cluster nodes: edit terraform-kubeadm/terraform.tfvars — control_memory / worker_memory
+# Then: cd terraform-kubeadm && terraform apply
+# Infra VM: terraform/terraform.tfvars — infra_memory, then cd terraform && terraform apply
 # Note: this recreates the VM
 ```
 
@@ -68,4 +69,4 @@ ssh labadmin@192.168.122.<ip> free -h
 
 ## Related Alerts
 - `ContainerOOMKilled` — individual container hit its memory limit (separate from node pressure)
-- `K3sWorkerNodeDown` — node OOM can cause kubelet to crash
+- `WorkerNodeDown` — node OOM can cause kubelet to crash

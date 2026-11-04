@@ -13,7 +13,9 @@ stages:
 variables:
   GIT_DEPTH: "0"
   KUBECONFIG: /tmp/kubeconfig
-  K3S_CONTROL_IP: "192.168.122.218"
+  # Traefik LoadBalancer address (MetalLB pool start); the lab hostnames
+  # resolve to it, the runner sends them as Host headers instead.
+  TRAEFIK_LB_IP: "192.168.122.200"
 
 lint:yaml:
   stage: lint
@@ -143,7 +145,7 @@ test:python:
     - python scripts/sync-webhook-configmap.py --check
     - python scripts/validate-ip-allocations.py
   rules:
-    - changes: ["scripts/webhook.py", "scripts/lab-*.py", "tests/**/*", "kubernetes/deployments/alertmanager-webhook.yaml", "ansible/inventory/**/*"]
+    - changes: ["scripts/webhook.py", "tests/**/*", "kubernetes/deployments/alertmanager-webhook.yaml", "ansible/inventory/**/*"]
 
 security:secret-detection:
   stage: security
@@ -219,7 +221,7 @@ deploy:kubernetes:
     - kubectl rollout status deployment --all --all-namespaces --timeout=5m
   environment:
     name: homelab
-    url: http://192.168.122.218:30080
+    url: http://grafana.homelab.local
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
@@ -240,7 +242,7 @@ deploy:monitoring:
     - kubectl apply -f monitoring/grafana/homelab-alerts.yaml
     - >-
       helm upgrade --install monitoring prometheus-community/kube-prometheus-stack
-      -f monitoring/fix-values.yaml -n monitoring --create-namespace
+      -f monitoring/values/kube-prometheus-stack.yaml -n monitoring --create-namespace
       --atomic --timeout 10m
   environment:
     name: homelab-monitoring
@@ -255,9 +257,9 @@ smoke:cluster-health:
     name: curlimages/curl@sha256:25d29daeb9b14b89e2fa8cc17c70e4b188bca1466086907c2d9a4b56b59d8e21
     entrypoint: [""]
   script:
-    - curl -fsS "http://${K3S_CONTROL_IP}:30090/-/healthy"
-    - curl -fsS "http://${K3S_CONTROL_IP}:30080/api/health"
-    - curl -fsS "http://${K3S_CONTROL_IP}:30093/-/healthy"
+    - curl -fsS -H "Host: prometheus.homelab.local" "http://${TRAEFIK_LB_IP}/-/healthy"
+    - curl -fsS -H "Host: grafana.homelab.local" "http://${TRAEFIK_LB_IP}/api/health"
+    - curl -fsS -H "Host: alertmanager.homelab.local" "http://${TRAEFIK_LB_IP}/-/healthy"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   needs: ["deploy:kubernetes"]

@@ -5,12 +5,13 @@ Recovery procedures for homelab-infrastructure alerts and failure modes.
 ## Control Plane
 | Runbook | Alert |
 |---------|-------|
-| [API Server Down](control-plane/api-server-down.md) | `K3sControlPlaneUnhealthy` |
+| [API Server Down](control-plane/api-server-down.md) | `ControlPlaneUnhealthy`, `ControlPlaneNodeNotReady` |
 
 ## Nodes
 | Runbook | Alert |
 |---------|-------|
-| [Worker Node Not Ready](nodes/worker-node-not-ready.md) | `K3sWorkerNodeDown`, `KubeNodeNotReady` |
+| [Worker Node Not Ready](nodes/worker-node-not-ready.md) | `WorkerNodeDown` |
+| [Cluster Drift](nodes/cluster-drift.md) | `ClusterDrift` |
 | [Node Memory Pressure](nodes/node-memory-pressure.md) | `NodeMemoryWarning`, `NodeMemoryHigh`, `NodeMemoryCritical`, `ContainerOOMKilled` |
 | [Node Disk Full](nodes/node-disk-full.md) | `NodeDiskHigh`, `NodeDiskCritical` |
 
@@ -33,6 +34,7 @@ Recovery procedures for homelab-infrastructure alerts and failure modes.
 | Runbook | Alert |
 |---------|-------|
 | [Monitoring Stack Down](monitoring/monitoring-stack-down.md) | Manual |
+| [Webhook Down](monitoring/webhook-down.md) | `AlertmanagerFailedToSendAlerts` |
 
 ## Disaster Recovery
 | Runbook | Scenario |
@@ -40,6 +42,20 @@ Recovery procedures for homelab-infrastructure alerts and failure modes.
 | [Full Cluster Recovery](disaster-recovery/full-cluster-recovery.md) | Host hypervisor failure |
 
 ---
+
+## Lab addresses
+
+| Host | IP | Role |
+|---|---|---|
+| kubeadm-control | 192.168.122.240 | control plane (API server, etcd, scheduler, controller-manager) |
+| kubeadm-worker-1 | 192.168.122.241 | worker |
+| kubeadm-worker-2 | 192.168.122.242 | worker |
+| infra VM | 192.168.122.230 | NFS server (`/data`) + GitLab CE, outside the cluster |
+| ci-runner | 192.168.122.220 | GitLab shell runner, outside the cluster |
+| Traefik | 192.168.122.200 | MetalLB address for the `*.homelab.local` ingresses |
+
+`kubectl` runs from the operator machine with the kubeadm admin kubeconfig, or
+on `kubeadm-control` as `labadmin`.
 
 ## Runbook Template
 

@@ -36,11 +36,12 @@ Known variables that must be defined in `webhook.py` (check `scripts/webhook.py`
 | `GITLAB_PROJECT_ID` | `'1'` |
 | `SSH_KEY` | `/root/.ssh/id_rsa` |
 | `SSH_USER` | `labadmin` |
-| `K3S_CONTROL_IP` | `192.168.122.218` |
+| `CONTROL_IP` | `192.168.122.240` |
 | `HYPERVISOR_IP` | `192.168.122.1` |
-| `REGISTRY_URL` | `http://192.168.122.218:30500` |
-| `ALERTMANAGER_URL` | `http://192.168.122.218:30093` |
-| `PROMETHEUS_URL` | `http://192.168.122.218:30090` |
+| `REGISTRY_URL` | `http://192.168.122.240:30500` |
+| `ALERTMANAGER_URL` | `http://alertmanager.homelab.local` |
+| `PROMETHEUS_URL` | `http://prometheus.homelab.local` |
+| `ALERTMANAGER_TOKEN` | `''` (fail closed) |
 | `ANTHROPIC_API_KEY` | `''` |
 | `SLACK_BOT_TOKEN` | `''` |
 | `SLACK_SIGNING_SECRET` | `''` |
@@ -72,22 +73,9 @@ kubectl run tmp --rm -it --image=alpine --restart=Never -- \
 # Edit webhook.py locally, add the missing variable in the config block (lines 12–32):
 # VAR_NAME = os.environ.get('VAR_NAME', 'default-value')
 
-# Rebuild the ConfigMap and redeploy (run from repo root):
-{
-  echo '---'
-  echo 'apiVersion: v1'
-  echo 'kind: ConfigMap'
-  echo 'metadata:'
-  echo '  name: alertmanager-webhook'
-  echo '  namespace: monitoring'
-  echo 'data:'
-  echo '  webhook.py: |'
-  sed 's/^/    /' scripts/webhook.py
-  echo ''
-  awk '/^---$/{found++} found>=2{print}' kubernetes/deployments/alertmanager-webhook.yaml
-} > /tmp/webhook-new.yaml
-
-kubectl apply -f /tmp/webhook-new.yaml
+# Regenerate the ConfigMap copy and redeploy (run from repo root):
+python3 scripts/sync-webhook-configmap.py
+kubectl apply -f kubernetes/deployments/alertmanager-webhook.yaml
 kubectl rollout restart deployment/alertmanager-webhook -n monitoring
 kubectl rollout status deployment/alertmanager-webhook -n monitoring --timeout=90s
 ```

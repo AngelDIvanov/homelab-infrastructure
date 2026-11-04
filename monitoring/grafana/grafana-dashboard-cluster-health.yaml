@@ -393,63 +393,173 @@ data:
     {
       "title": "CronJob Status",
       "uid": "homelab-cronjobs",
-      "tags": ["homelab"],
+      "tags": [
+        "homelab"
+      ],
       "refresh": "60s",
       "schemaVersion": 38,
-      "time": {"from": "now-24h", "to": "now"},
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
       "timezone": "browser",
       "panels": [
         {
           "id": 1,
           "title": "CronJobs with Failed Executions",
           "type": "stat",
-          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"expr": "count((kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}) > 0) or vector(0)", "refId": "A"}],
+          "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 0,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "count((kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}) > 0) or vector(0)",
+              "refId": "A"
+            }
+          ],
           "fieldConfig": {
             "defaults": {
-              "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
             }
           },
-          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "background",
+            "graphMode": "none"
+          }
         },
         {
           "id": 2,
           "title": "Currently Active Jobs",
           "type": "stat",
-          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"expr": "sum(kube_cronjob_status_active) or vector(0)", "refId": "A"}],
+          "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 8,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(kube_cronjob_status_active) or vector(0)",
+              "refId": "A"
+            }
+          ],
           "fieldConfig": {
             "defaults": {
-              "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
             }
           },
-          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "background",
+            "graphMode": "none"
+          }
         },
         {
           "id": 3,
           "title": "CronJobs with Succeeded Executions",
           "type": "stat",
-          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"expr": "count((kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}) >= 1) or vector(0)", "refId": "A"}],
+          "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 16,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "count((kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}) >= 1) or vector(0)",
+              "refId": "A"
+            }
+          ],
           "fieldConfig": {
             "defaults": {
-              "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": 1}]}
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              }
             }
           },
-          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "background",
+            "graphMode": "none"
+          }
         },
         {
           "id": 4,
           "title": "CronJob-Owned Job Failures Over Time",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "targets": [
             {
               "expr": "kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}",
@@ -459,19 +569,51 @@ data:
           ],
           "fieldConfig": {
             "defaults": {
-              "color": {"mode": "palette-classic"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]},
-              "custom": {"fillOpacity": 10}
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              },
+              "custom": {
+                "fillOpacity": 10
+              }
             }
           },
-          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
         },
         {
           "id": 5,
           "title": "CronJob-Owned Job Successes Over Time",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "targets": [
             {
               "expr": "kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}",
@@ -481,19 +623,39 @@ data:
           ],
           "fieldConfig": {
             "defaults": {
-              "color": {"mode": "palette-classic"},
-              "custom": {"fillOpacity": 10}
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "fillOpacity": 10
+              }
             }
           },
-          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
         },
         {
           "id": 6,
           "title": "Time Since Last CronJob Run",
           "description": "Seconds elapsed since each CronJob last scheduled a job. Spikes between runs are normal; a value that grows indefinitely means a CronJob has stopped scheduling.",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 12
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "targets": [
             {
               "expr": "time() - kube_cronjob_status_last_schedule_time",
@@ -505,18 +667,36 @@ data:
             "defaults": {
               "unit": "s",
               "min": 0,
-              "color": {"mode": "palette-classic"}
+              "color": {
+                "mode": "palette-classic"
+              }
             }
           },
-          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
         },
         {
           "id": 7,
           "title": "CronJob Summary",
           "description": "One row per CronJob. 'Since Last Run' shows seconds since last scheduled execution.",
           "type": "table",
-          "gridPos": {"h": 6, "w": 24, "x": 0, "y": 20},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 20
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "targets": [
             {
               "expr": "kube_cronjob_info",
@@ -535,12 +715,26 @@ data:
             }
           ],
           "transformations": [
-            {"id": "joinByField", "options": {"byField": "cronjob", "mode": "outer"}},
+            {
+              "id": "joinByField",
+              "options": {
+                "byField": "cronjob",
+                "mode": "outer"
+              }
+            },
             {
               "id": "filterFieldsByName",
               "options": {
                 "include": {
-                  "names": ["cronjob", "namespace", "schedule", "concurrency_policy", "timezone", "Value #SinceLastRun", "Value #Active"]
+                  "names": [
+                    "cronjob",
+                    "namespace",
+                    "schedule",
+                    "concurrency_policy",
+                    "timezone",
+                    "Value #SinceLastRun",
+                    "Value #Active"
+                  ]
                 }
               }
             },
@@ -563,44 +757,91 @@ data:
             "defaults": {},
             "overrides": [
               {
-                "matcher": {"id": "byName", "options": "Since Last Run"},
+                "matcher": {
+                  "id": "byName",
+                  "options": "Since Last Run"
+                },
                 "properties": [
-                  {"id": "unit", "value": "s"},
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  },
                   {
                     "id": "thresholds",
                     "value": {
                       "mode": "absolute",
                       "steps": [
-                        {"color": "green", "value": null},
-                        {"color": "yellow", "value": 3600},
-                        {"color": "red", "value": 86400}
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "yellow",
+                          "value": 3600
+                        },
+                        {
+                          "color": "red",
+                          "value": 86400
+                        }
                       ]
                     }
                   },
-                  {"id": "custom.displayMode", "value": "color-text"}
+                  {
+                    "id": "custom.displayMode",
+                    "value": "color-text"
+                  }
                 ]
               },
               {
-                "matcher": {"id": "byName", "options": "Active Jobs"},
+                "matcher": {
+                  "id": "byName",
+                  "options": "Active Jobs"
+                },
                 "properties": [
                   {
                     "id": "thresholds",
-                    "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "blue", "value": 1}]}
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "blue",
+                          "value": 1
+                        }
+                      ]
+                    }
                   },
-                  {"id": "custom.displayMode", "value": "color-text"}
+                  {
+                    "id": "custom.displayMode",
+                    "value": "color-text"
+                  }
                 ]
               }
             ]
           },
-          "options": {"showHeader": true, "cellHeight": "sm"}
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm"
+          }
         },
         {
           "id": 8,
           "title": "Recent Job Executions",
           "description": "One row per Job object currently tracked by kube-state-metrics. Sorted by most recently started. Duration is blank for still-running jobs.",
           "type": "table",
-          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 26},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 26
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "targets": [
             {
               "expr": "(time() - kube_job_status_start_time) * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\"}",
@@ -624,12 +865,26 @@ data:
             }
           ],
           "transformations": [
-            {"id": "joinByField", "options": {"byField": "job_name", "mode": "outer"}},
+            {
+              "id": "joinByField",
+              "options": {
+                "byField": "job_name",
+                "mode": "outer"
+              }
+            },
             {
               "id": "filterFieldsByName",
               "options": {
                 "include": {
-                  "names": ["job_name", "owner_name", "namespace", "Value #StartedAgo", "Value #Duration", "Value #Succeeded", "Value #Failed"]
+                  "names": [
+                    "job_name",
+                    "owner_name",
+                    "namespace",
+                    "Value #StartedAgo",
+                    "Value #Duration",
+                    "Value #Succeeded",
+                    "Value #Failed"
+                  ]
                 }
               }
             },
@@ -649,38 +904,93 @@ data:
             },
             {
               "id": "sortBy",
-              "options": {"fields": [{"desc": false, "displayName": "Started (ago)"}]}
+              "options": {
+                "fields": [
+                  {
+                    "desc": false,
+                    "displayName": "Started (ago)"
+                  }
+                ]
+              }
             }
           ],
           "fieldConfig": {
             "defaults": {},
             "overrides": [
               {
-                "matcher": {"id": "byName", "options": "Started (ago)"},
-                "properties": [{"id": "unit", "value": "s"}]
-              },
-              {
-                "matcher": {"id": "byName", "options": "Duration"},
-                "properties": [{"id": "unit", "value": "s"}]
-              },
-              {
-                "matcher": {"id": "byName", "options": "Failed"},
+                "matcher": {
+                  "id": "byName",
+                  "options": "Started (ago)"
+                },
                 "properties": [
                   {
-                    "id": "thresholds",
-                    "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
-                  },
-                  {"id": "custom.displayMode", "value": "color-text"}
+                    "id": "unit",
+                    "value": "s"
+                  }
                 ]
               },
               {
-                "matcher": {"id": "byName", "options": "Succeeded"},
+                "matcher": {
+                  "id": "byName",
+                  "options": "Duration"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Failed"
+                },
                 "properties": [
                   {
                     "id": "thresholds",
-                    "value": {"mode": "absolute", "steps": [{"color": "green", "value": 1}]}
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "red",
+                          "value": 1
+                        }
+                      ]
+                    }
                   },
-                  {"id": "custom.displayMode", "value": "color-text"}
+                  {
+                    "id": "custom.displayMode",
+                    "value": "color-text"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Succeeded"
+                },
+                "properties": [
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": 1
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "id": "custom.displayMode",
+                    "value": "color-text"
+                  }
                 ]
               }
             ]
@@ -688,306 +998,13 @@ data:
           "options": {
             "showHeader": true,
             "cellHeight": "sm",
-            "sortBy": [{"desc": false, "displayName": "Started (ago)"}]
-          }
-        },
-        {
-          "id": 9,
-          "type": "row",
-          "title": "check-lab Health Check (every 15 min)",
-          "collapsed": false,
-          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 36}
-        },
-        {
-          "id": 10,
-          "title": "check-lab Last Run",
-          "description": "Shows whether the most recent check-lab execution succeeded (1) or failed (0). Red = cluster issues detected.",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 37},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [
-            {
-              "expr": "clamp_max(kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\", owner_name=\"check-lab\"}, 1)",
-              "legendFormat": "last result",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "mappings": [
-                {"type": "value", "options": {"0": {"text": "FAIL", "color": "red"}}},
-                {"type": "value", "options": {"1": {"text": "PASS", "color": "green"}}}
-              ],
-              "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
-            }
-          },
-          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "value"}
-        },
-        {
-          "id": 11,
-          "title": "check-lab Failures (last 24 h)",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 37},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [
-            {
-              "expr": "sum(kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\", owner_name=\"check-lab\"}) or vector(0)",
-              "legendFormat": "failed runs",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 3}]}
-            }
-          },
-          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
-        },
-        {
-          "id": 12,
-          "title": "check-lab Run History",
-          "description": "Pass/fail trend for check-lab over the selected time range. Each 15-minute run shows succeeded=1 or failed=1.",
-          "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 37},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [
-            {
-              "expr": "kube_job_status_succeeded * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\", owner_name=\"check-lab\"}",
-              "legendFormat": "succeeded",
-              "refId": "A"
-            },
-            {
-              "expr": "kube_job_status_failed * on(namespace, job_name) group_left(owner_name) kube_job_owner{owner_kind=\"CronJob\", owner_name=\"check-lab\"}",
-              "legendFormat": "failed",
-              "refId": "B"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "color": {"mode": "palette-classic"},
-              "custom": {"fillOpacity": 20, "lineWidth": 2, "drawStyle": "bars", "barAlignment": 0}
-            },
-            "overrides": [
+            "sortBy": [
               {
-                "matcher": {"id": "byName", "options": "succeeded"},
-                "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
-              },
-              {
-                "matcher": {"id": "byName", "options": "failed"},
-                "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]
+                "desc": false,
+                "displayName": "Started (ago)"
               }
             ]
-          },
-          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
-        },
-        {
-          "id": 13,
-          "title": "check-lab Log Stream",
-          "description": "Structured JSON logs from the most recent check-lab pod. level=ERROR lines indicate failed checks.",
-          "type": "logs",
-          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 45},
-          "datasource": {"type": "loki", "uid": "loki"},
-          "targets": [
-            {
-              "expr": "{namespace=\"default\", app=\"check-lab\"}",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "dedupStrategy": "none",
-            "enableLogDetails": true,
-            "showLabels": false,
-            "showTime": true,
-            "sortOrder": "Descending",
-            "wrapLogMessage": false
           }
-        }
-      ]
-    }
----
-# ============================================================
-#  k3s Control Plane Health
-#  Replaces etcd dashboard (k3s uses SQLite/kine, not etcd).
-#  KubeSchedulerDown and KubeControllerManagerDown are silenced
-#  because k3s embeds them in the k3s binary. The API server
-#  up{job="apiserver"} is the canonical control plane health signal.
-# ============================================================
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-dashboard-k3s-controlplane
-  namespace: monitoring
-  labels:
-    grafana_dashboard: "1"
-  annotations:
-    grafana_folder: "Homelab"
-data:
-  k3s-controlplane.json: |
-    {
-      "title": "k3s Control Plane",
-      "uid": "homelab-k3s",
-      "tags": ["homelab"],
-      "refresh": "30s",
-      "schemaVersion": 38,
-      "time": {"from": "now-1h", "to": "now"},
-      "timezone": "browser",
-      "panels": [
-        {
-          "id": 1,
-          "title": "API Server",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"expr": "up{job=\"apiserver\"}", "refId": "A"}],
-          "fieldConfig": {
-            "defaults": {
-              "color": {"mode": "thresholds"},
-              "mappings": [
-                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}
-              ],
-              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
-            }
-          },
-          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none", "textMode": "value"}
-        },
-        {
-          "id": 2,
-          "title": "API Request Rate (req/s)",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"expr": "sum(rate(apiserver_request_total{job=\"apiserver\"}[5m]))", "refId": "A"}],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}
-            }
-          },
-          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"}
-        },
-        {
-          "id": 3,
-          "title": "API Error Rate (5xx/s)",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"expr": "sum(rate(apiserver_request_total{job=\"apiserver\",code=~\"5..\"}[5m])) or vector(0)", "refId": "A"}],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.01}]}
-            }
-          },
-          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
-        },
-        {
-          "id": 4,
-          "title": "API P99 Latency",
-          "type": "stat",
-          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"expr": "histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{job=\"apiserver\",verb!~\"WATCH|CONNECT\"}[5m])) by (le))", "refId": "A"}],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "s",
-              "color": {"mode": "thresholds"},
-              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}
-            }
-          },
-          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
-        },
-        {
-          "id": 5,
-          "title": "API Request Rate by Verb",
-          "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [
-            {
-              "expr": "sum by(verb) (rate(apiserver_request_total{job=\"apiserver\"}[5m]))",
-              "legendFormat": "{{verb}}",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {"unit": "reqps", "color": {"mode": "palette-classic"}, "custom": {"fillOpacity": 10}}
-          },
-          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
-        },
-        {
-          "id": 6,
-          "title": "API Request Latency P50 / P99",
-          "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.50, sum(rate(apiserver_request_duration_seconds_bucket{job=\"apiserver\",verb!~\"WATCH|CONNECT\"}[5m])) by (le))",
-              "legendFormat": "p50",
-              "refId": "A"
-            },
-            {
-              "expr": "histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{job=\"apiserver\",verb!~\"WATCH|CONNECT\"}[5m])) by (le))",
-              "legendFormat": "p99",
-              "refId": "B"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {"unit": "s", "color": {"mode": "palette-classic"}, "custom": {"fillOpacity": 5}},
-            "overrides": [
-              {"matcher": {"id": "byName", "options": "p99"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]},
-              {"matcher": {"id": "byName", "options": "p50"}, "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]}
-            ]
-          },
-          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
-        },
-        {
-          "id": 7,
-          "title": "API Requests by Response Code",
-          "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [
-            {
-              "expr": "sum by(code) (rate(apiserver_request_total{job=\"apiserver\"}[5m]))",
-              "legendFormat": "HTTP {{code}}",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {"unit": "reqps", "color": {"mode": "palette-classic"}, "custom": {"fillOpacity": 10}}
-          },
-          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
-        },
-        {
-          "id": 8,
-          "title": "API Server Uptime",
-          "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [
-            {
-              "expr": "up{job=\"apiserver\"}",
-              "legendFormat": "API Server",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "min": 0,
-              "max": 1,
-              "color": {"mode": "fixed", "fixedColor": "green"},
-              "custom": {"fillOpacity": 20},
-              "mappings": [
-                {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}
-              ]
-            }
-          },
-          "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
         }
       ]
     }

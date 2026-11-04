@@ -1,8 +1,7 @@
 #!/bin/bash
-# Sync Grafana dashboard JSON files to k3s ConfigMaps
+# Sync Grafana dashboard JSON files to ConfigMaps in the monitoring namespace.
+# Uses the current kubeconfig (the kubeadm admin config, see ansible/README.md).
 
-K3S_CONTROL="192.168.122.218"
-SSH_OPTS="-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no"
 DASHBOARD_DIR="$(cd "$(dirname "$0")/../monitoring/grafana" && pwd)"
 
 GREEN='\033[0;32m'
@@ -22,8 +21,7 @@ for file in "${!DASHBOARD_MAP[@]}"; do
     filepath="$DASHBOARD_DIR/$file"
     if [ -f "$filepath" ]; then
         printf "  %-45s" "$file"
-        result=$(ssh $SSH_OPTS labadmin@$K3S_CONTROL "sudo k3s kubectl apply -f -" < "$filepath" 2>&1)
-        if [ $? -eq 0 ]; then
+        if result=$(kubectl apply -f "$filepath" 2>&1); then
             echo -e "${GREEN}OK applied${NC}"
         else
             echo -e "${RED}FAIL failed${NC}"
@@ -36,15 +34,12 @@ done
 for json in "$DASHBOARD_DIR"/*.json; do
     [ -f "$json" ] || continue
     name=$(basename "$json" .json)
-    cm_name="grafana-dashboard-$(echo $name | tr '_' '-')"
+    cm_name="grafana-dashboard-${name//_/-}"
     printf "  %-45s" "$name.json"
-    result=$(ssh $SSH_OPTS labadmin@$K3S_CONTROL \
-        "sudo k3s kubectl create configmap $cm_name \
-        --from-file=$name.json=/dev/stdin \
-        -n monitoring \
-        --dry-run=client -o yaml | \
-        sudo k3s kubectl apply -f -" < "$json" 2>&1)
-    if [ $? -eq 0 ]; then
+    if result=$(kubectl create configmap "$cm_name" \
+            --from-file="$name.json=$json" \
+            -n monitoring \
+            --dry-run=client -o yaml | kubectl apply -f - 2>&1); then
         echo -e "${GREEN}OK synced${NC}"
     else
         echo -e "${RED}FAIL failed${NC}"
@@ -53,5 +48,5 @@ for json in "$DASHBOARD_DIR"/*.json; do
 done
 
 echo -e "\n${GREEN}OK Done — restart Grafana pod to reload dashboards${NC}"
-ssh $SSH_OPTS labadmin@$K3S_CONTROL "sudo k3s kubectl rollout restart deployment monitoring-grafana -n monitoring" 2>/dev/null
+kubectl rollout restart deployment monitoring-grafana -n monitoring 2>/dev/null
 echo -e "${GREEN}OK Grafana restarting${NC}\n"

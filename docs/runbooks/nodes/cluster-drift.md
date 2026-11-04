@@ -4,9 +4,9 @@
 `ClusterDrift` (severity: critical)
 
 ## Symptoms
-- A VM exists in virsh but is absent from `kubectl get nodes`
-- Node is running but k3s-agent never joined the cluster
-- Possible causes: wrong K3S_TOKEN, stale certificates, agent crash on boot
+- A kubeadm VM is running in virsh but is absent from `kubectl get nodes`
+- A node is registered but `NotReady` (kubelet or containerd not running)
+- A node is registered but its VM no longer exists on the hypervisor
 
 ## Re-run the Check Immediately
 
@@ -22,91 +22,71 @@ kubectl logs -n monitoring -l job-name=drift-manual -f
 - [ ] Which node is affected?
   ```bash
   virsh list --all
-  kubectl get nodes
+  kubectl get nodes -o wide
   ```
 
 - [ ] Is the VM running?
   ```bash
-  virsh start <node-name>   # if shut off
+  virsh start <vm-name>   # if shut off
   ```
 
-- [ ] Is k3s-agent running on the node?
+- [ ] Are kubelet and containerd running on the node?
   ```bash
-  ssh labadmin@<ip> sudo systemctl status k3s-agent
+  ssh labadmin@<ip> sudo systemctl status kubelet containerd
   ```
 
-- [ ] What is the agent error?
+- [ ] What does the kubelet log say?
   ```bash
-  ssh labadmin@<ip> sudo journalctl -u k3s-agent -n 20 --no-pager
+  ssh labadmin@<ip> sudo journalctl -u kubelet -n 30 --no-pager
   ```
 
 ## Recovery Steps
 
-### Invalid token (`invalid token format` in agent logs)
-
-The token in the agent env file must match the **full** token from the control plane,
-including the `::server:<secret>` suffix. A common mistake is the token being stored
-without the suffix (e.g. set during initial provisioning before the server token was
-fully written).
+### kubelet or containerd stopped
 
 ```bash
-# Get the correct token from control plane
-ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token
-# Expected format: K10<hash>::server:<secret>
-
-# Check what token the agent is using — compare carefully
-ssh labadmin@<node-ip> sudo cat /etc/systemd/system/k3s-agent.service.env
-# If it's missing ::server:<secret> that's the problem
-
-# Update the token on the node
-CORRECT_TOKEN="<full token including ::server: suffix>"
-ssh labadmin@<node-ip> "sudo sed -i \"s|K3S_TOKEN=.*|K3S_TOKEN='${CORRECT_TOKEN}'|\" /etc/systemd/system/k3s-agent.service.env"
-ssh labadmin@<node-ip> sudo systemctl daemon-reload
-ssh labadmin@<node-ip> sudo systemctl restart k3s-agent
+ssh labadmin@<node-ip> sudo systemctl restart containerd
+ssh labadmin@<node-ip> sudo systemctl restart kubelet
+kubectl get nodes -w
 ```
 
-**Root cause (2026-04-11):** k3s-worker-2 was provisioned with a truncated token —
-the `::server:` suffix was missing. Token must be copied in full from
-`/var/lib/rancher/k3s/server/node-token` on the control plane.
+### Node was never joined, or was deleted from the cluster
 
-**Also:** running `curl -sfL https://get.k3s.io | ... sh -s - agent` to upgrade k3s
-**wipes `/etc/systemd/system/k3s-agent.service.env`**, removing K3S_TOKEN and K3S_URL.
-Always restore the env file and restart the agent after an in-place upgrade:
+Join tokens expire after 24 hours; mint a new one on the control node and
+join from the worker. Never paste the join command into chat or a ticket, it
+carries the bootstrap token.
 
 ```bash
-# Run from the operator host; the whole repair executes on the target node.
-TOKEN=$(ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token) || exit 1
-[[ "$TOKEN" =~ ^K10[0-9a-f]{64}::server:[0-9a-f]+$ ]] || { echo "node-token is empty or malformed, aborting" >&2; exit 1; }
-{
-  printf '%s\n' "$TOKEN"
-  cat <<'REMOTE'
-set -euo pipefail
-tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
-chmod 0600 "$tmp"
-printf 'K3S_TOKEN=%s\nK3S_URL=https://192.168.122.218:6443\n' "$K3S_TOKEN_VALUE" > "$tmp"
-sudo install -m 0600 -o root -g root "$tmp" /etc/systemd/system/k3s-agent.service.env
-sudo systemctl daemon-reload
-sudo systemctl restart k3s-agent
-REMOTE
-} | ssh labadmin@<node-ip> \
-  'IFS= read -r K3S_TOKEN_VALUE && export K3S_TOKEN_VALUE && bash -s'
+# On kubeadm-control: print a fresh join command
+ssh labadmin@192.168.122.240 sudo kubeadm token create --print-join-command
+
+# On the worker: reset any half-joined state, then join
+ssh labadmin@<node-ip> sudo kubeadm reset -f
+ssh labadmin@<node-ip> 'sudo <join command from above>'
 ```
 
-### Stale certificates (`certificate signed by unknown authority`)
+The same thing, without copying tokens around, is the worker play of the
+bootstrap playbook (it mints the token itself):
 
 ```bash
-ssh labadmin@<node-ip> sudo systemctl stop k3s-agent
-ssh labadmin@<node-ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt
-ssh labadmin@<node-ip> sudo rm -f /var/lib/rancher/k3s/agent/server-ca.crt
-ssh labadmin@<node-ip> sudo systemctl start k3s-agent
+cd ansible
+ansible-playbook -i inventory/kubeadm.ini playbooks/kubeadm-bootstrap.yml --tags workers --limit <node-name>
 ```
 
-### Agent crash / never started
+### Certificate errors in the kubelet log (`certificate signed by unknown authority`)
+
+The node's kubelet client certificate no longer matches the cluster CA, which
+happens when the control plane was rebuilt. Reset and re-join the worker as
+above.
+
+### VM missing from virsh but node still registered
+
+The VM was destroyed (for example `worker_count` was lowered in
+`terraform-kubeadm`). Remove the stale node object:
 
 ```bash
-ssh labadmin@<node-ip> sudo systemctl restart k3s-agent
-ssh labadmin@<node-ip> sudo journalctl -u k3s-agent -f --no-pager
+kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data --force
+kubectl delete node <node-name>
 ```
 
 ## Verify Recovery
@@ -129,11 +109,12 @@ kubectl get nodes
 
 | Node | IP | Role |
 |---|---|---|
-| k3s-control | 192.168.122.218 | control-plane |
-| k3s-worker-1 | 192.168.122.219 | worker |
-| k3s-worker-2 | 192.168.122.221 | worker |
-| k3s-infra | 192.168.122.230 | infra |
+| kubeadm-control | 192.168.122.240 | control-plane |
+| kubeadm-worker-1 | 192.168.122.241 | worker |
+| kubeadm-worker-2 | 192.168.122.242 | worker |
+
+Worker addresses are `worker_ip_offset + N - 1` from `terraform-kubeadm`.
 
 ## Related Alerts
-- `K3sWorkerNodeDown` — fired by kube-state-metrics when a joined node goes NotReady
-- `KubeNodeNotReady` — fired if k3s-infra goes NotReady
+- `WorkerNodeDown` — fired by kube-state-metrics when a joined node goes NotReady
+- `ControlPlaneNodeNotReady` — fired if kubeadm-control goes NotReady

@@ -8,16 +8,15 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 
 ## What this demonstrates
 
-- **Full infrastructure-as-code lifecycle** — VM provisioning through Terraform, configuration via Ansible, container orchestration on k3s
+- **Full infrastructure-as-code lifecycle** — VM provisioning through Terraform, configuration via Ansible, a kubeadm Kubernetes cluster bootstrapped by Ansible roles
 - **Production-grade observability** — Prometheus, Grafana, Loki (31-day retention), Alertmanager with 20+ custom alert rules
 - **Complete incident management pipeline** — alert fires → Slack notification with runbook link → GitLab issue auto-created → auto-closed on resolution
 - **GitOps CI/CD** — lint, validate (kubeconform + promtool), security scan (gitleaks + kubesec), deploy, smoke test stages
-- **Automated backups** — k3s SQLite snapshots every 12h, Vaultwarden SQLite hot-copy daily, GitLab full backup daily; all retained with configurable history
-- **Security hardening** — NetworkPolicy default-deny, least-privilege ServiceAccounts, immutable CI tool images, PodDisruptionBudgets, and pod anti-affinity
-- **Self-healing automation** — crashloop recovery cronjobs, health check scripts, read-only by default with explicit `--fix` / `--restart` / `--reboot` modes
+- **Automated backups** — etcd snapshots every 12h, Vaultwarden SQLite hot-copy daily, GitLab full backup daily; all retained with configurable history
+- **Security hardening** — NetworkPolicy default-deny, least-privilege ServiceAccounts, immutable CI tool images, PodDisruptionBudgets, pod anti-affinity, pinned SSH host keys
+- **Self-healing automation** — crashloop recovery and image-prune CronJobs, cluster drift detection against the hypervisor
 - **Claude AI auto-healing** — Alertmanager fires → Claude reads live cluster state → diagnoses root cause → one-click Approve in Slack executes the fix automatically
-- **Runbook library** — 13 runbooks covering control plane, nodes, storage, applications, monitoring, and full disaster recovery with RTO/RPO targets
-- **Custom Python control plane** — TUI and menu-driven interface for full lab management
+- **Runbook library** — 14 runbooks covering control plane, nodes, storage, applications, monitoring, and full disaster recovery with RTO/RPO targets
 
 ---
 
@@ -25,15 +24,9 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 
 **Cluster & App**
 
-| k3s control plane | API dashboard | Trengo app |
-|---|---|---|
-| ![](docs/images/k3s-control-plane.png) | ![](docs/images/api-dashboard.png) | ![](docs/images/trengo-app.png) |
-
-**Control & Health**
-
-| Control Panel TUI | check-lab.sh output |
+| API dashboard | Trengo app |
 |---|---|
-| ![](docs/images/control-panel-tui.png) | ![](docs/images/check-lab-output.png) |
+| ![](docs/images/api-dashboard.png) | ![](docs/images/trengo-app.png) |
 
 **CI/CD & GitLab**
 
@@ -60,13 +53,14 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 | Layer | Tech |
 |---|---|
 | VM provisioning | Terraform + libvirt provider |
-| Configuration management | Ansible |
-| Container orchestration | k3s (SQLite, snapshots every 12h) |
+| Configuration management | Ansible (kubeadm bootstrap, add-ons and workloads as roles) |
+| Container orchestration | kubeadm Kubernetes 1.33, containerd, Calico, etcd |
+| Load balancing / ingress | MetalLB (L2) + Traefik, `*.homelab.local` hostnames |
 | CI/CD | GitLab CE (self-hosted) + `.gitlab-ci.yml` |
 | Monitoring | Prometheus + Grafana + Loki (31d retention) + Alertmanager |
 | Alerting | 20+ custom rules, auto-diagnosis via Claude AI |
 | Incident management | Slack + GitLab Issues (auto-open/close) + runbooks |
-| Backups | k3s state, Vaultwarden, GitLab — daily CronJobs |
+| Backups | etcd, Vaultwarden, GitLab — CronJobs |
 | Secrets | Vaultwarden (self-hosted) |
 | Registry | Local Docker registry — NFS-backed persistent storage |
 | Security | NetworkPolicy, RBAC, image SHA pinning, PodDisruptionBudgets |
@@ -77,16 +71,16 @@ A self-hosted DevOps lab running on KVM/libvirt. Everything is defined as code �
 
 ```
 Host machine (KVM/libvirt, 32GB RAM)
-├── k3s-control    .218   2 vCPU / 2GB   control plane
-├── k3s-worker-1   .219   2 vCPU / 2GB   workloads
-├── ci-runner      .220                    GitLab shell runner
-├── k3s-worker-2   .221   2 vCPU / 2GB   workloads (dynamic, Terraform-managed)
-└── k3s-infra      .230   2 vCPU / 8GB   GitLab CE + monitoring stack + NFS
+├── kubeadm-control   .240   2 vCPU / 2GB   control plane (API server, etcd, scheduler, controller-manager)
+├── kubeadm-worker-1  .241   2 vCPU / 2GB   workloads
+├── kubeadm-worker-2  .242   2 vCPU / 2GB   workloads
+├── infra VM          .230   2 vCPU / 3GB   NFS server (/data) + GitLab CE — outside the cluster
+└── ci-runner         .220                  GitLab shell runner — outside the cluster
 ```
 
-All IPs are in the default libvirt NAT range (`192.168.122.0/24`). Set `base_ip_octet` in `terraform.tfvars` if yours is different.
+All IPs are in the default libvirt NAT range (`192.168.122.0/24`). The node addresses come from `control_ip`, `worker_count` and `worker_ip_offset` in `terraform-kubeadm/terraform.tfvars`; MetalLB hands out `.200-.217` to `LoadBalancer` services, with Traefik on `.200`.
 
-Additional workers (`k3s-worker-3`, ...) are spun up on demand via Terraform. GitLab runs on `k3s-infra`; CI jobs execute on the dedicated `ci-runner` VM.
+Additional workers are added by raising `worker_count` and re-running the worker play. GitLab runs on the infra VM; CI jobs execute on the dedicated `ci-runner` VM.
 
 > **Known limitation:** All VMs run on a single KVM host. This is intentional for a homelab but means the physical host is a single point of failure. Full recovery from host loss is documented in the [disaster recovery runbook](docs/runbooks/disaster-recovery/).
 
@@ -95,43 +89,41 @@ Additional workers (`k3s-worker-3`, ...) are spun up on demand via Terraform. Gi
 ## Repo structure
 
 ```
+terraform-kubeadm/   kubeadm node VMs; writes ansible/inventory/kubeadm.ini
+terraform/           the infra VM (NFS + GitLab)
+
 ansible/
-  inventory/         hosts files for k3s and kubeadm clusters
-  playbooks/         bootstrap, hardening, app installs
+  inventory/         kubeadm.ini (generated), infra.ini, pinned known_hosts
+  playbooks/         kubeadm-bootstrap, kubeadm-addons, kubeadm-workloads, hardening
+  roles/             k8s_common, k8s_control, k8s_worker, k8s_addons, k8s_workloads
 
 kubernetes/
-  deployments/       k8s manifests (registry, NFS, pylab, vaultwarden, traefik...)
-  backup/            CronJobs — k3s SQLite snapshot, Vaultwarden, GitLab
+  deployments/       app manifests (registry, pylab, trengo-search, vaultwarden, webhook...)
+  backup/            CronJobs — etcd snapshot, Vaultwarden, GitLab
+  monitoring/        cluster drift check, lab network ConfigMap template
   policies/          NetworkPolicies (default-deny), PodDisruptionBudgets
+  self-healing/      crashloop recovery, failed-job cleanup, node image prune
 
 monitoring/
-  fix-values.yaml              Helm overrides for kube-prometheus-stack + Loki
+  values/            Helm values — kube-prometheus-stack, Loki, promtail
   grafana/
     homelab-alerts.yaml        20+ custom Prometheus alert rules
-    dashboards/                per-service Grafana dashboards
-    datasources/
+    homelab-silences.yaml      upstream rules silenced on purpose
+    grafana-dashboard-*.yaml   per-service Grafana dashboards
 
 docs/
-  runbooks/          13 runbooks — nodes, storage, apps, DR with RTO/RPO table
-    control-plane/
-    nodes/
-    storage/
-    applications/    pod-crashloop, image-pull, registry-down, secret-rotation
-    monitoring/
-    disaster-recovery/
+  runbooks/          14 runbooks — control plane, nodes, storage, apps, DR with RTO/RPO table
+  postmortems/
 
 scripts/
-  webhook.py        Alertmanager → Claude AI → Slack → GitLab incident bridge
-  lab-control.py    main control panel — start/stop VMs, deploy, run scenarios
-  lab-tui.py        Textual TUI version of the above
-  check-lab.sh      read-only health check with explicit remediation modes
-  deploy.sh         build and push the trengo-search app
+  webhook.py                Alertmanager → Claude AI → Slack → GitLab incident bridge
+  sync-webhook-configmap.py keeps the webhook ConfigMap identical to webhook.py
+  kubeadm-known-hosts.sh    pins VM + hypervisor SSH host keys via the QEMU guest agent
+  deploy.sh                 build, push and roll the trengo-search app
+  sync-dashboards.sh        Grafana dashboards → ConfigMaps
 
 tests/
   test_webhook.py   unit tests — command allowlist/blocklist, Slack signature verification
-
-terraform/          k3s worker VMs (dynamic scale)
-terraform-kubeadm/  standalone kubeadm cluster (separate experiment, not connected to main lab)
 ```
 
 ---
@@ -143,56 +135,45 @@ terraform-kubeadm/  standalone kubeadm cluster (separate experiment, not connect
 - KVM/libvirt on the host
 - Terraform >= 1.0
 - Ansible >= 2.12
-- `kubectl`, `k3s`, `virsh` on PATH
+- `kubectl`, `virsh` on PATH
 
 ### 1. Provision VMs
 
 ```bash
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+cp terraform-kubeadm/terraform.tfvars.example terraform-kubeadm/terraform.tfvars
 # edit terraform.tfvars — set your SSH public key and desired worker count
-cd terraform
-terraform init && terraform apply
+cd terraform-kubeadm
+terraform init && terraform apply          # writes ../ansible/inventory/kubeadm.ini
+../scripts/libvirt-reserve-lab-range.sh    # keep libvirt DHCP below .200
+../scripts/kubeadm-known-hosts.sh          # pin host keys of the VMs and the hypervisor
 ```
+
+The infra VM (NFS + GitLab) has its own root in `terraform/`.
 
 ### 2. Bootstrap the cluster
 
 ```bash
 cd ansible
-ansible-playbook -i inventory/homelab.ini playbooks/bootstrap.yml
-ansible-playbook -i inventory/homelab.ini playbooks/install-apps.yml
+ansible-galaxy collection install -r requirements.yml
+ansible-playbook -i inventory/kubeadm.ini playbooks/kubeadm-bootstrap.yml   # containerd, kubeadm init/join, Calico
+ansible-playbook -i inventory/kubeadm.ini playbooks/kubeadm-addons.yml      # MetalLB, Traefik, NFS provisioner, registry
 ```
 
-### 3. Deploy monitoring
+### 3. Deploy monitoring and the apps
 
 ```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
-  -n monitoring --create-namespace \
-  -f monitoring/fix-values.yaml
+ansible-playbook -i inventory/kubeadm.ini playbooks/kubeadm-workloads.yml
 ```
 
-### 4. Control panel
-
-```bash
-python3 scripts/lab-control.py   # menu-driven
-python3 scripts/lab-tui.py       # TUI (requires: pip install textual)
-./scripts/check-lab.sh            # read-only health report
-./scripts/check-lab.sh --fix      # apply in-place remediations
-./scripts/check-lab.sh --restart  # graceful VM restart, then remediate
-./scripts/check-lab.sh --reboot   # force VM reboot, then remediate
-./scripts/k3s-start.sh             # start control plane and workers
-./scripts/k3s-stop.sh              # gracefully stop control plane and workers
-./scripts/ci-runner.sh start        # manage the CI runner independently
-./scripts/lab-stop-all.sh          # also stop ci-runner; never stops k3s-infra
-```
+The play installs kube-prometheus-stack, Loki and Promtail from `monitoring/values/`, applies Vaultwarden, pylab, trengo-search and Portainer with their ingresses, the backup CronJobs and the network policies. Point `grafana`, `prometheus`, `alertmanager`, `vault` and `portainer.homelab.local` at the Traefik address (`192.168.122.200`) in `/etc/hosts` or the lab DNS. See [`ansible/README.md`](ansible/README.md) for the full add-on list and the manual steps (lab network ConfigMap, webhook, drift check).
 
 ---
 
 ## Secrets
 
-Secrets (`K3S_TOKEN`, `GITLAB_TOKEN`, ...) are pulled from environment variables or Vaultwarden via the Bitwarden CLI. See `scripts/load-secrets.sh` for the bootstrap flow and `scripts/setup-vault.sh` to set Vaultwarden up from scratch.
+Secrets (`GITLAB_TOKEN`, ...) are pulled from environment variables or Vaultwarden via the Bitwarden CLI. See `scripts/load-secrets.sh` for the bootstrap flow and `scripts/setup-vault.sh` to seed Vaultwarden from scratch.
 
-The secret rotation procedure for all 5 cluster secrets is documented in [`docs/runbooks/applications/secret-rotation.md`](docs/runbooks/applications/secret-rotation.md). No real-valued Secret manifests are committed — in-cluster secrets are created from the `.yaml.example` templates (`grafana-gitlab-secret.yaml.example`, `pylab-secrets.yaml.example`...) and never committed with real values. The webhook additionally requires an `alertmanager-token` Secret (`ALERTMANAGER_TOKEN`, sent by Alertmanager as a bearer token) — the alert endpoint is fail-closed without it:
+The secret rotation procedure for all cluster secrets is documented in [`docs/runbooks/applications/secret-rotation.md`](docs/runbooks/applications/secret-rotation.md). No real-valued Secret manifests are committed — in-cluster secrets are created from the `.yaml.example` templates (`grafana-gitlab-secret.yaml.example`, `pylab-secrets.yaml.example`...) and never committed with real values. The webhook additionally requires an `alertmanager-token` Secret (`ALERTMANAGER_TOKEN`, sent by Alertmanager as a bearer token) — the alert endpoint is fail-closed without it. Node join tokens are short-lived and minted by `kubeadm` when a worker joins; nothing is stored.
 
 ---
 
@@ -202,7 +183,7 @@ All stateful components are backed up automatically via Kubernetes CronJobs defi
 
 | What | How | Schedule | Retention |
 |---|---|---|---|
-| k3s cluster state (SQLite) | `sqlite3 .backup` hot-copy via SSH | Every 12h | 14 snapshots |
+| Cluster state (etcd) | `etcdctl snapshot save` from a job on the control node, written to NFS | Every 12h | 14 snapshots |
 | Vaultwarden | `sqlite3 .backup` from NFS-mounted PVC | Daily 02:00 | 30 days |
 | GitLab (repos, issues, CI, wikis) | `gitlab-backup create` via SSH | Daily 03:00 | 7 backups |
 
@@ -219,21 +200,21 @@ Restore procedures for each component are documented in the [runbooks](docs/runb
 
 **RBAC** — each workload has a dedicated ServiceAccount with least-privilege roles. `automountServiceAccountToken: false` is set by default; tokens are only mounted where explicitly required. The `webhook.py` ServiceAccount is scoped to read-only pod/node access; command execution is routed via SSH with a dedicated key, not via the Kubernetes API.
 
-**Supply-chain controls** — CI validation and deployment tools use immutable SHA256 image digests. Critical third-party workloads such as Vaultwarden are digest-pinned; locally built application images remain an explicit exception and are tracked as future hardening work.
+**Supply-chain controls** — CI validation and deployment tools use immutable SHA256 image digests. Kubernetes packages are pinned to an exact version by the Ansible roles. Critical third-party workloads such as Vaultwarden are digest-pinned; locally built application images remain an explicit exception and are tracked as future hardening work.
 
 **PodDisruptionBudgets** — applied to Traefik and pylab to prevent accidental full-cluster downtime during rolling updates.
 
 **Webhook security** — Every inbound route is authenticated and fail-closed. Slack requests (`/slack/lab`, `/slack/actions`) require a valid `SLACK_SIGNING_SECRET` HMAC — a missing secret rejects requests instead of trusting them, and the deployment marks the secret as required. The Alertmanager endpoint (`POST /`) requires a bearer token (`ALERTMANAGER_TOKEN`, sent by Alertmanager via `webhook_configs` `http_config` authorization); without a token configured the endpoint rejects everything rather than accept unauthenticated traffic — the ngrok tunnel therefore cannot be used to trigger remediation anonymously. Unknown paths return 404. Approve & Run is additionally gated by `SLACK_APPROVERS`, a comma-separated allowlist of Slack user IDs (`U…`, usernames are accepted but can be changed by their owner); users outside the list are denied, and the attempt is logged. The webhook endpoint is reachable from the internet only through the ngrok tunnel.
 
-**LLM command hardening** — Claude's suggested commands are parsed server-side: only `kubectl`, `k3s`, `ssh`, `virsh` and `docker` commands pass (an `ssh` line must be `ssh [user@]host command`, SSH options such as `ProxyCommand` are rejected), shell metacharacters (`;`, `|`, `&`, `<`, `>`, backticks, `$(`) are rejected, and reads of secrets, tokens, private keys or `node-token` are blocked — independently of what the prompt asks for. Defense in depth: the prompt forbids it, the parser enforces it. Longer term: replace free-form commands with structured action IDs validated against trusted remediation scripts (tracked in Known limitations).
+**LLM command hardening** — Claude's suggested commands are parsed server-side: only `kubectl`, `ssh`, `virsh` and `docker` commands pass (an `ssh` line must be `ssh [user@]host command`, SSH options such as `ProxyCommand` are rejected), shell metacharacters (`;`, `|`, `&`, `<`, `>`, backticks, `$(`) are rejected, and reads of secrets, private keys, kubeconfigs and `kubeadm token` output are blocked — independently of what the prompt asks for. Defense in depth: the prompt forbids it, the parser enforces it. Longer term: replace free-form commands with structured action IDs validated against trusted remediation scripts (tracked in Known limitations).
 
-**SSH host-key pinning** — Ansible inventories and the auto-healing webhook verify SSH host keys (`StrictHostKeyChecking=yes`) against pinned keys. Keys are read out-of-band through the QEMU guest agent (`scripts/homelab-known-hosts.sh`, `scripts/kubeadm-known-hosts.sh`), so a rogue host on the libvirt bridge cannot substitute its own key. The homelab script also pins the hypervisor's own keys, and the resulting file is mounted into the webhook pod as `/root/.ssh/known_hosts` (`SSH_KNOWN_HOSTS`). The webhook ConfigMap is generated from `scripts/webhook.py` by `scripts/sync-webhook-configmap.py`, and CI fails if the two drift apart.
+**SSH host-key pinning** — the Ansible inventories and the auto-healing webhook verify SSH host keys (`StrictHostKeyChecking=yes`) against pinned keys. Keys are read out-of-band through the QEMU guest agent (`scripts/kubeadm-known-hosts.sh`), so a rogue host on the libvirt bridge cannot substitute its own key. The script also pins the hypervisor's own keys, and the resulting file is mounted into the webhook pod as `/root/.ssh/known_hosts` (`SSH_KNOWN_HOSTS`). The webhook ConfigMap is generated from `scripts/webhook.py` by `scripts/sync-webhook-configmap.py`, and CI fails if the two drift apart.
 
 **Remediation success is exit-code based** — SSH remediation results are classified by the remote exit code (timeouts map to 124), not by grepping output for the word "error"; failed remediation is reported as failed.
 
-**Address allocation guardrails** — the MetalLB pool (`.200-.217`) is disjoint from all static lab addresses (`.218-.221`, `.230`, `.240+`) and from the libvirt DHCP range (ends at `.199`, see `scripts/libvirt-reserve-lab-range.sh`). `scripts/validate-ip-allocations.py` fails CI on any overlap, and `scripts/sync-webhook-configmap.py --check` fails CI if the ConfigMap copy of `webhook.py` drifts from `scripts/webhook.py` (the same script without `--check` regenerates it) (the deployed copy is the ConfigMap — drift would silently deploy unhardened code).
+**Address allocation guardrails** — the MetalLB pool (`.200-.217`) is disjoint from all static lab addresses (`.220`, `.230`, `.240+`) and from the libvirt DHCP range (ends at `.199`, see `scripts/libvirt-reserve-lab-range.sh`). `scripts/validate-ip-allocations.py` fails CI on any overlap, and `scripts/sync-webhook-configmap.py --check` fails CI if the ConfigMap copy of `webhook.py` drifts from `scripts/webhook.py` (the same script without `--check` regenerates it) (the deployed copy is the ConfigMap — drift would silently deploy unhardened code).
 
-**Secret rotation** — documented procedure for rotating all 5 cluster secrets: `docs/runbooks/applications/secret-rotation.md`.
+**Secret rotation** — documented procedure for rotating all cluster secrets: `docs/runbooks/applications/secret-rotation.md`.
 
 ---
 
@@ -264,7 +245,7 @@ Engineer clicks Approve & Run
 Commands execute automatically, routed to the right host:
   • virsh commands   → hypervisor (KVM host)
   • docker commands  → hypervisor (source code lives there)
-  • kubectl commands → k3s-control with sudo
+  • kubectl commands → kubeadm-control over SSH
   • ssh commands     → direct from webhook pod
        ↓
 Command output posted in thread
@@ -278,7 +259,8 @@ Alert resolves → GitLab issue auto-closed → RESOLVED posted to Slack
 |---|---|---|
 | TrengoAppDown | Deployment scaled to 0, image pull failure, crashloop | `kubectl rollout restart`, `docker build/push` |
 | PodImagePullError | Registry empty or unreachable | `docker build` + `docker push` from hypervisor source |
-| K3sWorkerNodeDown | VM powered off | `virsh start k3s-worker-N` |
+| WorkerNodeDown | VM powered off | `virsh start kubeadm-worker-N` |
+| ClusterDrift | kubelet or containerd stopped on a running VM | `systemctl restart kubelet` over SSH |
 | PodCrashLooping | OOM, bad config, missing secret | `kubectl describe`, log fetch, rollback |
 | LocalRegistryDown | Registry pod crashed | `kubectl rollout restart deployment/registry` |
 | NodeMemoryCritical | stress-ng or runaway process | `pkill`, service restart |
@@ -293,7 +275,7 @@ Alerts and diagnoses are kept compact in the channel — full details expand in 
 - **Command output** — list of commands run in channel; full stdout/stderr in thread
 - **Resolution** — RESOLVED notification with duration, incident link auto-closed
 
-Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge is `scripts/webhook.py`; Alertmanager reaches it with a bearer token (`http_config.authorization` in `monitoring/fix-values.yaml`), and each alert is processed by its own status — a firing group can contain resolved alerts.
+Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge is `scripts/webhook.py`; Alertmanager reaches it with a bearer token (`http_config.authorization` in `monitoring/values/kube-prometheus-stack.yaml`), and each alert is processed by its own status — a firing group can contain resolved alerts.
 
 ---
 
@@ -304,7 +286,7 @@ Alert rules live in `monitoring/grafana/homelab-alerts.yaml`. The webhook bridge
 | Category | Runbooks |
 |---|---|
 | Control plane | API server down |
-| Nodes | Worker not ready, memory pressure, disk full |
+| Nodes | Worker not ready, cluster drift, memory pressure, disk full |
 | Storage | NFS server down, PVC pending |
 | Applications | Pod crashloop, image pull error, registry down, Trengo app down, secret rotation |
 | Monitoring | Monitoring stack down, webhook receiver down |
@@ -334,9 +316,9 @@ Merge requests require a 9-point checklist and at least one approval before merg
 
 - **Single KVM host** — all VMs share one physical machine; host failure requires full rebuild (documented in DR runbook)
 - **No GitOps operator** — cluster state is applied via CI/CD push rather than continuously reconciled by ArgoCD or FluxCD
-- **SQLite k3s backend** — appropriate for this scale; etcd would be required for a true HA control plane
+- **Single control-plane node** — one etcd member, no HA; appropriate for this scale, and the etcd snapshots cover recovery
+- **Plain HTTP ingresses** — the `*.homelab.local` hostnames have no TLS yet; Vaultwarden's web vault needs it (desktop/mobile clients work)
 - **Free-form remediation commands** — approved commands are constrained by the operator allowlist + blocklist + metachar rejection, but the stronger design is structured action IDs with validated arguments mapped to trusted remediation scripts; tracked as future work
-- `terraform-kubeadm/` is a standalone experiment for learning kubeadm; it is not connected to the main lab
 
 ---
 

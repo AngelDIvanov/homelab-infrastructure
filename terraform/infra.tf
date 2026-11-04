@@ -1,7 +1,10 @@
 # ─────────────────────────────────────────────────────────────
-#  k3s-infra — dedicated node for stateful monitoring workloads
+#  infra — NFS server and GitLab CE, outside the Kubernetes cluster
 #  Fixed IP: 192.168.122.230
-#  Taint: node-role=infra:NoSchedule
+#
+#  The libvirt domain and volume keep their historical name
+#  "k3s-infra": renaming a libvirt_domain forces a replacement,
+#  which would recreate the VM that holds the NFS data and GitLab.
 # ─────────────────────────────────────────────────────────────
 
 variable "infra_enabled" {

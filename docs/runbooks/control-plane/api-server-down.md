@@ -1,34 +1,39 @@
-# K3s Control Plane Unreachable
+# Control Plane Unreachable
 
 ## Alert
-`K3sControlPlaneUnhealthy` (severity: critical)
+- `ControlPlaneUnhealthy` (severity: critical) — the kube-apiserver scrape target is down
+- `ControlPlaneNodeNotReady` (severity: critical) — the kubeadm-control node is NotReady
 
 ## Symptoms
 - `kubectl` commands fail: `connection refused` or `dial tcp: i/o timeout`
 - Deployments cannot scale, pods not rescheduled
 - GitLab CI/CD pipelines blocked
-- Alertmanager may stop firing new alerts (if control plane hosts metrics)
+- Alertmanager may stop firing new alerts (Prometheus cannot discover targets)
 
 ## Root Cause Checklist
-- [ ] Is k3s service running on k3s-control (.218)?
+- [ ] Is the VM itself running on the hypervisor?
   ```bash
-  ssh labadmin@192.168.122.218 sudo systemctl status k3s
+  virsh list --all | grep kubeadm-control
   ```
 - [ ] Is the API server listening on port 6443?
   ```bash
-  ssh labadmin@192.168.122.218 sudo ss -tlnp | grep 6443
+  ssh labadmin@192.168.122.240 sudo ss -tlnp | grep 6443
   ```
-- [ ] Are there errors in the k3s journal?
+- [ ] Are kubelet and containerd running? (the control-plane components are static pods managed by the kubelet)
   ```bash
-  ssh labadmin@192.168.122.218 sudo journalctl -u k3s -n 50 --no-pager
+  ssh labadmin@192.168.122.240 sudo systemctl status kubelet containerd
   ```
-- [ ] Is the disk full on k3s-control?
+- [ ] Are the static pods up?
   ```bash
-  ssh labadmin@192.168.122.218 df -h /var/lib/rancher/k3s/
+  ssh labadmin@192.168.122.240 sudo crictl ps -a --name 'kube-apiserver|etcd|kube-scheduler|kube-controller-manager'
   ```
-- [ ] Is the VM itself running on the hypervisor?
+- [ ] Are there errors in the kubelet journal?
   ```bash
-  virsh list --all | grep k3s-control
+  ssh labadmin@192.168.122.240 sudo journalctl -u kubelet -n 50 --no-pager
+  ```
+- [ ] Is the disk full on kubeadm-control?
+  ```bash
+  ssh labadmin@192.168.122.240 df -h / /var/lib/etcd /var/lib/containerd
   ```
 
 ## Recovery Steps
@@ -36,40 +41,53 @@
 ### Step 1 — Verify VM is running
 ```bash
 virsh list --all
-# If k3s-control is shut off:
-virsh start k3s-control
-# Wait ~30s for boot, then proceed
+# If kubeadm-control is shut off:
+virsh start kubeadm-control
+# Wait ~60s for boot and the static pods, then proceed
 ```
 
-### Step 2 — Restart k3s service
+### Step 2 — Restart the kubelet (re-creates the static pods)
 ```bash
-ssh labadmin@192.168.122.218 sudo systemctl restart k3s
+ssh labadmin@192.168.122.240 sudo systemctl restart containerd
+ssh labadmin@192.168.122.240 sudo systemctl restart kubelet
 # Wait 30s then check
-ssh labadmin@192.168.122.218 sudo systemctl status k3s
+ssh labadmin@192.168.122.240 sudo crictl ps --name kube-apiserver
 ```
 
 ### Step 3 — If disk is full, clear space
 ```bash
-ssh labadmin@192.168.122.218 sudo k3s crictl rmi --prune
-ssh labadmin@192.168.122.218 sudo journalctl --vacuum-size=200M
+ssh labadmin@192.168.122.240 sudo crictl rmi --prune
+ssh labadmin@192.168.122.240 sudo journalctl --vacuum-size=200M
 ```
 
-### Step 4 — If SQLite database is corrupted
+### Step 4 — If a static pod keeps crashing
 ```bash
-# Check for corruption
-ssh labadmin@192.168.122.218 sudo sqlite3 /var/lib/rancher/k3s/server/db/state.db "PRAGMA integrity_check;"
+# Logs of the last apiserver container
+ssh labadmin@192.168.122.240 'sudo crictl logs --tail 50 $(sudo crictl ps -a --name kube-apiserver -q | head -1)'
+# Same for etcd
+ssh labadmin@192.168.122.240 'sudo crictl logs --tail 50 $(sudo crictl ps -a --name etcd -q | head -1)'
+```
 
-# If corrupted, restore from latest snapshot (on k3s-infra)
-ls -lt /var/lib/k3s-snapshots/
-# Copy latest snapshot back to k3s-control:
-scp /var/lib/k3s-snapshots/k3s-state-<LATEST>.db labadmin@192.168.122.218:/tmp/
-ssh labadmin@192.168.122.218 "sudo systemctl stop k3s && sudo cp /tmp/k3s-state-<LATEST>.db /var/lib/rancher/k3s/server/db/state.db && sudo systemctl start k3s"
+### Step 5 — If etcd is corrupted, restore from the latest snapshot
+The `etcd-snapshot` CronJob (`kubernetes/backup/etcd-snapshot-cronjob.yaml`)
+writes snapshots to the `etcd-snapshots` NFS claim every 12h.
+
+```bash
+# Pick the snapshot from a pod that mounts the claim, copy it to the control node
+kubectl -n kube-system get pods -l job-name --field-selector=status.phase=Succeeded | head
+# ... copy the chosen snapshot to /tmp/etcd-snapshot.db on kubeadm-control, then:
+ssh labadmin@192.168.122.240 '
+  sudo systemctl stop kubelet
+  sudo mv /var/lib/etcd /var/lib/etcd.broken.$(date +%s)
+  sudo ETCDCTL_API=3 etcdctl snapshot restore /tmp/etcd-snapshot.db --data-dir /var/lib/etcd
+  sudo systemctl start kubelet
+'
 ```
 
 ## Verify Recovery
 ```bash
 kubectl get nodes          # All nodes Ready
-kubectl get pods -A        # No new errors
+kubectl get pods -n kube-system   # apiserver, etcd, scheduler, controller-manager Running
 kubectl get events -A --sort-by='.lastTimestamp' | tail -20
 ```
 
@@ -77,10 +95,11 @@ kubectl get events -A --sort-by='.lastTimestamp' | tail -20
 If the above steps don't restore the control plane within 15 minutes, proceed to [Full Cluster Recovery](../disaster-recovery/full-cluster-recovery.md).
 
 ## Post-Incident
-- [ ] Review why k3s stopped (OOM, disk, crash)
+- [ ] Review why the control plane stopped (OOM, disk, crash)
 - [ ] Verify the snapshot job is running: `kubectl get cronjob etcd-snapshot -n kube-system`
-- [ ] Check snapshot age: `kubectl get jobs -n kube-system -l job-name --sort-by=.status.startTime | grep etcd-snapshot`, then list `/backup` from a pod that mounts the `etcd-snapshots` claim
+- [ ] Check snapshot age: `kubectl get jobs -n kube-system --sort-by=.status.startTime | grep etcd-snapshot`, then list `/backup` from a pod that mounts the `etcd-snapshots` claim
 
 ## Related Alerts
-- `K3sWorkerNodeDown` — worker nodes unreachable after control plane recovery
+- `WorkerNodeDown` — worker nodes unreachable after control plane recovery
+- `EtcdSnapshotMissing` — no snapshot to restore from
 - `NodeDiskCritical` — disk pressure may have caused this

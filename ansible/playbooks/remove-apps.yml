@@ -1,6 +1,6 @@
 ---
 - name: Remove demo tools from all k8s nodes
-  hosts: k8s_cluster
+  hosts: kubeadm_all
   become: yes
 
   tasks:

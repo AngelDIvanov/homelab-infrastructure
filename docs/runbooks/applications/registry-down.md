@@ -5,7 +5,7 @@
 
 ## Symptoms
 - New pod deployments fail with `ImagePullBackOff`
-- `curl http://192.168.122.218:30500/v2/` returns connection refused
+- `curl http://192.168.122.240:30500/v2/` returns connection refused
 - Registry pod in CrashLoopBackOff or Pending
 
 ## Root Cause Checklist
@@ -42,22 +42,22 @@ kubectl describe pvc registry-data -n registry
 
 ### Verify images are still present after restart
 ```bash
-curl http://192.168.122.218:30500/v2/_catalog
+curl http://192.168.122.240:30500/v2/_catalog
 # Should show: {"repositories":["pylab","trengo-search",...]}
 ```
 
 ### Images lost (registry was using emptyDir previously)
 If the registry lost its images, rebuild and push:
 ```bash
-docker build -t 192.168.122.218:30500/pylab:latest /home/labadmin/pylab/
-docker push 192.168.122.218:30500/pylab:latest
-docker build -t 192.168.122.218:30500/trengo-search:latest /home/labadmin/trengo-search/
-docker push 192.168.122.218:30500/trengo-search:latest
+docker build -t 192.168.122.240:30500/pylab:latest /home/labadmin/pylab/
+docker push 192.168.122.240:30500/pylab:latest
+docker build -t 192.168.122.240:30500/trengo-search:latest /home/labadmin/trengo-search/
+docker push 192.168.122.240:30500/trengo-search:latest
 ```
 
 ## Verify Recovery
 ```bash
-curl http://192.168.122.218:30500/v2/_catalog
+curl http://192.168.122.240:30500/v2/_catalog
 kubectl get pods -A | grep -E "ImagePull|ErrImage"
 # Should be empty
 ```

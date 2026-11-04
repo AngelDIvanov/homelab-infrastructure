@@ -20,7 +20,7 @@ spec:
             summary: "Trengo app is completely down"
             description: "Deployment trengo-search has 0 available replicas for more than 30 seconds."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/trengo-app-down.md"
-            dashboard_url: "http://192.168.122.218:30080/d/trengo"
+            dashboard_url: "http://grafana.homelab.local/d/trengo"
 
         - alert: TrengoAppDegraded
           expr: kube_deployment_status_replicas_available{deployment="trengo-search"} < kube_deployment_spec_replicas{deployment="trengo-search"}
@@ -31,7 +31,7 @@ spec:
             summary: "Trengo app is degraded (fewer replicas than desired)"
             description: "Deployment trengo-search has fewer available replicas than desired for more than 2 minutes."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/trengo-app-down.md"
-            dashboard_url: "http://192.168.122.218:30080/d/trengo"
+            dashboard_url: "http://grafana.homelab.local/d/trengo"
 
         - alert: PodImagePullError
           expr: kube_pod_container_status_waiting_reason{reason=~"ErrImagePull|ImagePullBackOff|ErrImageNeverPull"} == 1
@@ -42,7 +42,7 @@ spec:
             summary: "Pod stuck on image pull error"
             description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} cannot pull image ({{ $labels.reason }})."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/pod-image-pull-error.md"
-            dashboard_url: "http://192.168.122.218:30080/d/k8s-pods"
+            dashboard_url: "http://grafana.homelab.local/d/k8s-pods"
 
         - alert: PodCrashLooping
           expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
@@ -53,7 +53,7 @@ spec:
             summary: "Pod is crash-looping"
             description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted more than 3 times in the last 15 minutes."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/pod-crashloop.md"
-            dashboard_url: "http://192.168.122.218:30080/d/k8s-pods"
+            dashboard_url: "http://grafana.homelab.local/d/k8s-pods"
 
         - alert: NodeDiskHigh
           expr: 100 - ((node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100) > 75
@@ -64,7 +64,7 @@ spec:
             summary: "Node disk usage is high"
             description: "Node {{ $labels.instance }} disk usage is above 75% (current: {{ $value | printf \"%.1f\" }}%)."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/node-disk-full.md"
-            dashboard_url: "http://192.168.122.218:30080/d/node-resources"
+            dashboard_url: "http://grafana.homelab.local/d/node-resources"
 
         - alert: NodeMemoryWarning
           expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 80
@@ -75,7 +75,7 @@ spec:
             summary: "Node memory usage is high"
             description: "Node {{ $labels.instance }} memory usage is above 80% (current: {{ $value | printf \"%.1f\" }}%). Monitor closely."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/node-memory-pressure.md"
-            dashboard_url: "http://192.168.122.218:30080/d/node-resources"
+            dashboard_url: "http://grafana.homelab.local/d/node-resources"
 
         - alert: NodeMemoryHigh
           expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 85
@@ -86,7 +86,7 @@ spec:
             summary: "Node memory usage is critical — auto-remediation triggered"
             description: "Node {{ $labels.instance }} memory usage is above 85% (current: {{ $value | printf \"%.1f\" }}%). Auto-restart initiated."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/node-memory-pressure.md"
-            dashboard_url: "http://192.168.122.218:30080/d/node-resources"
+            dashboard_url: "http://grafana.homelab.local/d/node-resources"
 
         - alert: NodeMemoryCritical
           expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
@@ -97,7 +97,7 @@ spec:
             summary: "Node memory critical — auto-remediation triggered"
             description: "Node {{ $labels.instance }} memory above 90% (current: {{ $value | printf \"%.1f\" }}%). Auto-restart initiated."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/node-memory-pressure.md"
-            dashboard_url: "http://192.168.122.218:30080/d/node-resources"
+            dashboard_url: "http://grafana.homelab.local/d/node-resources"
 
         - alert: NodeDiskCritical
           expr: 100 - ((node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100) > 90
@@ -108,31 +108,30 @@ spec:
             summary: "Node disk usage is critical"
             description: "Node {{ $labels.instance }} disk usage is above 90% (current: {{ $value | printf \"%.1f\" }}%). Immediate action required."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/node-disk-full.md"
-            dashboard_url: "http://192.168.122.218:30080/d/node-resources"
+            dashboard_url: "http://grafana.homelab.local/d/node-resources"
 
-        # K3sWorkerNodeDown — informational alert for worker nodes going down.
-        # Excludes k3s-infra (monitoring node) — if that goes down, Prometheus
-        # can't send alerts anyway. ci-runner is not in k3s so never appears here.
-        - alert: K3sWorkerNodeDown
-          expr: kube_node_status_condition{condition="Ready",status="true",node!="k3s-infra"} == 0
+        # WorkerNodeDown — informational alert for worker nodes going down.
+        # The control-plane node is covered by ControlPlaneNodeNotReady below.
+        - alert: WorkerNodeDown
+          expr: kube_node_status_condition{condition="Ready",status="true",node!="kubeadm-control"} == 0
           for: 1m
           labels:
             severity: info
           annotations:
-            summary: "K3s worker node is down — cluster is handling it"
+            summary: "Worker node is down — cluster is handling it"
             description: "Node *{{ $labels.node }}* is NotReady. Kubernetes has automatically rescheduled all workloads to healthy nodes. No immediate action required — please power the node back on when you get a chance."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/worker-node-not-ready.md"
 
-        # KubeNodeNotReady — scoped to infra only. Workers are handled by K3sWorkerNodeDown above.
-        - alert: KubeNodeNotReady
-          expr: kube_node_status_condition{condition="Ready",status="true",node="k3s-infra"} == 0
+        # ControlPlaneNodeNotReady — the single kubeadm control-plane node.
+        - alert: ControlPlaneNodeNotReady
+          expr: kube_node_status_condition{condition="Ready",status="true",node="kubeadm-control"} == 0
           for: 2m
           labels:
             severity: critical
           annotations:
-            summary: "k3s-infra node is not ready — monitoring stack may be affected"
-            description: "Node {{ $labels.node }} has been in a NotReady state for more than 2 minutes. Prometheus, Grafana and Alertmanager run on this node."
-            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/worker-node-not-ready.md"
+            summary: "kubeadm-control node is not ready"
+            description: "Node {{ $labels.node }} has been in a NotReady state for more than 2 minutes. The API server, etcd, scheduler and controller-manager run on this node."
+            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/control-plane/api-server-down.md"
 
         - alert: ContainerOOMKilled
           expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1 and increase(kube_pod_container_status_restarts_total[15m]) > 0
@@ -164,30 +163,6 @@ spec:
             description: "CronJob {{ $labels.owner_name }} in namespace {{ $labels.namespace }} has {{ $value }} failed job pod(s). Check logs for job {{ $labels.job_name }}."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/pod-crashloop.md"
 
-        - alert: CheckLabFailed
-          expr: >
-            (kube_job_status_failed
-              * on(namespace, job_name) group_left(owner_name)
-              kube_job_owner{owner_kind="CronJob", owner_name="check-lab"}
-            ) > 0
-          for: 0m
-          labels:
-            severity: warning
-          annotations:
-            summary: "check-lab health check detected cluster issues"
-            description: "The check-lab CronJob (job {{ $labels.job_name }}, namespace {{ $labels.namespace }}) reported {{ $value }} failure(s). Check pod logs: kubectl logs -n default -l app=check-lab --previous"
-            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/pod-crashloop.md"
-
-        - alert: CheckLabNotScheduled
-          expr: time() - kube_cronjob_status_last_schedule_time{cronjob="check-lab"} > 1200
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "check-lab CronJob has not run in 20 minutes"
-            description: "check-lab last ran {{ $value | humanizeDuration }} ago (expected every 15 min). CronJob may be suspended or the cluster scheduler is unhealthy. Check: kubectl get cronjob check-lab -n default"
-            runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/pod-crashloop.md"
-
         - alert: NodeCPUHigh
           expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
           for: 5m
@@ -197,7 +172,7 @@ spec:
             summary: "Node CPU usage is high"
             description: "Node {{ $labels.instance }} CPU usage is above 85% (current: {{ $value | printf \"%.1f\" }}%)."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/nodes/node-memory-pressure.md"
-            dashboard_url: "http://192.168.122.218:30080/d/node-resources"
+            dashboard_url: "http://grafana.homelab.local/d/node-resources"
 
         - alert: ContainerCPUThrottling
           expr: rate(container_cpu_throttled_seconds_total[5m]) > 0.5
@@ -238,7 +213,7 @@ spec:
             severity: critical
           annotations:
             summary: "Local Docker registry is unreachable"
-            description: "The local registry at 192.168.122.218:30500 has been unreachable for 2+ minutes. New image pulls will fail across the cluster."
+            description: "The local registry at 192.168.122.240:30500 has been unreachable for 2+ minutes. New image pulls will fail across the cluster."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/applications/registry-down.md"
 
         - alert: EtcdSnapshotMissing
@@ -251,13 +226,13 @@ spec:
             description: "The etcd-snapshot CronJob last ran {{ $value | humanizeDuration }} ago (expected every 12h). Check: kubectl get cronjob etcd-snapshot -n kube-system"
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/control-plane/api-server-down.md"
 
-        - alert: K3sControlPlaneUnhealthy
+        - alert: ControlPlaneUnhealthy
           expr: up{job="apiserver"} == 0
           for: 2m
           labels:
             severity: critical
           annotations:
-            summary: "k3s control plane is unreachable"
-            description: "The Kubernetes API server scrape target has been down for 2+ minutes. In k3s, the scheduler and controller-manager are embedded in the same binary — this is the canonical control plane health signal replacing the silenced KubeSchedulerDown and KubeControllerManagerDown upstreams."
+            summary: "Kubernetes control plane is unreachable"
+            description: "The kube-apiserver scrape target has been down for 2+ minutes. The upstream KubeSchedulerDown, KubeControllerManagerDown and etcd rules cover the other control-plane components on the kubeadm node."
             runbook_url: "https://github.com/AngelDIvanov/homelab-infrastructure/blob/main/docs/runbooks/control-plane/api-server-down.md"
-            dashboard_url: "http://192.168.122.218:30080/d/k8s-cluster"
+            dashboard_url: "http://grafana.homelab.local/d/k8s-cluster"

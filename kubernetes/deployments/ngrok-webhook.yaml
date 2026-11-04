@@ -26,16 +26,9 @@ spec:
       labels:
         app: ngrok-webhook
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: k3s-infra
-      tolerations:
-        - key: node-role
-          operator: Equal
-          value: infra
-          effect: NoSchedule
       containers:
         - name: ngrok
-          image: 192.168.122.218:30500/ngrok:3.37.6
+          image: 192.168.122.240:30500/ngrok:3.37.6
           imagePullPolicy: IfNotPresent
           args:
             - http
