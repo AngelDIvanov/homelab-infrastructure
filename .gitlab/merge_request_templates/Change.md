@@ -7,11 +7,11 @@
 ## Testing done
 - [ ] Unit tests pass
 - [ ] Integration test passes on staging
-- [ ] Manual smoke test on staging: http://192.168.122.218:32504
+- [ ] Manual smoke test on staging: trengo-search-staging NodePort 32505 on a cluster node
 
 ## Rollback plan
 ```bash
-ssh labadmin@192.168.122.218 "sudo k3s kubectl rollout undo deployment/trengo-search -n default"
+kubectl rollout undo deployment/trengo-search -n default
 ```
 
 ## Version bump

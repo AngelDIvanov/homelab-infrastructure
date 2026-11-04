@@ -24,6 +24,6 @@ Prioritize correctness, security, recoverability, and safe operations over cosme
 
 ## Homelab constraints
 
-- This is a single-host KVM/libvirt lab using k3s with SQLite, not an HA production cluster. Do not recommend complexity that conflicts with those documented constraints unless it fixes a concrete issue.
-- `k3s-infra` hosts persistent services and must not be stopped by routine k3s or lab shutdown scripts.
-- Worker VMs are discovered dynamically; do not reintroduce hardcoded worker counts.
+- This is a single-host KVM/libvirt lab running one kubeadm cluster (one control-plane node with etcd, two workers), not an HA production cluster. Do not recommend complexity that conflicts with those documented constraints unless it fixes a concrete issue.
+- The infra VM (`192.168.122.230`) hosts the NFS server and GitLab CE outside the cluster and must not be stopped by routine lab shutdown steps.
+- Worker VMs come from `worker_count` in `terraform-kubeadm`; do not hardcode worker lists in scripts or manifests.

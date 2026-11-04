@@ -9,7 +9,7 @@ No dedicated alert — triggered by pods stuck in `ContainerCreating` with `moun
 - Affected apps: Grafana, Vaultwarden, Loki, Portainer
 
 ## Root Cause Checklist
-- [ ] Is the NFS server process running on k3s-infra (.230)?
+- [ ] Is the NFS server process running on the infra VM (.230)?
   ```bash
   ssh labadmin@192.168.122.230 sudo systemctl status nfs-server
   ```
@@ -17,9 +17,9 @@ No dedicated alert — triggered by pods stuck in `ContainerCreating` with `moun
   ```bash
   ssh labadmin@192.168.122.230 sudo exportfs -v
   ```
-- [ ] Can k3s-control mount the NFS share?
+- [ ] Can a cluster node see the NFS share?
   ```bash
-  ssh labadmin@192.168.122.218 sudo showmount -e 192.168.122.230
+  ssh labadmin@192.168.122.240 sudo showmount -e 192.168.122.230
   ```
 
 ## Recovery Steps
@@ -45,7 +45,7 @@ kubectl rollout restart deployment -n vaultwarden
 
 ### Step 4 — If NFS exports are missing (server was rebuilt)
 ```bash
-# Re-export manually on k3s-infra:
+# Re-export manually on the infra VM:
 ssh labadmin@192.168.122.230 "echo '/data 192.168.122.0/24(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports"
 ssh labadmin@192.168.122.230 sudo exportfs -ra
 ssh labadmin@192.168.122.230 sudo systemctl enable --now nfs-server

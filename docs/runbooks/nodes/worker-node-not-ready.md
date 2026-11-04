@@ -1,13 +1,13 @@
 # Worker Node Not Ready
 
 ## Alert
-- `K3sWorkerNodeDown` (severity: info) — worker node (.219 or .221)
-- `KubeNodeNotReady` (severity: critical) — k3s-infra node (.230)
+- `WorkerNodeDown` (severity: info) — a worker node (.241, .242, ...) is NotReady
+
+The control-plane node has its own alert, see [API Server Down](../control-plane/api-server-down.md).
 
 ## Symptoms
 - `kubectl get nodes` shows node in `NotReady` state
 - Pods on that node stuck in `Terminating` or evicted to other nodes
-- If k3s-infra: Grafana/Prometheus/Alertmanager unreachable
 
 ## Root Cause Checklist
 - [ ] Is the VM running on the hypervisor?
@@ -18,52 +18,49 @@
   ```bash
   ssh labadmin@192.168.122.<node-ip>
   ```
-- [ ] Is k3s-agent running?
+- [ ] Are kubelet and containerd running?
   ```bash
-  ssh labadmin@192.168.122.<node-ip> sudo systemctl status k3s-agent
+  ssh labadmin@192.168.122.<node-ip> sudo systemctl status kubelet containerd
   ```
-- [ ] Are there agent errors?
+- [ ] Are there kubelet errors?
   ```bash
-  ssh labadmin@192.168.122.<node-ip> sudo journalctl -u k3s-agent -n 30 --no-pager
+  ssh labadmin@192.168.122.<node-ip> sudo journalctl -u kubelet -n 30 --no-pager
   ```
 
 ## Node IP Reference
 | Node | IP |
 |------|----|
-| k3s-worker-1 | 192.168.122.219 |
-| k3s-worker-2 | 192.168.122.221 |
-| k3s-infra | 192.168.122.230 |
+| kubeadm-worker-1 | 192.168.122.241 |
+| kubeadm-worker-2 | 192.168.122.242 |
 
 ## Recovery Steps
 
 ### Step 1 — Start the VM if it's down
 ```bash
 virsh list --all
-virsh start k3s-worker-1   # or k3s-worker-2 / k3s-infra
+virsh start kubeadm-worker-1   # or kubeadm-worker-2
 ```
 
-### Step 2 — Restart k3s-agent if VM is running but node NotReady
+### Step 2 — Restart the kubelet if VM is running but node NotReady
 ```bash
-# Replace <ip> with 192.168.122.219 (worker-1) or 192.168.122.221 (worker-2)
-ssh labadmin@<ip> sudo systemctl restart k3s-agent
+ssh labadmin@<ip> sudo systemctl restart containerd
+ssh labadmin@<ip> sudo systemctl restart kubelet
 # Watch node come back:
 kubectl get nodes -w
 ```
 
-### Step 3 — If agent won't start (certificate or token issues)
+### Step 3 — If the kubelet won't start (certificate or join issues)
 ```bash
-ssh labadmin@<ip> sudo systemctl stop k3s-agent
-ssh labadmin@<ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt
-ssh labadmin@<ip> sudo systemctl start k3s-agent
-# If still failing with "invalid token format":
-#   Check /etc/systemd/system/k3s-agent.service.env on the node
-#   Token must match: sudo cat /var/lib/rancher/k3s/server/node-token (from k3s-control)
+ssh labadmin@<ip> sudo journalctl -u kubelet -n 50 --no-pager
+# "certificate signed by unknown authority" or "Unauthorized": the node must be
+# re-joined — see nodes/cluster-drift.md ("Node was never joined, or was deleted").
 ```
 
 ### Step 4 — If node is stuck Terminating for a long time
 ```bash
 # Force-remove the node (only if VM is truly gone and won't return)
-kubectl delete node <node-name>   # e.g. k3s-worker-1 or k3s-worker-2
+kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data --force
+kubectl delete node <node-name>   # e.g. kubeadm-worker-1
 # Pods will reschedule to healthy nodes automatically
 ```
 
@@ -79,5 +76,6 @@ kubectl get pods -A -o wide | grep <node-name>  # Should be empty or Running
 - [ ] If recurring: add node monitoring at hypervisor level
 
 ## Related Alerts
-- `K3sControlPlaneUnhealthy` — if control plane also went down
+- `ControlPlaneUnhealthy` — if the control plane also went down
+- `ClusterDrift` — VM running but node missing from the cluster
 - `NodeMemoryHigh` — OOM may have caused the node failure

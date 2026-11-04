@@ -13,11 +13,11 @@ metadata:
   namespace: monitoring
 data:
   HYPERVISOR_IP:  "<your-hypervisor-ip>"      # KVM host — runs virsh
-  K3S_CONTROL_IP: "<your-control-plane-ip>"   # k3s-control node
-  WORKER1_IP:     "<your-worker1-ip>"          # k3s-worker-1
-  INFRA_IP:       "<your-infra-ip>"            # k3s-infra (GitLab + monitoring)
-  GITLAB_IP:      "<your-infra-ip>"            # same as INFRA_IP unless split
+  CONTROL_IP:     "<your-control-plane-ip>"   # kubeadm-control (terraform-kubeadm control_ip)
+  INFRA_IP:       "<your-infra-ip>"           # NFS server + GitLab CE, outside the cluster
+  GITLAB_IP:      "<your-infra-ip>"           # same as INFRA_IP unless split
   REGISTRY_URL:   "http://<your-control-plane-ip>:30500"
-  PROMETHEUS_URL: "http://<your-control-plane-ip>:30090"
-  ALERTMANAGER_URL: "http://<your-control-plane-ip>:30093"
+  # Human-facing URLs used in Slack links; served by the Traefik ingress.
+  PROMETHEUS_URL: "http://prometheus.homelab.local"
+  ALERTMANAGER_URL: "http://alertmanager.homelab.local"
   GITLAB_URL:     "http://<your-infra-ip>:8929"

@@ -30,7 +30,7 @@ receivers:
         send_resolved: true
         color: 'danger'
         title: '[CRITICAL] {{ .GroupLabels.alertname }}'
-        title_link: 'http://192.168.122.218:30090/alerts'
+        title_link: 'http://prometheus.homelab.local/alerts'
         text: |
           {{ range .Alerts -}}
           *Summary:* {{ .Annotations.summary }}
@@ -39,7 +39,7 @@ receivers:
           *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
           *On-call:* <!here> — please investigate
           {{ end }}
-        footer: 'Homelab Alertmanager | http://192.168.122.218:30093'
+        footer: 'Homelab Alertmanager | http://alertmanager.homelab.local'
 
   - name: 'slack-warning'
     slack_configs:
@@ -47,7 +47,7 @@ receivers:
         send_resolved: true
         color: 'warning'
         title: '[WARNING] {{ .GroupLabels.alertname }}'
-        title_link: 'http://192.168.122.218:30090/alerts'
+        title_link: 'http://prometheus.homelab.local/alerts'
         text: |
           {{ range .Alerts -}}
           *Summary:* {{ .Annotations.summary }}
@@ -56,7 +56,7 @@ receivers:
           *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
           *FYI:* <!here>
           {{ end }}
-        footer: 'Homelab Alertmanager | http://192.168.122.218:30093'
+        footer: 'Homelab Alertmanager | http://alertmanager.homelab.local'
 
   - name: 'slack-info'
     slack_configs:
@@ -64,13 +64,13 @@ receivers:
         send_resolved: true
         color: 'good'
         title: '[INFO] {{ .GroupLabels.alertname }}'
-        title_link: 'http://192.168.122.218:30090/alerts'
+        title_link: 'http://prometheus.homelab.local/alerts'
         text: |
           {{ range .Alerts -}}
           *Summary:* {{ .Annotations.summary }}
           *Description:* {{ .Annotations.description }}
           {{ end }}
-        footer: 'Homelab Alertmanager | http://192.168.122.218:30093'
+        footer: 'Homelab Alertmanager | http://alertmanager.homelab.local'
 
 inhibit_rules:
   - source_match:

@@ -233,7 +233,7 @@ spec:
 ---
 # ─── PodDisruptionBudget ─────────────────────────────────────────────────────
 # Real-life issue: remove this → rolling update can take all pods down at once
-# Try: kubectl drain k3s-worker-1 --ignore-daemonsets --delete-emptydir-data
+# Try: kubectl drain kubeadm-worker-1 --ignore-daemonsets --delete-emptydir-data
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

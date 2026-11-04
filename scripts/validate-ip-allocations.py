@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GROUP_VARS = ROOT / "ansible" / "inventory" / "group_vars" / "kubeadm_all.yml"
 INVENTORIES = [
-    ROOT / "ansible" / "inventory" / "homelab.ini",
+    ROOT / "ansible" / "inventory" / "infra.ini",
     ROOT / "ansible" / "inventory" / "kubeadm.ini",
 ]
 DHCP_CEILING_LAST_OCTET = 200  # DHCP ends at .199; .200+ is static by convention

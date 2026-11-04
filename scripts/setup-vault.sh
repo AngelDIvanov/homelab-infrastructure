@@ -3,7 +3,8 @@
 # Homelab Vault Setup — One-time bootstrap
 # =============================================================================
 # What this does:
-#   1. Deploys Vaultwarden to k3s via Ansible
+#   1. Checks that Vaultwarden (deployed by ansible/playbooks/kubeadm-workloads.yml)
+#      answers at its ingress hostname
 #   2. Installs Bitwarden CLI (bw)
 #   3. Logs in and seeds vault with all homelab secrets
 #   4. Strips secrets from ~/.bashrc and replaces with load-secrets.sh
@@ -13,10 +14,10 @@
 
 set -euo pipefail
 
-HOMELAB_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SCRIPTS_DIR="$HOMELAB_DIR/scripts"
 SESSION_FILE="$HOME/.config/homelab/.bw_session"
-VAULTWARDEN_URL="https://192.168.122.218:30900"
+# Served by the Traefik ingress (kubernetes/deployments/vaultwarden.yaml);
+# the hostname must resolve to the Traefik load balancer address.
+VAULTWARDEN_URL="${VAULTWARDEN_URL:-http://vault.homelab.local}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()    { echo -e "${CYAN}[INFO]${NC} $*"; }
@@ -25,38 +26,17 @@ warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error()   { echo -e "${RED}[ERR ]${NC} $*"; exit 1; }
 step()    { echo -e "\n${CYAN}══════════════════════════════════════════${NC}"; echo -e "${CYAN}  $*${NC}"; echo -e "${CYAN}══════════════════════════════════════════${NC}"; }
 
-CERT_FILE="$HOME/.config/homelab/vaultwarden-cert.pem"
-
 mkdir -p "$(dirname "$SESSION_FILE")"
 chmod 700 "$(dirname "$SESSION_FILE")"
 
-# Trust the self-signed cert for all bw CLI calls
-if [ -f "$CERT_FILE" ]; then
-    export NODE_EXTRA_CA_CERTS="$CERT_FILE"
-fi
+# ─── Step 1: Vaultwarden reachable ───────────────────────────────────────────
+step "Step 1/5 — Checking Vaultwarden at $VAULTWARDEN_URL"
 
-# ─── Step 1: Deploy Vaultwarden ──────────────────────────────────────────────
-step "Step 1/5 — Deploying Vaultwarden to k3s"
-
-MANIFEST="$HOMELAB_DIR/kubernetes/deployments/vaultwarden.yaml"
-
-# Only generate cert once — skip if already present
-if [ ! -f "$CERT_FILE" ]; then
-    info "Generating TLS certificate..."
-    bash "$SCRIPTS_DIR/gen-vaultwarden-cert.sh"
-    export NODE_EXTRA_CA_CERTS="$CERT_FILE"
+if curl -fsS --max-time 10 -o /dev/null "$VAULTWARDEN_URL/alive"; then
+    success "Vaultwarden is up"
 else
-    success "TLS certificate already exists, skipping generation."
+    error "Vaultwarden does not answer at $VAULTWARDEN_URL. Deploy it first: ansible-playbook -i inventory/kubeadm.ini playbooks/kubeadm-workloads.yml"
 fi
-
-# Always apply the manifest from the correct local path
-info "Applying Vaultwarden manifest..."
-ssh -o StrictHostKeyChecking=no labadmin@192.168.122.218 "cat > /home/labadmin/vaultwarden.yaml" < "$MANIFEST"
-ssh -o StrictHostKeyChecking=no labadmin@192.168.122.218 "
-  sudo k3s kubectl apply -f /home/labadmin/vaultwarden.yaml
-  rm /home/labadmin/vaultwarden.yaml
-"
-success "Vaultwarden deployed at $VAULTWARDEN_URL"
 
 # ─── Step 2: Install bw CLI ──────────────────────────────────────────────────
 step "Step 2/5 — Installing Bitwarden CLI"
@@ -83,8 +63,8 @@ bw config server "$VAULTWARDEN_URL"
 
 if ! bw status 2>/dev/null | grep -q '"status":"unlocked"\|"status":"locked"'; then
     echo ""
-    warn "Open your browser and go to: $VAULTWARDEN_URL"
-    warn "Create your account there first, THEN press Enter to continue."
+    warn "Create your account with a Bitwarden client pointed at $VAULTWARDEN_URL"
+    warn "(the web vault needs HTTPS; see ansible/README.md), THEN press Enter to continue."
     read -rp "Press Enter once your account is created..."
 fi
 
@@ -126,8 +106,6 @@ create_secret() {
 
 # Read existing secrets from .bashrc automatically
 EXISTING_GITLAB_TOKEN=$(grep -oP "(?<=export GITLAB_TOKEN=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
-# Take the value of the last active export: quoted value up to its closing quote, or bare value up to a space/comment
-EXISTING_K3S_TOKEN=$(grep -oP "^export K3S_TOKEN=\K.*" "$HOME/.bashrc" | tail -1 | sed -E "s/^'([^']*)'.*$/\1/;t;s/^\"([^\"]*)\".*$/\1/;t;s/^([^'\"# ]+).*$/\1/" || true)
 EXISTING_GMAIL_PASS=$(grep -oP "(?<=export GMAIL_APP_PASS=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
 EXISTING_GMAIL_USER=$(grep -oP "(?<=export GMAIL_USER=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
 EXISTING_SEND_TO=$(grep -oP "(?<=export SEND_TO=).*" "$HOME/.bashrc" | tr -d '"' | head -1 || true)
@@ -139,17 +117,6 @@ info "Found these secrets in ~/.bashrc (will be moved to vault):"
 [ -n "$EXISTING_GMAIL_USER"   ] && echo "  GMAIL_USER    -> found"
 [ -n "$EXISTING_SEND_TO"      ] && echo "  SEND_TO       -> found"
 
-echo ""
-warn "Enter your K3S_TOKEN (not in .bashrc — check your k3s control node or use the new token after rotation):"
-read -rsp "  K3S_TOKEN: " INPUT_K3S_TOKEN
-echo ""
-
-if [ -z "$INPUT_K3S_TOKEN" ] && [ -n "$EXISTING_K3S_TOKEN" ]; then
-    warn "No token entered — using the existing K3S_TOKEN from ~/.bashrc"
-    INPUT_K3S_TOKEN="$EXISTING_K3S_TOKEN"
-fi
-
-create_secret "homelab-k3s-token"    "$INPUT_K3S_TOKEN"
 create_secret "homelab-gitlab-token" "$EXISTING_GITLAB_TOKEN"
 create_secret "homelab-gmail-pass"   "$EXISTING_GMAIL_PASS"
 create_secret "homelab-gmail-user"   "$EXISTING_GMAIL_USER"
@@ -170,13 +137,7 @@ for file in "$HOME/.bashrc" "$BASHRC_BACKUP"; do
     sed -i '/^export GMAIL_APP_PASS=/d' "$file"
     sed -i '/^export GMAIL_USER=/d' "$file"
     sed -i '/^export SEND_TO=/d' "$file"
-    if [ -n "$INPUT_K3S_TOKEN" ]; then
-        sed -i '/^export K3S_TOKEN=/d' "$file"
-    fi
 done
-if [ -z "$INPUT_K3S_TOKEN" ]; then
-    warn "K3S_TOKEN empty (no input, none in ~/.bashrc) — keeping any existing export line"
-fi
 success "Backed up ~/.bashrc and removed hardcoded secrets from both copies"
 
 # Add load-secrets sourcing if not already there
@@ -196,14 +157,14 @@ echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║  Setup complete!                             ║${NC}"
 echo -e "${GREEN}║                                              ║${NC}"
-echo -e "${GREEN}║  Vaultwarden: $VAULTWARDEN_URL   ║${NC}"
+echo -e "${GREEN}║  Vaultwarden: $VAULTWARDEN_URL"
 echo -e "${GREEN}║  Secrets: stored in vault                    ║${NC}"
 echo -e "${GREEN}║  ~/.bashrc: cleaned                          ║${NC}"
 echo -e "${GREEN}║                                              ║${NC}"
-echo -e "${GREEN}║  NEXT: rotate your GitLab + K3s tokens,      ║${NC}"
-echo -e "${GREEN}║  then update them with:                      ║${NC}"
+echo -e "${GREEN}║  NEXT: rotate your GitLab token, then        ║${NC}"
+echo -e "${GREEN}║  update it with:                             ║${NC}"
 echo -e "${GREEN}║    bw edit item <item-id>                    ║${NC}"
-echo -e "${GREEN}║  or via the Vaultwarden web UI.              ║${NC}"
+echo -e "${GREEN}║  or via a Bitwarden client.                  ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 info "Run 'source ~/.bashrc' or open a new terminal to pick up changes."

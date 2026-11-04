@@ -26,9 +26,11 @@ data:
     # Path to a known_hosts file inside the pod. When set, SSH host keys are
     # verified (StrictHostKeyChecking=yes). Leave empty only for throwaway labs.
     SSH_KNOWN_HOSTS   = os.environ.get('SSH_KNOWN_HOSTS',   '')
-    K3S_CONTROL_IP    = os.environ.get('K3S_CONTROL_IP',    '192.168.122.218')
+    # kubeadm control-plane node: kubectl runs there over SSH (labadmin has the
+    # admin kubeconfig, installed by the k8s_control role).
+    CONTROL_IP        = os.environ.get('CONTROL_IP',        '192.168.122.240')
     HYPERVISOR_IP     = os.environ.get('HYPERVISOR_IP',     '192.168.122.1')
-    REGISTRY_URL      = os.environ.get('REGISTRY_URL',      'http://192.168.122.218:30500')
+    REGISTRY_URL      = os.environ.get('REGISTRY_URL',      f'http://{CONTROL_IP}:30500')
 
     ANTHROPIC_API_KEY    = os.environ.get('ANTHROPIC_API_KEY',    '')
     ANTHROPIC_MODEL      = os.environ.get('ANTHROPIC_MODEL',      'claude-sonnet-4-6')
@@ -46,8 +48,9 @@ data:
     # Bearer token required on the Alertmanager endpoint (POST /). Fail closed:
     # empty token rejects all alert traffic instead of opening the endpoint.
     ALERTMANAGER_TOKEN = os.environ.get('ALERTMANAGER_TOKEN', '')
-    ALERTMANAGER_URL   = os.environ.get('ALERTMANAGER_URL',   f'http://{K3S_CONTROL_IP}:30093')
-    PROMETHEUS_URL     = os.environ.get('PROMETHEUS_URL',     f'http://{K3S_CONTROL_IP}:30090')
+    # Human-facing URLs for Slack links, served by the Traefik ingress.
+    ALERTMANAGER_URL   = os.environ.get('ALERTMANAGER_URL',   'http://alertmanager.homelab.local')
+    PROMETHEUS_URL     = os.environ.get('PROMETHEUS_URL',     'http://prometheus.homelab.local')
 
     SLACK_CRITICAL_CHANNEL = '#incidents'
     SLACK_WARNING_CHANNEL  = '#incidents'
@@ -73,7 +76,8 @@ data:
         'PodCrashLooping':   f'{WIKI_BASE}/runbooks/PodCrashLooping',
         'PodImagePullError': f'{WIKI_BASE}/runbooks/PodImagePullError',
         'ClusterDrift':      f'{GITHUB_RUNBOOKS}/nodes/cluster-drift.md',
-        'K3sWorkerNodeDown': f'{GITHUB_RUNBOOKS}/nodes/worker-node-not-ready.md',
+        'WorkerNodeDown':    f'{GITHUB_RUNBOOKS}/nodes/worker-node-not-ready.md',
+        'ControlPlaneUnhealthy': f'{GITHUB_RUNBOOKS}/control-plane/api-server-down.md',
         'LocalRegistryDown': f'{GITHUB_RUNBOOKS}/applications/registry-down.md',
     }
 
@@ -93,7 +97,7 @@ data:
                 'instance_contains': '192.168.122.230',
                 'host': '192.168.122.230',
                 'cmd': 'sudo pkill -f stress-ng 2>/dev/null; sudo gitlab-ctl restart',
-                'description': 'Killed stress-ng and restarted GitLab on k3s-infra.',
+                'description': 'Killed stress-ng and restarted GitLab on the infra VM.',
             },
             {
                 'instance_contains': '192.168.122.220',
@@ -150,7 +154,7 @@ data:
         return out if rc == 0 else f'[exit {rc}] {out}'
 
     def ssh_kube(args, timeout=20):
-        return _ssh_out(K3S_CONTROL_IP, f'sudo k3s kubectl {args}', timeout)
+        return _ssh_out(CONTROL_IP, f'kubectl {args}', timeout)
 
     _nodes_cache = {'ts': 0.0, 'data': {}}
     def cluster_nodes():
@@ -175,7 +179,7 @@ data:
         """Human-readable 'name (ip)' list of live nodes, for LLM context."""
         nodes = cluster_nodes()
         if not nodes:
-            return "k3s-control, k3s-infra, k3s-worker-* (live list unavailable)"
+            return "kubeadm-control, kubeadm-worker-* (live list unavailable)"
         return ", ".join(f"{name} ({ip})" for ip, name in sorted(nodes.items(), key=lambda kv: kv[1]))
 
     def dispatch_cmd(cmd, timeout=60):
@@ -185,16 +189,16 @@ data:
             # virsh lives on the hypervisor host, not inside any VM
             return _ssh_out(HYPERVISOR_IP, c, timeout=timeout)
         if re.match(r'^(sudo\s+)?kubectl\b', c):
-            # kubectl as labadmin on k3s-control can't read k3s.yaml — use sudo k3s kubectl
+            # labadmin on the control node has the admin kubeconfig; no sudo needed
             kubectl_args = re.sub(r'^(sudo\s+)?kubectl\s+', '', c)
-            return _ssh_out(K3S_CONTROL_IP, f'sudo k3s kubectl {kubectl_args}', timeout=timeout)
+            return _ssh_out(CONTROL_IP, f'kubectl {kubectl_args}', timeout=timeout)
         if re.match(r'^docker\b', c):
             # docker build/push runs on the hypervisor where source code lives
             return _ssh_out(HYPERVISOR_IP, c, timeout=120)
         if re.match(r'^ssh\b', c):
             # Run SSH directly from the webhook pod — it has the homelab@ansible key
-            # that is authorized on all nodes. Routing through k3s-control would use
-            # labadmin's key there, which may not match.
+            # that is authorized on all nodes. Routing through the control node
+            # would use labadmin's key there, which may not match.
             rest = re.sub(r'^ssh\b\s*', '', c)
             args = [SSH_BIN, '-i', SSH_KEY, *_ssh_host_opts(),
                     '-o', 'ConnectTimeout=10', *shlex.split(rest)]
@@ -209,7 +213,7 @@ data:
                 return '(timeout)'
             except Exception as e:
                 return f'(error: {e})'
-        return _ssh_out(K3S_CONTROL_IP, c, timeout=timeout)
+        return _ssh_out(CONTROL_IP, c, timeout=timeout)
 
     # ── Cluster state gathering ───────────────────────────────────────────────────
     def gather_state():
@@ -252,7 +256,7 @@ data:
                 ns, pod = parts[0], parts[1]
                 logs = ssh_kube(
                     f"logs {pod} -n {ns} --tail=40 --previous 2>/dev/null "
-                    f"|| sudo k3s kubectl logs {pod} -n {ns} --tail=40 2>/dev/null"
+                    f"|| kubectl logs {pod} -n {ns} --tail=40 2>/dev/null"
                 )
                 if logs and NO_OUTPUT not in logs:
                     out.append(f"=== LOGS ({ns}/{pod}) ===\n{logs}")
@@ -273,35 +277,37 @@ data:
             return 'ANTHROPIC_API_KEY not set — cannot call Claude.'
 
         system = (
-            "You are an SRE assistant for a homelab k3s cluster. "
+            "You are an SRE assistant for a homelab kubeadm Kubernetes cluster (one control-plane node with etcd, workers). "
             f"Nodes (discovered live): {cluster_node_summary()}. "
-            "k3s-infra (.230) also runs GitLab CE + Prometheus/Grafana/Loki/Alertmanager. "
+            f"The control plane is kubeadm-control ({CONTROL_IP}). "
+            "The NFS server and GitLab CE run on a separate infra VM (192.168.122.230) that is NOT a cluster node. "
+            "Prometheus/Grafana/Loki/Alertmanager run as pods in the monitoring namespace. "
             "Any node whose name contains 'worker' runs workloads. "
             "When a worker node is down, check BOTH virsh list --all and kubectl get nodes "
             "to identify which one. Use the correct IP when SSHing. "
-            "To restart k3s-agent: ssh labadmin@<correct-ip> sudo systemctl restart k3s-agent. "
+            "To restart the node agent: ssh labadmin@<correct-ip> sudo systemctl restart kubelet. "
             "CLUSTER DRIFT: if a VM is running but not in the cluster, common causes are: "
-            "1) invalid token — check /etc/systemd/system/k3s-agent.service.env on the node, "
-            "compare K3S_TOKEN with: ssh labadmin@192.168.122.218 sudo cat /var/lib/rancher/k3s/server/node-token "
-            "2) stale certs — fix with: ssh labadmin@<ip> sudo rm -f /var/lib/rancher/k3s/agent/client-ca.crt && sudo systemctl restart k3s-agent "
+            "1) kubelet not running or crash-looping — check: ssh labadmin@<ip> sudo journalctl -u kubelet -n 30 "
+            "2) containerd down — ssh labadmin@<ip> sudo systemctl restart containerd "
+            "3) the node was never joined or was deleted — re-join with a fresh token (operator task, not a command for you). "
             "COMMAND ROUTING (handled automatically — just write the command): "
             "- virsh commands → hypervisor host (192.168.122.1). "
             "- docker commands → hypervisor host (192.168.122.1) where source code lives. "
-            "- kubectl commands → k3s-control with sudo. "
+            f"- kubectl commands → kubeadm-control ({CONTROL_IP}) as labadmin. "
             "- ssh commands → direct from webhook pod with key injected. "
-            "LOCAL REGISTRY: 192.168.122.218:30500 (unauthenticated, NFS-backed PVC — images persist across pod restarts). "
+            f"LOCAL REGISTRY: {REGISTRY_URL} (unauthenticated, NFS-backed PVC — images persist across pod restarts). "
             "APP SOURCE PATHS ON HYPERVISOR (192.168.122.1): "
-            "  pylab       → /home/labadmin/pylab/       → 192.168.122.218:30500/pylab:latest "
-            "  trengo-search → /home/labadmin/trengo-search/ → 192.168.122.218:30500/trengo-search:latest "
+            f"  pylab       → /home/labadmin/pylab/       → {CONTROL_IP}:30500/pylab:latest "
+            f"  trengo-search → /home/labadmin/trengo-search/ → {CONTROL_IP}:30500/trengo-search:latest "
             "If the registry is empty or an image is missing, rebuild with: "
-            "  docker build -t 192.168.122.218:30500/<app>:latest /home/labadmin/<app>/ "
-            "  docker push 192.168.122.218:30500/<app>:latest "
+            f"  docker build -t {CONTROL_IP}:30500/<app>:latest /home/labadmin/<app>/ "
+            f"  docker push {CONTROL_IP}:30500/<app>:latest "
             "Analyze the cluster state, then respond with: "
             "1) Brief diagnosis (2-3 sentences). "
             "2) Root cause. "
             "3) Fix commands in a single ```bash code block. "
             "STRICT RULES for the bash block: "
-            "Only use kubectl, k3s, ssh, virsh, or docker commands. "
+            "Only use kubectl, ssh, virsh, or docker commands. "
             "One command per line. No shell variables, no pipes, no conditionals, no comments inside the block. "
             "Put all explanations outside the block. "
             "MINIMAL COMMANDS ONLY — only include commands that directly fix the reported issue. "
@@ -316,8 +322,8 @@ data:
             "does NOT require rebuilding images. "
             "Do NOT delete jobs or pods unless they are the direct cause of the alert. "
             "To start a down VM: virsh start <node-name> "
-            "To restart k3s agent: ssh labadmin@<ip> sudo systemctl restart k3s-agent "
-            "For cluster drift (VM running but not in cluster): check agent logs, restart agent first. "
+            "To restart the node agent: ssh labadmin@<ip> sudo systemctl restart kubelet "
+            "For cluster drift (VM running but not in cluster): check kubelet logs, restart kubelet first. "
         )
 
         payload = json.dumps({
@@ -345,7 +351,7 @@ data:
             return f"Claude API error: {e}"
 
     # ── Parse safe commands from Claude response ──────────────────────────────────
-    _SAFE_CMD = re.compile(r'^(sudo\s+)?(kubectl|k3s|ssh|virsh|docker)\b')
+    _SAFE_CMD = re.compile(r'^(sudo\s+)?(kubectl|ssh|virsh|docker)\b')
     # An ssh line must be `ssh [user@]host command`: no options before the
     # destination, so ProxyCommand/LocalCommand/-F/-i and friends cannot smuggle a
     # local command or key into the webhook pod. ssh stops option parsing at the
@@ -355,7 +361,7 @@ data:
 
     # Block commands that read sensitive files or perform destructive ops
     _BLOCKED_PATTERNS = [
-        re.compile(r'id_rsa|id_ed25519|\.pem|\.key|node-token|service\.env', re.IGNORECASE),
+        re.compile(r'id_rsa|id_ed25519|\.pem|\.key|\.conf|kubeadm\s+token|bootstrap-token|service\.env', re.IGNORECASE),
         re.compile(r'(cat|less|more|head|tail|tee)\s+.*(secret|token|password|passwd|shadow)', re.IGNORECASE),
         re.compile(r'kubectl\s+(get|describe)\s+secret', re.IGNORECASE),
         re.compile(r'rm\s+-rf\s+/'),
@@ -742,7 +748,7 @@ data:
                 log.info(f"NodeDiskHigh instance {ip!r} is not a known cluster node — skipping")
                 return None
             name = nodes[ip]
-            cmd  = 'sudo k3s crictl rmi --prune'
+            cmd  = 'sudo crictl rmi --prune'
             log.info(f"Auto-remediation: NodeDiskHigh on {name} ({ip})")
             out, rc = _ssh(ip, cmd, timeout=120)
             success = rc == 0
@@ -906,7 +912,7 @@ data:
         })
 
         # Always diagnose critical/warning; also diagnose specific info alerts that need a fix offer
-        DIAGNOSE_INFO = {'K3sWorkerNodeDown', 'K3sSnapshotMissing', 'LocalRegistryDown', 'ClusterDrift'}
+        DIAGNOSE_INFO = {'WorkerNodeDown', 'EtcdSnapshotMissing', 'LocalRegistryDown', 'ClusterDrift'}
         if severity in ('critical', 'warning') or alertname in DIAGNOSE_INFO:
             post_diagnosis(alert)
 
@@ -934,9 +940,9 @@ data:
             'channel': channel,
             'attachments': [{
                 'color': 'good', 'title': f"RESOLVED | {alertname}",
-                'title_link': 'http://192.168.122.218:30090/alerts',
+                'title_link': f'{PROMETHEUS_URL}/alerts',
                 'text': '\n'.join(lines),
-                'footer': 'Homelab Alertmanager | http://192.168.122.218:30093',
+                'footer': f'Homelab Alertmanager | {ALERTMANAGER_URL}',
             }],
         })
 
@@ -1048,13 +1054,6 @@ spec:
       labels:
         app: alertmanager-webhook
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: k3s-infra
-      tolerations:
-        - key: node-role
-          operator: Equal
-          value: infra
-          effect: NoSchedule
       containers:
         - name: webhook
           image: python:3.11-alpine
@@ -1071,7 +1070,7 @@ spec:
               value: "labadmin"
             - name: SSH_KEY
               value: "/root/.ssh/id_rsa"
-            # Pinned host keys (VMs + hypervisor) from scripts/homelab-known-hosts.sh,
+            # Pinned host keys (VMs + hypervisor) from scripts/kubeadm-known-hosts.sh,
             # stored as the known_hosts key of the webhook-ssh-key Secret.
             # Unset = StrictHostKeyChecking=no (logged as a warning at every call).
             - name: SSH_KNOWN_HOSTS

@@ -13,12 +13,12 @@
 
 ### Step 1 — Prune unused container images (quickest win)
 ```bash
-ssh labadmin@192.168.122.<ip> sudo k3s crictl rmi --prune
+ssh labadmin@192.168.122.<ip> sudo crictl rmi --prune
 ```
 
 ### Step 2 — Find large directories
 ```bash
-ssh labadmin@192.168.122.<ip> sudo du -sh /var/lib/rancher/k3s/* | sort -h | tail -10
+ssh labadmin@192.168.122.<ip> sudo du -sh /var/lib/containerd/* /var/lib/kubelet/pods | sort -h | tail -10
 ssh labadmin@192.168.122.<ip> sudo du -sh /var/log/* | sort -h | tail -10
 ```
 
@@ -27,7 +27,7 @@ ssh labadmin@192.168.122.<ip> sudo du -sh /var/log/* | sort -h | tail -10
 ssh labadmin@192.168.122.<ip> sudo journalctl --vacuum-size=200M
 ```
 
-### Step 4 — On k3s-infra (.230): clean GitLab artifacts
+### Step 4 — On the infra VM (.230): clean GitLab artifacts
 ```bash
 ssh labadmin@192.168.122.230 sudo gitlab-rake gitlab:cleanup:orphan_job_artifact_files
 ssh labadmin@192.168.122.230 sudo gitlab-ctl tail unicorn 2>/dev/null | tail -5
@@ -46,5 +46,5 @@ ssh labadmin@192.168.122.<ip> df -h /
 ```
 
 ## Related Alerts
-- `K3sControlPlaneUnhealthy` — disk full on control plane causes k3s crash
+- `ControlPlaneUnhealthy` — disk full on the control node crashes etcd and the API server
 - `PodImagePullError` — can't pull images when disk is full
